@@ -35,14 +35,14 @@ describe('Objects helpers', () => {
 	describe('clone', () => {
 		it('should return a new object with the same properties', () => {
 			const original = { name: 'John', age: 30 };
-			const clone = helpers.merge({} as typeof original, original);
+			const clone = helpers.clone(original);
 			expect(clone).toEqual(original);
 			expect(clone).not.toBe(original);
 		});
 
 		it('should return a new object with the same properties even if the original object has nested objects', () => {
 			const original = { name: 'John', age: 30, address: { street: '1st Ave', city: 'New York' } };
-			const clone = helpers.merge({} as typeof original, original);
+			const clone = helpers.clone(original);
 			expect(clone).toEqual(original);
 			expect(clone).not.toBe(original);
 		});
