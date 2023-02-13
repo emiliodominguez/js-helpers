@@ -71,7 +71,7 @@ describe('Objects helpers', () => {
 
 		it('should throw an error if the object does not have the specified property', () => {
 			const object = { name: 'John', age: 30 };
-			expect(helpers.getProperty(object, 'email' as any)).toEqual(undefined);
+			expect(helpers.getProperty(object, 'email' as any)).toBeUndefined();
 		});
 	});
 
@@ -99,17 +99,23 @@ describe('Objects helpers', () => {
 		});
 	});
 
-	describe('getObjectByKeys', () => {
-		it('should get an object property from the provided key(s)', () => {
-			const testObject = { firstName: 'Lorem', lastName: 'Ipsum', dimensions: { height: 200, weight: 130 } };
-			const firstName = helpers.getFromObjectByKeys<typeof testObject, string>(testObject, 'firstName');
-			const lastName = helpers.getFromObjectByKeys<typeof testObject, string>(testObject, 'lastName');
-			const height = helpers.getFromObjectByKeys<typeof testObject, string>(testObject, 'dimensions.height');
-			const weight = helpers.getFromObjectByKeys<typeof testObject, string>(testObject, 'dimensions.weight');
-			expect(firstName).toEqual(testObject.firstName);
-			expect(lastName).toEqual(testObject.lastName);
-			expect(height).toEqual(testObject.dimensions.height);
-			expect(weight).toEqual(testObject.dimensions.weight);
+	describe('getFromObjectByKeys', () => {
+		it('should return the correct nested value', () => {
+			const target = { a: { b: { c: 'hello world' } } };
+			const result = helpers.getFromObjectByKeys<typeof target, string>(target, 'a.b.c');
+			expect(result).toEqual('hello world');
+		});
+
+		it('should return the correct value for non-nested keys', () => {
+			const target = { a: 'hello world' };
+			const result = helpers.getFromObjectByKeys<typeof target, string>(target, 'a');
+			expect(result).toEqual('hello world');
+		});
+
+		it('should return undefined for non-existing keys', () => {
+			const target = { a: 'hello world' };
+			const result = helpers.getFromObjectByKeys<typeof target, string>(target, 'b' as any);
+			expect(result).toBeUndefined();
 		});
 	});
 
