@@ -14,7 +14,8 @@
 		"lint:fix": "eslint --fix ./src/**/*.{js,ts}",
 		"lint-staged": "lint-staged",
 		"prepare": "husky install",
-		"test": "jest --verbose --watch"
+		"test": "jest",
+		"test:watch": "jest --verbose --watch"
 	},
 	"lint-staged": {
 		"./src/**/*.{js,ts}": [
