@@ -6,18 +6,10 @@ import { NestedKeyOf } from '../utils/types';
  * @template Output
  * @param {Target} target - The target object that will receive the properties from the other objects
  * @param {...any} sources - The sources from which to get the properties
- * @returns {Output} The merged object
+ * @returns {Target & Source & Output} The merged object
  */
-export function merge<Target, Output>(target: Target, ...sources: any[]): Output {
-	for (const source of sources) {
-		for (const key in source) {
-			if (source.hasOwnProperty(key)) {
-				(target as any)[key] = (source as any)[key];
-			}
-		}
-	}
-
-	return target as unknown as Output;
+export function merge<Target, Source extends Partial<Target>, Output>(target: Target, ...sources: Source[]): Target & Source & Output {
+	return { ...target, ...Object.assign({}, ...sources) };
 }
 
 /**
@@ -27,7 +19,7 @@ export function merge<Target, Output>(target: Target, ...sources: any[]): Output
  * @returns {T} The cloned object
  */
 export function clone<T extends Object>(object: T): T {
-	return merge({} as T, object);
+	return { ...object };
 }
 
 /**
