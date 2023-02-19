@@ -40,47 +40,53 @@ export function flatten<T>(array: T[]): T[] {
 }
 
 /**
- * Remove duplicates from an array
+ * Remove duplicates from an iterable
  * @template T
- * @param {T[]} array - The array to be processed
+ * @param {Iterable<T>} iterable - The iterable to be processed
  * @returns {T[]} The array with duplicates removed
  */
-export function removeDuplicates<T>(array: T[]): T[] {
-	return Array.from(new Set(array));
+export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
+	return Array.from(new Set(iterable));
 }
 
 /**
- * Get the union of two arrays (all unique values from both arrays)
+ * Get the union of two iterables (all unique values from both iterables)
  * @template A
  * @template B
- * @param {A[]} a - The first array
- * @param {B[]} b - The second array
- * @returns {(A | B)[]} The union of the two arrays
+ * @param {Iterable<A>} a - The first iterable
+ * @param {Iterable<B>} b - The second iterable
+ * @returns {(A | B)[]} The union of the two iterables
  */
-export function union<A, B extends A>(a: A[], b: B[]): (A | B)[] {
-	return removeDuplicates(a.concat(b));
+export function union<A, B extends A>(a: Iterable<A>, b: Iterable<B>): (A | B)[] {
+	const setA = new Set(a);
+	const setB = new Set(b);
+	return Array.from(new Set([...setA, ...setB]));
 }
 
 /**
- * Get the intersection of two arrays (all values that exist in both arrays)
+ * Get the intersection of two iterables (all values that exist in both iterables)
  * @template A
- * @template B
- * @param {A[]} a - The first array
- * @param {B[]} b - The second array
- * @returns {(A & B)[]} The intersection of the two arrays
+ * @template BF
+ * @param {Iterable<A>} a - The first iterable
+ * @param {Iterable<B>} b - The second iterable
+ * @returns {Array<A & B>} The intersection of the two iterables
  */
-export function intersection<A extends B, B>(a: A[], b: B[]): (A & B)[] {
-	return a.filter(value => b.includes(value));
+export function intersection<A extends B, B>(a: Iterable<A>, b: Iterable<B>): Array<A & B> {
+	const setA = new Set(a);
+	const setB = new Set(b);
+	return Array.from(new Set([...setA].filter(value => setB.has(value))));
 }
 
 /**
- * Get the difference of two arrays (all values that exist in the first array but not the second)
+ * Get the difference of two iterables (all values that exist in the first iterable but not the second)
  * @template A
  * @template B
- * @param {A[]} a - The first array
- * @param {B[]} b - The second array
- * @returns {array} The difference of the two arrays
+ * @param {Iterable<A>} a - The first iterable
+ * @param {Iterable<B>} b - The second iterable
+ * @returns {Array<A & B>} The difference of the two iterables
  */
-export function difference<A extends B, B>(a: A[], b: B[]): (A & B)[] {
-	return a.filter(value => !b.includes(value));
+export function difference<A extends B, B>(a: Iterable<A>, b: Iterable<B>): Array<A & B> {
+	const setA = new Set(a);
+	const setB = new Set(b);
+	return Array.from(new Set([...setA].filter(value => !setB.has(value))));
 }
