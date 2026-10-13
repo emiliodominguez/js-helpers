@@ -152,7 +152,9 @@
 				"require-jsdoc": "off",
 				"@typescript-eslint/explicit-function-return-type": "off",
 				"@typescript-eslint/no-explicit-any": "off",
-				"@typescript-eslint/no-empty-function": "off"
+				"@typescript-eslint/no-empty-function": "off",
+				"import/no-named-as-default-member": "off",
+				"import/no-named-as-default": "off"
 			}
 		}
 	]
