@@ -11,13 +11,13 @@ yarn validate  # lint + typecheck + tests + build — the same gates CI runs
 
 Each module lives in `src/<module>/` and follows the same shape:
 
-| File                       | Purpose                                                 |
-| -------------------------- | ------------------------------------------------------- |
-| `index.ts`                 | Public API. The only file exporting runtime code.       |
-| `<module>.spec.ts`         | Example-based unit tests (edge cases, regressions).     |
-| `<module>.property.spec.ts`| Property-based tests with [fast-check](https://fast-check.dev). |
+| File                        | Purpose                                                         |
+| --------------------------- | --------------------------------------------------------------- |
+| `index.ts`                  | Public API. The only file exporting runtime code.               |
+| `<module>.spec.ts`          | Example-based unit tests (edge cases, regressions).             |
+| `<module>.property.spec.ts` | Property-based tests with [fast-check](https://fast-check.dev). |
 
-New modules must be re-exported as a namespace from `src/index.ts`; deep imports (`js-helpers/<module>`) work automatically through the `exports` map.
+New modules must be re-exported as a namespace from `src/index.ts`; deep imports (`@emiliodominguez/js-helpers/<module>`) work automatically through the `exports` map.
 
 ## Code rules
 

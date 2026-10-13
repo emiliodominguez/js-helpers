@@ -190,16 +190,18 @@ function createMethodDecorator(decoratorName: string, wrap: MethodWrapper): Univ
  * @returns {void | BabelFieldDescriptor} Babel legacy: the read-only descriptor; otherwise nothing
  * @throws {TypeError} when applied to an accessor, a private field, or (standard) anything other than a field
  * @example
+ * ```ts
  * class Config {
  *   @readonly
  *   url: string = 'https://example.com';
  * }
  * const config = new Config();
  * config.url = 'x'; // TypeError: Cannot assign to read only property 'url'
+ * ```
  */
-export function readonly(target: object, propertyKey: string | symbol, descriptor?: undefined): void;
-export function readonly<D extends BabelFieldDescriptor>(target: object, propertyKey: string | symbol, descriptor: D): D;
-export function readonly(value: undefined, context: ClassFieldDecoratorContext): void;
+export function readonly(targetOrValue: object, keyOrContext: string | symbol, descriptor?: undefined): void;
+export function readonly<D extends BabelFieldDescriptor>(targetOrValue: object, keyOrContext: string | symbol, descriptor: D): D;
+export function readonly(targetOrValue: undefined, keyOrContext: ClassFieldDecoratorContext): void;
 /**
  * Implementation of {@link readonly} (see the first overload for the full documentation).
  * @param {unknown} targetOrValue - Legacy: the prototype (or constructor); standard: `undefined`
@@ -317,13 +319,15 @@ function wrapLog(method: UnknownMethod, name: string): UnknownMethod {
  * @returns {TypedPropertyDescriptor<T> | T} Legacy: the new descriptor; standard: the wrapped method
  * @throws {TypeError} when applied to something other than a method
  * @example
+ * ```ts
  * class Api {
  *   @log
  *   get(id: number): Promise<User> { ... }
  * }
+ * ```
  */
-export function log<T extends AnyFunction>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
-export function log<T extends AnyFunction>(value: T, context: ClassMethodDecoratorContext): T;
+export function log<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
+export function log<T extends AnyFunction>(targetOrValue: T, keyOrContext: ClassMethodDecoratorContext): T;
 /**
  * Implementation of {@link log} (see the first overload for the full documentation).
  * @param {unknown} targetOrValue - Legacy: the prototype (or constructor); standard: the method
@@ -372,13 +376,15 @@ function wrapMemoize(method: UnknownMethod): UnknownMethod {
  * @returns {TypedPropertyDescriptor<T> | T} Legacy: the new descriptor; standard: the wrapped method
  * @throws {TypeError} when applied to something other than a method
  * @example
+ * ```ts
  * class Calculator {
  *   @memoize
  *   fibonacci(n: number): number { return n < 2 ? n : this.fibonacci(n - 1) + this.fibonacci(n - 2); }
  * }
+ * ```
  */
-export function memoize<T extends AnyFunction>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
-export function memoize<T extends AnyFunction>(value: T, context: ClassMethodDecoratorContext): T;
+export function memoize<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
+export function memoize<T extends AnyFunction>(targetOrValue: T, keyOrContext: ClassMethodDecoratorContext): T;
 /**
  * Implementation of {@link memoize} (see the first overload for the full documentation).
  * @param {unknown} targetOrValue - Legacy: the prototype (or constructor); standard: the method
@@ -409,6 +415,7 @@ export function memoize(targetOrValue: unknown, keyOrContext: unknown, descripto
  * @returns {TypedPropertyDescriptor<T> | void} Legacy: the accessor descriptor; standard: nothing
  * @throws {TypeError} when applied to something other than a (public) method
  * @example
+ * ```ts
  * class Counter {
  *   count = 0;
  *   @bound
@@ -416,9 +423,10 @@ export function memoize(targetOrValue: unknown, keyOrContext: unknown, descripto
  * }
  * const { increment } = new Counter();
  * increment(); // works
+ * ```
  */
-export function bound<T extends AnyFunction>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
-export function bound<T extends AnyFunction>(value: T, context: ClassMethodDecoratorContext): void;
+export function bound<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
+export function bound<T extends AnyFunction>(targetOrValue: T, keyOrContext: ClassMethodDecoratorContext): void;
 /**
  * Implementation of {@link bound} (see the first overload for the full documentation).
  * @param {unknown} targetOrValue - Legacy: the prototype (or constructor); standard: the method
@@ -496,10 +504,12 @@ export function bound(targetOrValue: unknown, keyOrContext: unknown, descriptor?
  * @throws {RangeError} when `wait` or `options.maxWait` is negative, `NaN` or infinite
  * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
  * @example
+ * ```ts
  * class Search {
  *   @debounced(300)
  *   query(text: string): void { ... }
  * }
+ * ```
  */
 export function debounced(wait: number, options?: DebounceOptions): UniversalMethodDecorator {
 	// Validate eagerly, at class definition time.
@@ -531,10 +541,12 @@ export function debounced(wait: number, options?: DebounceOptions): UniversalMet
  * @throws {RangeError} when `wait` is negative, `NaN` or infinite
  * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
  * @example
+ * ```ts
  * class Tracker {
  *   @throttled(1000, { trailing: true })
  *   onScroll(y: number): void { ... }
  * }
+ * ```
  */
 export function throttled(wait: number, options?: ThrottleOptions): UniversalMethodDecorator {
 	// Validate eagerly, at class definition time.
@@ -564,10 +576,12 @@ export function throttled(wait: number, options?: ThrottleOptions): UniversalMet
  * @returns {UniversalMethodDecorator} The decorator (legacy and standard)
  * @throws {TypeError} when applied to something other than a method
  * @example
+ * ```ts
  * class Client {
  *   @deprecated('Client.fetchAll is deprecated, use Client.list instead.')
  *   fetchAll(): Item[] { return this.list(); }
  * }
+ * ```
  */
 export function deprecated(message?: string): UniversalMethodDecorator {
 	return createMethodDecorator('deprecated', function (method: UnknownMethod, name: string): UnknownMethod {

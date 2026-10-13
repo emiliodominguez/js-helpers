@@ -27,6 +27,7 @@ jobs:
       - run: yarn format:check
       - run: yarn typecheck
       - run: yarn build
+      - run: yarn check:exports
       - run: yarn docs
 
   test:

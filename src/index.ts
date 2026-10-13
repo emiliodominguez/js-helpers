@@ -2,7 +2,7 @@
  * js-helpers — strictly-typed, zero-dependency TypeScript utilities.
  *
  * Every module is exposed as a namespace to avoid name collisions (e.g. `strings.isEmpty` vs `objects.isEmpty`).
- * Prefer deep imports (`js-helpers/arrays`) for the best tree-shaking.
+ * Prefer deep imports (`@emiliodominguez/js-helpers/arrays`) for the best tree-shaking.
  * @packageDocumentation
  */
 export * as arrays from './arrays/index.js';

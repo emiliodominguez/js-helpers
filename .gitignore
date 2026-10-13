@@ -1,6 +1,6 @@
 node_modules
 dist
 coverage
-docs/api
+docs/reference
 *.log
 .DS_Store

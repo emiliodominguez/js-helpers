@@ -1,5 +1,5 @@
 {
-	"name": "js-helpers",
+	"name": "@emiliodominguez/js-helpers",
 	"version": "2.0.0",
 	"description": "Strictly-typed, zero-dependency, tree-shakeable TypeScript utilities for arrays, objects, strings, math, functions, async flows, dates, type guards and decorators — property-tested with fast-check.",
 	"keywords": [
@@ -84,7 +84,9 @@
 		"validate": "yarn lint && yarn typecheck && yarn test && yarn build",
 		"prepare": "husky",
 		"prepublishOnly": "yarn validate",
-		"docs": "typedoc"
+		"docs": "typedoc",
+		"docs:api": "node scripts/generate-api-docs.mjs && prettier --write docs/API.md",
+		"check:exports": "attw --pack . --profile node16"
 	},
 	"lint-staged": {
 		"src/**/*.ts": [
@@ -93,6 +95,7 @@
 		]
 	},
 	"devDependencies": {
+		"@arethetypeswrong/cli": "^0.18.5",
 		"@types/jest": "^29.5.14",
 		"@types/node": "^22.20.5",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",
@@ -111,5 +114,9 @@
 		"ts-jest": "^29.4.14",
 		"typedoc": "^0.28",
 		"typescript": "^5.9.3"
+	},
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
 	}
 }
