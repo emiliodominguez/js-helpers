@@ -1,0 +1,13 @@
+{
+	"$schema": "https://typedoc.org/schema.json",
+	"name": "js-helpers",
+	"entryPoints": ["src/arrays", "src/async", "src/date", "src/decorators", "src/functions", "src/guards", "src/math", "src/objects", "src/strings", "src/utils"],
+	"entryPointStrategy": "expand",
+	"exclude": ["**/*.spec.ts"],
+	"tsconfig": "tsconfig.build.json",
+	"out": "docs/api",
+	"readme": "README.md",
+	"excludePrivate": true,
+	"excludeInternal": true,
+	"githubPages": true
+}

@@ -1,18 +1,26 @@
 {
 	"compilerOptions": {
-		"target": "ES5",
+		"target": "ES2020",
+		"lib": ["ES2022"],
 		"module": "commonjs",
 		"moduleResolution": "node",
+		"rootDir": "./src",
 		"outDir": "./dist",
+		"declaration": true,
+		"declarationMap": true,
 		"sourceMap": true,
 		"strict": true,
-		"noImplicitAny": true,
+		"noImplicitOverride": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
 		"esModuleInterop": true,
-		"allowJs": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"downlevelIteration": true,
-		"emitDecoratorMetadata": true,
-		"experimentalDecorators": true
-	}
+		"experimentalDecorators": true,
+		"useDefineForClassFields": false,
+		"types": ["jest", "node"]
+	},
+	"include": ["src"]
 }
