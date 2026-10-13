@@ -15,9 +15,9 @@ jobs:
     name: Lint, typecheck & build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: yarn
@@ -46,12 +46,13 @@ jobs:
     env:
       TZ: ${{ matrix.tz }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: yarn
 
-      - run: yarn install --frozen-lockfile
+      # Dev tooling (e.g. are-the-types-wrong) requires Node 20+; the library itself supports Node 18.
+      - run: yarn install --frozen-lockfile --ignore-engines
       - run: yarn test:coverage
