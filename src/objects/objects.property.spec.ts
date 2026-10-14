@@ -365,4 +365,154 @@ describe('objects (properties)', function () {
 			);
 		});
 	});
+
+	describe('round 2 helpers', function () {
+		/**
+		 * JSON-like trees whose keys survive a flatten/unflatten round-trip: no separator, not numeric-looking (they would come back as
+		 * arrays), not empty, not unsafe (`__proto__`...). Arrays are dense. Empty objects/arrays are allowed (they are kept as leaves).
+		 */
+		function jsonTree(key: fc.Arbitrary<string>): fc.Arbitrary<Record<string, unknown>> {
+			const { node } = fc.letrec<{ node: unknown }>(function (tie) {
+				return {
+					node: fc.oneof(
+						{ depthSize: 'small', withCrossShrink: true },
+						fc.integer({ min: -3, max: 3 }),
+						fc.string({ maxLength: 3 }),
+						fc.boolean(),
+						fc.constant(null),
+						fc.array(tie('node'), { maxLength: 3 }),
+						fc.dictionary(key, tie('node'), { maxKeys: 3, noNullPrototype: true })
+					)
+				};
+			});
+			return fc.dictionary(key, node, { maxKeys: 4, noNullPrototype: true });
+		}
+		const roundTripKey = fc.stringMatching(/^[a-z_][a-z0-9_]{0,3}$/);
+		/** Few distinct keys, so that two generated trees overlap a lot. */
+		const overlappingTree = jsonTree(fc.constantFrom('a', 'b', 'c'));
+
+		it('unflattenObject(flattenObject(x)) is equal to x', function () {
+			fc.assert(
+				fc.property(jsonTree(roundTripKey), fc.constantFrom('.', '/', '::'), function (tree, separator) {
+					const flat = helpers.flattenObject(tree, { separator });
+					expect(helpers.isEqual(helpers.unflattenObject(flat, { separator }), tree)).toBe(true);
+				})
+			);
+		});
+
+		it('flattenObject maps every path to a leaf readable with getFromObjectByKeys', function () {
+			fc.assert(
+				fc.property(jsonTree(roundTripKey), function (tree) {
+					for (const [path, value] of Object.entries(helpers.flattenObject(tree))) {
+						expect(helpers.getFromObjectByKeys(tree, path as any)).toBe(value);
+						expect(helpers.hasInObjectByKeys(tree, path)).toBe(true);
+						const isNonEmptyContainer = typeof value === 'object' && value !== null && Object.keys(value).length > 0;
+						expect(isNonEmptyContainer).toBe(false);
+					}
+				})
+			);
+		});
+
+		it('pickBy and omitBy partition the own enumerable properties', function () {
+			fc.assert(
+				fc.property(record, fc.func(fc.boolean()), function (object, decide) {
+					function predicate(value: unknown, key: PropertyKey): boolean {
+						return decide(value, key);
+					}
+					const picked = helpers.pickBy(object, predicate);
+					const omitted = helpers.omitBy(object, predicate);
+					const pickedKeys = new Set(Object.keys(picked));
+					for (const key of Object.keys(omitted)) expect(pickedKeys.has(key)).toBe(false);
+					expect(helpers.isEqual(helpers.merge(picked, omitted), object)).toBe(true);
+				})
+			);
+		});
+
+		it('compactObject keeps exactly the defined values', function () {
+			fc.assert(
+				fc.property(fc.dictionary(fc.string(), fc.oneof(fc.constant(undefined), anyValue), { noNullPrototype: true }), function (object) {
+					const compacted = helpers.compactObject(object);
+					const expected = Object.keys(object).filter(function (key) {
+						return object[key] !== undefined;
+					});
+					expect(Object.keys(compacted)).toEqual(expected);
+					for (const key of expected) expect((compacted as Record<string, unknown>)[key]).toBe(object[key]);
+				})
+			);
+		});
+
+		it('typedFromEntries(typedEntries(x)) is equal to x', function () {
+			fc.assert(
+				fc.property(record, function (object) {
+					expect(helpers.isEqual(helpers.typedFromEntries(helpers.typedEntries(object)), object)).toBe(true);
+					expect(helpers.typedKeys(object)).toEqual(Object.keys(object));
+				})
+			);
+		});
+
+		it('omit removes numeric keys like their string form', function () {
+			fc.assert(
+				fc.property(fc.dictionary(fc.nat(20).map(String), fc.integer(), { noNullPrototype: true }), fc.array(fc.nat(20)), function (object, keys) {
+					const omitted = helpers.omit(object as Record<number, number>, keys);
+					const expected = Object.keys(object).filter(function (key) {
+						return !keys.includes(Number(key));
+					});
+					expect(Object.keys(omitted)).toEqual(expected);
+				})
+			);
+		});
+
+		it('hasInObjectByKeys / deleteFromObjectByKeys agree with setInObjectByKeys', function () {
+			const path = fc.array(fc.oneof(fc.stringMatching(/^[a-z]{1,3}$/), fc.nat(3).map(String)), { minLength: 1, maxLength: 4 }).map(function (segments) {
+				return segments.join('.');
+			});
+			fc.assert(
+				fc.property(path, fc.anything(), function (keys, value) {
+					const target: Record<string, unknown> = {};
+					expect(helpers.hasInObjectByKeys(target, keys)).toBe(false);
+					helpers.setInObjectByKeys(target, keys, value);
+					expect(helpers.hasInObjectByKeys(target, keys)).toBe(true);
+					expect(helpers.deleteFromObjectByKeys(target, keys)).toBe(true);
+					expect(helpers.hasInObjectByKeys(target, keys)).toBe(false);
+					expect(helpers.deleteFromObjectByKeys(target, keys)).toBe(false);
+				})
+			);
+		});
+
+		it('diff(a, a) and diff(a, deepClone(a)) are empty', function () {
+			fc.assert(
+				fc.property(overlappingTree, function (tree) {
+					const empty = { added: [], removed: [], changed: [] };
+					expect(helpers.diff(tree, tree)).toEqual(empty);
+					expect(helpers.diff(tree, helpers.deepClone(tree))).toEqual(empty);
+				})
+			);
+		});
+
+		it('diff is symmetric: added(a, b) = removed(b, a) and changed agree', function () {
+			fc.assert(
+				fc.property(overlappingTree, overlappingTree, function (a, b) {
+					const forward = helpers.diff(a, b);
+					const backward = helpers.diff(b, a);
+					expect(forward.added).toEqual(backward.removed);
+					expect(forward.removed).toEqual(backward.added);
+					expect([...forward.changed].sort()).toEqual([...backward.changed].sort());
+				})
+			);
+		});
+
+		it('diff paths are consistent with hasInObjectByKeys and the trees are equal iff the diff is empty', function () {
+			fc.assert(
+				fc.property(overlappingTree, overlappingTree, function (a, b) {
+					const { added, removed, changed } = helpers.diff(a, b);
+					for (const path of added) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toEqual([false, true]);
+					for (const path of removed) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toEqual([true, false]);
+					for (const path of changed) {
+						expect(helpers.isEqual(helpers.getFromObjectByKeys(a, path as any), helpers.getFromObjectByKeys(b, path as any))).toBe(false);
+					}
+					expect(added.length + removed.length + changed.length === 0).toBe(helpers.isEqual(a, b));
+				})
+			);
+		});
+	});
 });

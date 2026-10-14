@@ -377,4 +377,230 @@ describe('arrays (property-based)', function () {
 			})
 		);
 	});
+
+	it('range never reaches the exclusive end and matches the exact rational count', function () {
+		// start = a / 10, end = b / 10, step = s / 10: the exact count is ceil((b - a) / s), which floats must reproduce.
+		const tenth = fc.integer({ min: -200, max: 200 });
+		const tenthStep = fc.integer({ min: -30, max: 30 }).filter(function (s) {
+			return s !== 0;
+		});
+		fc.assert(
+			fc.property(tenth, tenth, tenthStep, function (a, b, s) {
+				const values = helpers.range(a / 10, b / 10, s / 10);
+				expect(values).toHaveLength(Math.max(0, Math.ceil((b - a) / s)));
+				for (const value of values) {
+					if (s > 0) expect(value).toBeLessThan(b / 10);
+					else expect(value).toBeGreaterThan(b / 10);
+				}
+			})
+		);
+	});
+
+	describe('round 2 helpers', function () {
+		it('unzip inverts zip for equal-length, non-empty arrays', function () {
+			const columns = fc.integer({ min: 1, max: 12 }).chain(function (length) {
+				return fc.tuple(
+					fc.array(smallInt, { minLength: length, maxLength: length }),
+					fc.array(fc.string(), { minLength: length, maxLength: length }),
+					fc.array(fc.boolean(), { minLength: length, maxLength: length })
+				);
+			});
+			fc.assert(
+				fc.property(columns, function ([numbers, strings, booleans]) {
+					expect(helpers.unzip(helpers.zip(numbers, strings, booleans))).toEqual([numbers, strings, booleans]);
+				})
+			);
+		});
+
+		it('zip(...unzip(tuples)) gives the tuples back', function () {
+			fc.assert(
+				fc.property(fc.array(fc.tuple(smallInt, fc.string()), { minLength: 1, maxLength: 12 }), function (tuples) {
+					const [numbers = [], strings = []] = helpers.unzip(tuples);
+					expect(helpers.zip(numbers, strings)).toEqual(tuples);
+				})
+			);
+		});
+
+		it('windowed returns the expected number of contiguous slices', function () {
+			fc.assert(
+				fc.property(smallInts, fc.integer({ min: 1, max: 8 }), fc.integer({ min: 1, max: 8 }), function (array, size, step) {
+					const windows = helpers.windowed(array, size, step);
+					expect(windows).toHaveLength(Math.max(0, Math.floor((array.length - size) / step) + 1));
+					windows.forEach(function (window, index) {
+						expect(window).toEqual(array.slice(index * step, index * step + size));
+					});
+				})
+			);
+		});
+
+		it('pairwise equals windowed(array, 2) as tuples', function () {
+			fc.assert(
+				fc.property(smallInts, function (array) {
+					expect(helpers.pairwise(array)).toEqual(helpers.windowed(array, 2));
+				})
+			);
+		});
+
+		it('minBy / maxBy agree with the first item of sortBy ascending / descending', function () {
+			const key = fc.oneof(smallInt, fc.constant(NaN), fc.string({ maxLength: 2 }));
+			const items = fc.array(fc.record({ key, id: fc.nat() }), { maxLength: 20 });
+			fc.assert(
+				fc.property(items, function (array) {
+					function selector(item: { key: number | string }): number | string {
+						return item.key;
+					}
+					const valid = array.filter(function (item) {
+						return !Number.isNaN(item.key);
+					});
+					expect(helpers.minBy(array, selector)).toBe(helpers.sortBy(valid, selector)[0]);
+					expect(helpers.maxBy(array, selector)).toBe(helpers.sortBy(valid, selector, 'desc')[0]);
+				})
+			);
+		});
+
+		it('sumBy equals sum of the mapped integers', function () {
+			fc.assert(
+				fc.property(fc.array(fc.integer({ min: -1e6, max: 1e6 })), function (array) {
+					const expected = array.reduce(function (total, value) {
+						return total + value * 3;
+					}, 0);
+					expect(
+						helpers.sumBy(array, function (value) {
+							return value * 3;
+						})
+					).toBe(expected);
+				})
+			);
+		});
+
+		/** Arrays with a valid (possibly negative) index into them. */
+		const withIndex = fc.array(smallInt, { minLength: 1, maxLength: 20 }).chain(function (array) {
+			const index = fc.integer({ min: -array.length, max: array.length - 1 });
+			return fc.tuple(fc.constant(array), index, index);
+		});
+
+		it('move matches a splice-based reference and keeps a permutation', function () {
+			fc.assert(
+				fc.property(withIndex, function ([array, from, to]) {
+					const reference = [...array];
+					reference.splice(to < 0 ? to + array.length : to, 0, ...reference.splice(from, 1));
+					const moved = helpers.move(array, from, to);
+					expect(moved).toEqual(reference);
+					expect(sortedNumbers(moved)).toEqual(sortedNumbers(array));
+					expect(helpers.move(moved, to, from)).toEqual(array);
+				})
+			);
+		});
+
+		it('insertAt matches splice on a copy and grows the array by the inserted count', function () {
+			const input = fc.array(smallInt, { maxLength: 20 }).chain(function (array) {
+				return fc.tuple(fc.constant(array), fc.integer({ min: -array.length, max: array.length }), smallInts);
+			});
+			fc.assert(
+				fc.property(input, function ([array, index, items]) {
+					const reference = [...array];
+					reference.splice(index, 0, ...items);
+					const result = helpers.insertAt(array, index, ...items);
+					expect(result).toEqual(reference);
+					expect(result).toHaveLength(array.length + items.length);
+				})
+			);
+		});
+
+		it('removeAt matches splice on a copy and inverts insertAt', function () {
+			fc.assert(
+				fc.property(withIndex, fc.nat({ max: 25 }), function ([array, index], count) {
+					const reference = [...array];
+					reference.splice(index, count);
+					expect(helpers.removeAt(array, index, count)).toEqual(reference);
+					const position = index < 0 ? index + array.length : index;
+					expect(helpers.removeAt(helpers.insertAt(array, position, 99, 98), position, 2)).toEqual(array);
+				})
+			);
+		});
+
+		const sortedInts = smallInts.map(sortedNumbers);
+
+		it('sortedIndex equals a naive linear scan and keeps the array sorted when inserting', function () {
+			fc.assert(
+				fc.property(sortedInts, smallInt, function (array, value) {
+					const index = helpers.sortedIndex(array, value);
+					const naive = array.filter(function (item) {
+						return item < value;
+					}).length;
+					expect(index).toBe(naive);
+					const inserted = helpers.insertAt(array, index, value);
+					expect(inserted).toEqual(sortedNumbers(inserted));
+				})
+			);
+		});
+
+		it('binarySearch finds present elements of sorted unique arrays and returns -1 otherwise', function () {
+			const unique = fc.uniqueArray(fc.integer({ min: -50, max: 50 }), { maxLength: 30 }).map(sortedNumbers);
+			fc.assert(
+				fc.property(unique, fc.integer({ min: -50, max: 50 }), function (array, value) {
+					array.forEach(function (item, index) {
+						expect(helpers.binarySearch(array, item)).toBe(index);
+					});
+					expect(helpers.binarySearch(array, value)).toBe(array.indexOf(value));
+				})
+			);
+		});
+
+		it('cartesianProduct has the product of the lengths and lists every combination once', function () {
+			const arrays = fc.array(fc.array(smallInt, { maxLength: 4 }), { maxLength: 4 });
+			fc.assert(
+				fc.property(arrays, function (inputs) {
+					const product = helpers.cartesianProduct(...inputs);
+					const expectedLength = inputs.reduce(function (total, array) {
+						return total * array.length;
+					}, 1);
+					expect(product).toHaveLength(expectedLength);
+					product.forEach(function (tuple, index) {
+						expect(tuple).toHaveLength(inputs.length);
+						// Decode `index` in mixed radix (last array fastest) to find the expected positions.
+						let rest = index;
+						for (let k = inputs.length - 1; k >= 0; k--) {
+							expect(tuple[k]).toBe(inputs[k][rest % inputs[k].length]);
+							rest = Math.floor(rest / inputs[k].length);
+						}
+					});
+				})
+			);
+		});
+
+		it('intersperse has length 2n - 1 and the original items at even positions', function () {
+			fc.assert(
+				fc.property(smallInts, function (array) {
+					const result = helpers.intersperse(array, 'sep');
+					expect(result).toHaveLength(Math.max(0, 2 * array.length - 1));
+					expect(
+						result.filter(function (_value, index) {
+							return index % 2 === 0;
+						})
+					).toEqual(array);
+					expect(
+						result.filter(function (_value, index) {
+							return index % 2 === 1;
+						})
+					).toEqual(new Array(Math.max(0, array.length - 1)).fill('sep'));
+				})
+			);
+		});
+
+		it('differenceBy / intersectionBy with identity equal difference / intersection and partition the distinct keys', function () {
+			function modulo(value: number): number {
+				return ((value % 3) + 3) % 3;
+			}
+			fc.assert(
+				fc.property(smallInts, smallInts, function (a, b) {
+					expect(helpers.differenceBy(a, b, Number)).toEqual(helpers.difference(a, b));
+					expect(helpers.intersectionBy(a, b, Number)).toEqual(helpers.intersection(a, b));
+					const kept = helpers.intersectionBy(a, b, modulo).map(modulo);
+					const dropped = helpers.differenceBy(a, b, modulo).map(modulo);
+					expect(sortedNumbers([...kept, ...dropped])).toEqual(sortedNumbers(helpers.removeDuplicates(a.map(modulo))));
+				})
+			);
+		});
+	});
 });

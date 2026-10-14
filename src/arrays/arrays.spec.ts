@@ -308,6 +308,27 @@ describe('Arrays helpers', function () {
 			expect(values[9]).toBeCloseTo(0.9, 12);
 		});
 
+		it('regression: never includes a value equal to the exclusive end because of float rounding', function () {
+			// (2.1 - 0) / 0.3 is 7.000000000000001: the count used to be rounded up to 8, so 2.1 itself was produced.
+			expect(helpers.range(0, 2.1, 0.3)).toHaveLength(7);
+			expect(helpers.range(0, 1.1, 0.1)).toHaveLength(11);
+			expect(helpers.range(0, 1.1, 0.1)[10]).toBeCloseTo(1, 12);
+			expect(helpers.range(2.1, 0, -0.3)).toHaveLength(7);
+			for (const value of helpers.range(0, 2.1, 0.3)) expect(value).toBeLessThan(2.1);
+		});
+
+		it('regression: does not add a value just below the end when the step divides the span up to rounding', function () {
+			// 3 * 0.3 is 0.8999999999999999 < 0.9; the mathematically intended range has 3 items.
+			expect(helpers.range(0, 0.9, 0.3)).toEqual([0, 0.3, 0.6]);
+			expect(helpers.range(1e6 + 0.1, 1e6 + 0.4, 0.1)).toHaveLength(3);
+		});
+
+		it('keeps the end exclusive even when large magnitudes round values onto it', function () {
+			const values = helpers.range(1e16, 1e16 + 4);
+			expect(values.length).toBeLessThan(4);
+			for (const value of values) expect(value).toBeLessThan(1e16 + 4);
+		});
+
 		it('should throw a RangeError for a zero step', function () {
 			expect(function () {
 				helpers.range(0, 5, 0);
@@ -676,6 +697,392 @@ describe('Arrays helpers', function () {
 			expect(function () {
 				helpers.drop([1, 2, 3], n);
 			}).toThrow(RangeError);
+		});
+	});
+
+	describe('unzip', function () {
+		it('splits tuples into one array per position (inverse of zip)', function () {
+			const pairs: Array<[number, string]> = [
+				[1, 'a'],
+				[2, 'b']
+			];
+			const result = helpers.unzip(pairs);
+			const typed: [number[], string[]] | [] = result;
+			expect(typed).toEqual([
+				[1, 2],
+				['a', 'b']
+			]);
+			expect(helpers.unzip(helpers.zip([1, 2, 3], [true, false, true]))).toEqual([
+				[1, 2, 3],
+				[true, false, true]
+			]);
+		});
+
+		it('truncates to the shortest tuple, like zip', function () {
+			expect(
+				helpers.unzip([
+					[1, 2, 3],
+					[4, 5],
+					[6, 7, 8]
+				])
+			).toEqual([
+				[1, 4, 6],
+				[2, 5, 7]
+			]);
+			expect(helpers.unzip([[1], []])).toEqual([]);
+		});
+
+		it('returns [] for an empty input (arity unknown)', function () {
+			const [xs = [], ys = []] = helpers.unzip<[number, string]>([]);
+			expect(xs).toEqual([]);
+			expect(ys).toEqual([]);
+			expect(helpers.unzip([])).toEqual([]);
+		});
+	});
+
+	describe('windowed / pairwise', function () {
+		it('returns full sliding windows', function () {
+			expect(helpers.windowed([1, 2, 3, 4], 2)).toEqual([
+				[1, 2],
+				[2, 3],
+				[3, 4]
+			]);
+			expect(helpers.windowed([1, 2, 3, 4, 5], 2, 2)).toEqual([
+				[1, 2],
+				[3, 4]
+			]);
+			expect(helpers.windowed([1, 2, 3, 4, 5], 3, 2)).toEqual([
+				[1, 2, 3],
+				[3, 4, 5]
+			]);
+			expect(helpers.windowed([1, 2, 3], 1, 5)).toEqual([[1]]);
+			expect(helpers.windowed([1, 2], 3)).toEqual([]);
+			expect(helpers.windowed([], 1)).toEqual([]);
+		});
+
+		it('returns fresh windows', function () {
+			const input = [1, 2, 3];
+			const [window] = helpers.windowed(input, 3);
+			window.push(4);
+			expect(input).toEqual([1, 2, 3]);
+		});
+
+		it.each([
+			[0, 1],
+			[-1, 1],
+			[1.5, 1],
+			[NaN, 1],
+			[Infinity, 1],
+			[2, 0],
+			[2, -2],
+			[2, 0.5],
+			[2, Infinity]
+		])('throws a RangeError for size %p and step %p', function (size, step) {
+			expect(function () {
+				helpers.windowed([1, 2, 3], size, step);
+			}).toThrow(RangeError);
+		});
+
+		it('pairwise returns adjacent pairs', function () {
+			const pairs: Array<[string, string]> = helpers.pairwise(['a', 'b', 'c']);
+			expect(pairs).toEqual([
+				['a', 'b'],
+				['b', 'c']
+			]);
+			expect(helpers.pairwise([1])).toEqual([]);
+			expect(helpers.pairwise([])).toEqual([]);
+		});
+	});
+
+	describe('minBy / maxBy', function () {
+		const items = [
+			{ id: 'a', n: 3 },
+			{ id: 'b', n: 1 },
+			{ id: 'c', n: 7 },
+			{ id: 'd', n: 1 },
+			{ id: 'e', n: 7 }
+		];
+
+		function byN(item: { n: number }): number {
+			return item.n;
+		}
+
+		it('returns the first item with the extreme key', function () {
+			expect(helpers.minBy(items, byN)?.id).toBe('b');
+			expect(helpers.maxBy(items, byN)?.id).toBe('c');
+		});
+
+		it('returns undefined for empty arrays or when every key is NaN', function () {
+			expect(helpers.minBy([], byN)).toBeUndefined();
+			expect(helpers.maxBy([], byN)).toBeUndefined();
+			expect(helpers.minBy([NaN, NaN], Number)).toBeUndefined();
+			expect(
+				helpers.maxBy([new Date(NaN)], function (d) {
+					return d;
+				})
+			).toBeUndefined();
+		});
+
+		it('ignores NaN keys and invalid dates', function () {
+			expect(helpers.minBy([NaN, 2, NaN, 1], Number)).toBe(1);
+			expect(helpers.maxBy([NaN, 2, 1], Number)).toBe(2);
+			const dates = [new Date(NaN), new Date(5), new Date(1)];
+			expect(
+				helpers.minBy(dates, function (d) {
+					return d;
+				})
+			).toBe(dates[2]);
+			expect(
+				helpers.maxBy(dates, function (d) {
+					return d;
+				})
+			).toBe(dates[1]);
+		});
+
+		it('uses the sortBy ordering (bigints, strings by code unit, numbers before strings)', function () {
+			expect(helpers.maxBy(['b', 'a', 'B'], String)).toBe('b');
+			expect(helpers.minBy(['b', 'a', 'B'], String)).toBe('B');
+			expect(
+				helpers.maxBy([1n, 3, 2n], function (v) {
+					return v;
+				})
+			).toBe(3);
+			expect(
+				helpers.minBy<number | string>(['a', 5], function (v) {
+					return v;
+				})
+			).toBe(5);
+			expect(
+				helpers.maxBy<number | string>([5, 'a'], function (v) {
+					return v;
+				})
+			).toBe('a');
+		});
+
+		it('calls the selector once per item with its index', function () {
+			const selector = jest.fn(function (value: number) {
+				return value;
+			});
+			helpers.minBy([3, 1, 2], selector);
+			expect(selector.mock.calls).toEqual([
+				[3, 0],
+				[1, 1],
+				[2, 2]
+			]);
+		});
+	});
+
+	describe('sumBy', function () {
+		it('sums the selected numbers with compensated summation', function () {
+			expect(
+				helpers.sumBy([{ p: 0.1 }, { p: 0.2 }, { p: 0.3 }], function (o) {
+					return o.p;
+				})
+			).toBe(0.6);
+			expect(helpers.sumBy([1e100, 1, -1e100], Number)).toBe(1);
+			expect(
+				helpers.sumBy(['a', 'bb'], function (s, i) {
+					return s.length * 10 + i;
+				})
+			).toBe(31);
+		});
+
+		it('returns 0 for an empty array and propagates NaN/Infinity', function () {
+			expect(helpers.sumBy([], Number)).toBe(0);
+			expect(helpers.sumBy([1, NaN], Number)).toBeNaN();
+			expect(helpers.sumBy([1, Infinity], Number)).toBe(Infinity);
+		});
+	});
+
+	describe('move / insertAt / removeAt', function () {
+		it('move relocates an item without mutating the input', function () {
+			const input = ['a', 'b', 'c', 'd'];
+			expect(helpers.move(input, 0, 2)).toEqual(['b', 'c', 'a', 'd']);
+			expect(helpers.move(input, 3, 0)).toEqual(['d', 'a', 'b', 'c']);
+			expect(helpers.move(input, -1, 0)).toEqual(['d', 'a', 'b', 'c']);
+			expect(helpers.move(input, 0, -1)).toEqual(['b', 'c', 'd', 'a']);
+			expect(helpers.move(input, 1, 1)).toEqual(input);
+			expect(helpers.move(input, 1, 1)).not.toBe(input);
+			expect(input).toEqual(['a', 'b', 'c', 'd']);
+		});
+
+		it.each([
+			[4, 0],
+			[0, 4],
+			[-5, 0],
+			[0, -5],
+			[0.5, 0],
+			[0, NaN]
+		])('move throws a RangeError for from %p and to %p', function (from, to) {
+			expect(function () {
+				helpers.move(['a', 'b', 'c', 'd'], from, to);
+			}).toThrow(RangeError);
+		});
+
+		it('move throws for any index of an empty array', function () {
+			expect(function () {
+				helpers.move([], 0, 0);
+			}).toThrow(/out of range/);
+		});
+
+		it('insertAt inserts items before the index (negative indices count from the end)', function () {
+			const input = [1, 2, 3];
+			expect(helpers.insertAt(input, 0, 9)).toEqual([9, 1, 2, 3]);
+			expect(helpers.insertAt(input, 1, 9, 8)).toEqual([1, 9, 8, 2, 3]);
+			expect(helpers.insertAt(input, 3, 9)).toEqual([1, 2, 3, 9]);
+			expect(helpers.insertAt(input, -1, 9)).toEqual([1, 2, 9, 3]);
+			expect(helpers.insertAt(input, -3, 9)).toEqual([9, 1, 2, 3]);
+			expect(helpers.insertAt(input, 2)).toEqual([1, 2, 3]);
+			expect(helpers.insertAt([], 0, 'x')).toEqual(['x']);
+			expect(helpers.insertAt([[1]], 1, [2])).toEqual([[1], [2]]);
+			expect(input).toEqual([1, 2, 3]);
+		});
+
+		it.each([4, -4, 1.5, NaN, Infinity])('insertAt throws a RangeError for index %p', function (index) {
+			expect(function () {
+				helpers.insertAt([1, 2, 3], index, 0);
+			}).toThrow(RangeError);
+		});
+
+		it('removeAt removes count items from the index', function () {
+			const input = [1, 2, 3, 4];
+			expect(helpers.removeAt(input, 1)).toEqual([1, 3, 4]);
+			expect(helpers.removeAt(input, 1, 2)).toEqual([1, 4]);
+			expect(helpers.removeAt(input, -2, 2)).toEqual([1, 2]);
+			expect(helpers.removeAt(input, -1)).toEqual([1, 2, 3]);
+			expect(helpers.removeAt(input, 2, 0)).toEqual([1, 2, 3, 4]);
+			expect(helpers.removeAt(input, 1, 100)).toEqual([1]);
+			expect(input).toEqual([1, 2, 3, 4]);
+		});
+
+		it.each([
+			[4, 1],
+			[-5, 1],
+			[0.5, 1],
+			[0, -1],
+			[0, 1.5],
+			[0, Infinity]
+		])('removeAt throws a RangeError for index %p and count %p', function (index, count) {
+			expect(function () {
+				helpers.removeAt([1, 2, 3, 4], index, count);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('sortedIndex / binarySearch', function () {
+		it('sortedIndex returns the lowest insertion index', function () {
+			expect(helpers.sortedIndex([10, 20, 20, 30], 20)).toBe(1);
+			expect(helpers.sortedIndex([10, 20, 30], 5)).toBe(0);
+			expect(helpers.sortedIndex([10, 20, 30], 25)).toBe(2);
+			expect(helpers.sortedIndex([10, 20, 30], 99)).toBe(3);
+			expect(helpers.sortedIndex([], 1)).toBe(0);
+			expect(helpers.sortedIndex(['B', 'a', 'c'], 'b')).toBe(2);
+			expect(helpers.sortedIndex([1n, 5n, 9n], 6n)).toBe(2);
+		});
+
+		it('sortedIndex accepts a comparator', function () {
+			const people = [{ age: 20 }, { age: 30 }, { age: 30 }, { age: 40 }];
+			function compare(a: { age: number }, b: { age: number }): number {
+				return a.age - b.age;
+			}
+			expect(helpers.sortedIndex(people, { age: 30 }, compare)).toBe(1);
+			expect(
+				helpers.sortedIndex([3, 2, 1], 2, function (a, b) {
+					return b - a;
+				})
+			).toBe(1);
+		});
+
+		it('binarySearch finds the lowest matching index or -1', function () {
+			expect(helpers.binarySearch([1, 3, 5, 7], 5)).toBe(2);
+			expect(helpers.binarySearch([1, 3, 5, 7], 1)).toBe(0);
+			expect(helpers.binarySearch([1, 3, 5, 7], 7)).toBe(3);
+			expect(helpers.binarySearch([1, 3, 5, 7], 4)).toBe(-1);
+			expect(helpers.binarySearch([1, 3, 5, 7], 8)).toBe(-1);
+			expect(helpers.binarySearch([], 8)).toBe(-1);
+			expect(helpers.binarySearch([1, 2, 2, 2, 3], 2)).toBe(1);
+			expect(helpers.binarySearch(['a', 'b'], 'b')).toBe(1);
+		});
+
+		it('binarySearch accepts a comparator', function () {
+			function caseInsensitive(a: string, b: string): number {
+				const x = a.toLowerCase();
+				const y = b.toLowerCase();
+				return x < y ? -1 : x > y ? 1 : 0;
+			}
+			expect(helpers.binarySearch(['a', 'B', 'c'], 'b', caseInsensitive)).toBe(1);
+			expect(helpers.binarySearch(['a', 'B', 'c'], 'd', caseInsensitive)).toBe(-1);
+		});
+
+		it('rejects NaN with the default comparator', function () {
+			expect(function () {
+				helpers.sortedIndex([1, 2], NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.binarySearch([1, 2], NaN);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('cartesianProduct', function () {
+		it('combines every item of each array, last array fastest', function () {
+			const result = helpers.cartesianProduct([1, 2], ['a', 'b'], [true]);
+			const typed: Array<[number, string, boolean]> = result;
+			expect(typed).toEqual([
+				[1, 'a', true],
+				[1, 'b', true],
+				[2, 'a', true],
+				[2, 'b', true]
+			]);
+		});
+
+		it('handles empty arrays and no arguments', function () {
+			expect(helpers.cartesianProduct([1, 2], [])).toEqual([]);
+			expect(helpers.cartesianProduct()).toEqual([[]]);
+			expect(helpers.cartesianProduct([1, 2])).toEqual([[1], [2]]);
+		});
+
+		it('throws a RangeError when the product is too large', function () {
+			const big = { length: 2 ** 20 } as unknown as number[];
+			expect(function () {
+				helpers.cartesianProduct(big, big);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('intersperse', function () {
+		it('inserts the separator between items', function () {
+			const result: Array<number | string> = helpers.intersperse([1, 2, 3], ',');
+			expect(result).toEqual([1, ',', 2, ',', 3]);
+			expect(helpers.intersperse(['a'], 0)).toEqual(['a']);
+			expect(helpers.intersperse([], 0)).toEqual([]);
+		});
+	});
+
+	describe('differenceBy / intersectionBy', function () {
+		function id(o: { id: number }): number {
+			return o.id;
+		}
+
+		it('differenceBy keeps the first item of a per key absent from b', function () {
+			expect(helpers.differenceBy([{ id: 1 }, { id: 2 }, { id: 1, v: 'dup' }], [{ id: 2 }], id)).toEqual([{ id: 1 }]);
+			expect(helpers.differenceBy([1.2, 2.5, 3.1, 3.9], [2.1], Math.floor)).toEqual([1.2, 3.1]);
+			expect(helpers.differenceBy([], [1], Number)).toEqual([]);
+		});
+
+		it('intersectionBy keeps the first item of a per key present in b', function () {
+			expect(helpers.intersectionBy([{ id: 1 }, { id: 2, v: 'first' }, { id: 2 }], [{ id: 2 }, { id: 3 }], id)).toEqual([{ id: 2, v: 'first' }]);
+			expect(helpers.intersectionBy([1.2, 2.5], [], Math.floor)).toEqual([]);
+		});
+
+		it('accepts different item types and iterables, and uses SameValueZero', function () {
+			const users = [{ id: 1 }, { id: 2 }];
+			function key(item: { id: number } | number): number {
+				return typeof item === 'number' ? item : item.id;
+			}
+			expect(helpers.differenceBy<{ id: number }, number>(users, once(2), key)).toEqual([{ id: 1 }]);
+			expect(helpers.intersectionBy<{ id: number }, number>(once(...users), [2], key)).toEqual([{ id: 2 }]);
+			expect(helpers.intersectionBy([NaN], [NaN], Number)).toEqual([NaN]);
 		});
 	});
 });

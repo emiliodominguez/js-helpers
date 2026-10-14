@@ -1,3 +1,4 @@
+import { sum } from '../math/index.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -332,6 +333,8 @@ export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
  * With a single argument, it is the (exclusive) end and the range starts at 0.
  * The result is empty when `step` points away from `end`. Each value is computed as `start + i * step`,
  * so fractional steps do not accumulate rounding errors (but are still subject to floating-point precision).
+ * When `(end - start) / step` is an integer up to floating-point rounding (e.g. `range(0, 2.1, 0.3)`), the range has exactly
+ * that many items, and no item ever reaches `end` (it is always exclusive, even when rounding errors would land on it).
  * @param {number} start - The first value, or the exclusive end when `end` is omitted
  * @param {number} [end] - The exclusive end of the range
  * @param {number} [step=1] - The increment between values (may be negative, never 0)
@@ -342,6 +345,7 @@ export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
  * range(2, 8, 2); // [2, 4, 6]
  * range(5, 0, -2); // [5, 3, 1]
  * range(0, 5, -1); // []
+ * range(0, 2.1, 0.3); // [0, 0.3, 0.6, 0.8999999999999999, 1.2, 1.5, 1.7999999999999998] (7 items, 2.1 excluded)
  */
 export function range(start: number, end?: number, step = 1): number[] {
 	const from = end === undefined ? 0 : start;
@@ -350,8 +354,15 @@ export function range(start: number, end?: number, step = 1): number[] {
 		throw new RangeError(`range: arguments must be finite numbers, got (${String(start)}, ${String(end)}, ${String(step)})`);
 	}
 	if (step === 0) throw new RangeError('range: `step` must not be 0');
-	const length = Math.max(0, Math.ceil((to - from) / step));
+	const ratio = (to - from) / step;
+	const nearest = Math.round(ratio);
+	// `ratio` carries rounding errors (`2.1 / 0.3` is `7.000000000000001`); when it is an integer up to those errors,
+	// the range is meant to stop exactly one step before `end`, so the count must not be rounded up.
+	const tolerance = 4 * Number.EPSILON * ((Math.abs(from) + Math.abs(to)) / Math.abs(step) + Math.abs(ratio));
+	let length = Math.max(0, Math.abs(ratio - nearest) <= tolerance ? nearest : Math.ceil(ratio));
 	if (length > MAX_ARRAY_LENGTH) throw new RangeError(`range: the range would contain ${length} items, more than an array can hold`);
+	// Safety net for huge magnitudes, where `start + i * step` rounds onto (or past) `end`: the end stays exclusive.
+	while (length > 0 && (from + (length - 1) * step - to) * step >= 0) length--;
 	const result: number[] = new Array<number>(length);
 	for (let i = 0; i < length; i++) result[i] = from + i * step;
 	return result;
@@ -632,4 +643,475 @@ export function take<T>(array: ReadonlyArray<T>, n: number): T[] {
 export function drop<T>(array: ReadonlyArray<T>, n: number): T[] {
 	assertInteger('drop', 'n', n, 0);
 	return array.slice(n);
+}
+
+/**
+ * The tuple of arrays produced by {@link unzip} for an array of tuples of type `T`.
+ * @example
+ * type R = Unzipped<[number, string]>; // [number[], string[]]
+ */
+export type Unzipped<T extends ReadonlyArray<unknown>> = { -readonly [K in keyof T]: Array<T[K]> };
+
+/**
+ * A comparator, as accepted by `Array.prototype.sort`: negative when `a` sorts before `b`, positive when after, `0` when equivalent.
+ */
+export type Comparator<T> = (a: T, b: T) => number;
+
+/**
+ * Split an array of tuples into one array per tuple position: the inverse of {@link zip}.
+ * Like `zip`, the result is truncated to the SHORTEST tuple, so `unzip(zip(a, b))` gives back `[a, b]` for equal-length, non-empty arrays.
+ * The number of positions is read from the tuples themselves, so for an EMPTY input it cannot be known and `[]` is returned;
+ * the return type says so (`Unzipped<T> | []`) — use destructuring defaults: `const [xs = [], ys = []] = unzip(pairs);`.
+ * @template T - The tuple type
+ * @param {ReadonlyArray<T>} tuples - The tuples to split
+ * @returns {Unzipped<T> | []} One fresh array per tuple position, or `[]` when there are no tuples
+ * @example
+ * unzip([[1, 'a'], [2, 'b']] as [number, string][]); // [[1, 2], ['a', 'b']] typed as [number[], string[]] | []
+ * unzip([]); // []
+ */
+export function unzip<T extends ReadonlyArray<unknown>>(tuples: ReadonlyArray<T>): Unzipped<T> | [] {
+	if (tuples.length === 0) return [];
+	let arity = Infinity;
+	for (const tuple of tuples) arity = Math.min(arity, tuple.length);
+	const result: unknown[][] = [];
+	for (let position = 0; position < arity; position++) {
+		const column: unknown[] = new Array<unknown>(tuples.length);
+		for (let row = 0; row < tuples.length; row++) column[row] = tuples[row][position];
+		result.push(column);
+	}
+	return result as Unzipped<T>;
+}
+
+/**
+ * Return the sliding windows of `size` consecutive items, starting every `step` items. Only FULL windows are returned,
+ * so an array shorter than `size` gives `[]`, and trailing items that do not fill a window are dropped.
+ * The number of windows is `max(0, floor((length - size) / step) + 1)`.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The source array
+ * @param {number} size - The length of each window (a positive integer)
+ * @param {number} [step=1] - The distance between the starts of two consecutive windows (a positive integer)
+ * @returns {T[][]} A new array of windows (each window is a fresh array)
+ * @throws {RangeError} when `size` or `step` is not a positive integer
+ * @example
+ * windowed([1, 2, 3, 4], 2); // [[1, 2], [2, 3], [3, 4]]
+ * windowed([1, 2, 3, 4, 5], 2, 2); // [[1, 2], [3, 4]]
+ * windowed([1, 2], 3); // []
+ */
+export function windowed<T>(array: ReadonlyArray<T>, size: number, step = 1): T[][] {
+	assertInteger('windowed', 'size', size, 1);
+	assertInteger('windowed', 'step', step, 1);
+	const result: T[][] = [];
+	for (let start = 0; start + size <= array.length; start += step) {
+		result.push(array.slice(start, start + size));
+	}
+	return result;
+}
+
+/**
+ * Return every pair of adjacent items: `[a[0], a[1]], [a[1], a[2]], ...` (empty for arrays with fewer than 2 items).
+ * @template T
+ * @param {ReadonlyArray<T>} array - The source array
+ * @returns {Array<[T, T]>} A new array of `length - 1` pairs
+ * @example
+ * pairwise([1, 2, 3]); // [[1, 2], [2, 3]]
+ * pairwise([1]); // []
+ */
+export function pairwise<T>(array: ReadonlyArray<T>): Array<[T, T]> {
+	const result: Array<[T, T]> = [];
+	for (let i = 1; i < array.length; i++) result.push([array[i - 1], array[i]]);
+	return result;
+}
+
+/**
+ * Shared worker of {@link minBy} and {@link maxBy}: the first item whose key is extreme in the given direction.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The items to inspect
+ * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
+ * @param {number} direction - `-1` to find the smallest key, `1` to find the largest
+ * @returns {T | undefined} The first item with the extreme key, or `undefined` when there is no non-NaN key
+ */
+function extremeBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, direction: number): T | undefined {
+	let best: T | undefined;
+	let bestKey: number | string | bigint | undefined;
+	for (let i = 0; i < array.length; i++) {
+		const key = toComparable(selector(array[i], i));
+		if (Number.isNaN(key)) continue;
+		// Strict comparison: on ties the first item wins.
+		if (bestKey === undefined || compareKeys(key, bestKey) * direction > 0) {
+			best = array[i];
+			bestKey = key;
+		}
+	}
+	return best;
+}
+
+/**
+ * Return the item with the SMALLEST key, using the same ordering rules as {@link sortBy}
+ * (numbers/bigints numerically and before strings, strings by UTF-16 code units, `Date`s by timestamp).
+ * On ties the FIRST such item wins. Items whose key is `NaN` (or an invalid `Date`) are ignored.
+ * The selector is called exactly once per item.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The items to inspect
+ * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
+ * @returns {T | undefined} The first item with the smallest key, or `undefined` when the array is empty or every key is `NaN`
+ * @example
+ * minBy([{ n: 3 }, { n: 1 }, { n: 1 }], function (o) { return o.n; }); // the first { n: 1 }
+ * minBy([NaN, 2], function (n) { return n; }); // 2
+ */
+export function minBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
+	return extremeBy(array, selector, -1);
+}
+
+/**
+ * Return the item with the LARGEST key, using the same ordering rules as {@link sortBy}
+ * (numbers/bigints numerically and before strings, strings by UTF-16 code units, `Date`s by timestamp).
+ * On ties the FIRST such item wins. Items whose key is `NaN` (or an invalid `Date`) are ignored.
+ * The selector is called exactly once per item.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The items to inspect
+ * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
+ * @returns {T | undefined} The first item with the largest key, or `undefined` when the array is empty or every key is `NaN`
+ * @example
+ * maxBy([{ n: 3 }, { n: 7 }], function (o) { return o.n; }); // { n: 7 }
+ * maxBy(['b', 'a', 'B'], function (s) { return s; }); // 'b'
+ */
+export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
+	return extremeBy(array, selector, 1);
+}
+
+/**
+ * Add up the numbers returned by `selector` for each item, using compensated (Neumaier) summation like `sum` from the math module,
+ * so the rounding error does not grow with the number of items.
+ * `NaN`/`Infinity` keys propagate as in plain addition.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The items to add up
+ * @param {(item: T, index: number) => number} selector - Returns the number contributed by an item
+ * @returns {number} The total (`0` for an empty array)
+ * @example
+ * sumBy([{ price: 0.1 }, { price: 0.2 }, { price: 0.3 }], function (o) { return o.price; }); // 0.6
+ */
+export function sumBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => number): number {
+	return sum(Array.from(array, selector));
+}
+
+/**
+ * Resolves a possibly negative index (counting from the end, like `Array.prototype.at`) and checks its range.
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {string} name - Name of the validated parameter
+ * @param {number} index - The index to resolve
+ * @param {number} length - The length of the array
+ * @param {boolean} allowEnd - Whether `length` itself is a valid (insertion) position
+ * @returns {number} The resolved index, in `[0, length)` (or `[0, length]` when `allowEnd`)
+ * @throws {RangeError} when `index` is not an integer or is out of range
+ */
+function resolveIndex(caller: string, name: string, index: number, length: number, allowEnd: boolean): number {
+	if (!Number.isInteger(index)) throw new RangeError(`${caller}: \`${name}\` must be an integer, got ${String(index)}`);
+	const resolved = index < 0 ? length + index : index;
+	const upper = allowEnd ? length : length - 1;
+	if (resolved < 0 || resolved > upper) {
+		throw new RangeError(`${caller}: \`${name}\` ${index} is out of range for an array of length ${length}`);
+	}
+	return resolved;
+}
+
+/**
+ * Return a copy of an array with the item at `from` moved to position `to` (the input is not mutated).
+ * `to` is the index the item has in the RESULT. Negative indices count from the end, like `Array.prototype.at`.
+ * Equivalent to `copy.splice(to, 0, ...copy.splice(from, 1))` on a copy. Holes of sparse arrays become `undefined`.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The source array
+ * @param {number} from - Index of the item to move, in `[-length, length - 1]`
+ * @param {number} to - Index of the item in the result, in `[-length, length - 1]`
+ * @returns {T[]} A new array, a permutation of the input
+ * @throws {RangeError} when `from` or `to` is not an integer or is out of range (any index is out of range for an empty array)
+ * @example
+ * move(['a', 'b', 'c', 'd'], 0, 2); // ['b', 'c', 'a', 'd']
+ * move(['a', 'b', 'c'], -1, 0); // ['c', 'a', 'b']
+ */
+export function move<T>(array: ReadonlyArray<T>, from: number, to: number): T[] {
+	const source = resolveIndex('move', 'from', from, array.length, false);
+	const target = resolveIndex('move', 'to', to, array.length, false);
+	const result = Array.from(array);
+	const [item] = result.splice(source, 1);
+	result.splice(target, 0, item);
+	return result;
+}
+
+/**
+ * Return a copy of an array with `items` inserted before position `index` (the input is not mutated).
+ * Negative indices count from the end, like `Array.prototype.at` / `splice`: `-1` inserts before the last item;
+ * `index === length` appends. Holes of sparse arrays become `undefined`.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The source array
+ * @param {number} index - Insertion position, in `[-length, length]`
+ * @param {...T} items - The items to insert (in order)
+ * @returns {T[]} A new array of length `array.length + items.length`
+ * @throws {RangeError} when `index` is not an integer or is out of range
+ * @example
+ * insertAt([1, 2, 3], 1, 9, 8); // [1, 9, 8, 2, 3]
+ * insertAt([1, 2, 3], -1, 9); // [1, 2, 9, 3]
+ * insertAt([1, 2, 3], 3, 9); // [1, 2, 3, 9]
+ */
+export function insertAt<T>(array: ReadonlyArray<T>, index: number, ...items: T[]): T[] {
+	const position = resolveIndex('insertAt', 'index', index, array.length, true);
+	const result: T[] = [];
+	for (let i = 0; i < position; i++) result.push(array[i]);
+	for (const item of items) result.push(item);
+	for (let i = position; i < array.length; i++) result.push(array[i]);
+	return result;
+}
+
+/**
+ * Return a copy of an array without the `count` items starting at `index` (the input is not mutated).
+ * Negative indices count from the end, like `Array.prototype.at`. Like `splice`, `count` is clamped to the items available
+ * (pass `array.length` to remove everything from `index` on). Holes of sparse arrays become `undefined`.
+ * @template T
+ * @param {ReadonlyArray<T>} array - The source array
+ * @param {number} index - Index of the first item to remove, in `[-length, length - 1]`
+ * @param {number} [count=1] - How many items to remove (a non-negative integer)
+ * @returns {T[]} A new array without the removed items
+ * @throws {RangeError} when `index` is not an integer or is out of range (any index is out of range for an empty array)
+ * @throws {RangeError} when `count` is not a non-negative integer
+ * @example
+ * removeAt([1, 2, 3, 4], 1); // [1, 3, 4]
+ * removeAt([1, 2, 3, 4], -2, 2); // [1, 2]
+ */
+export function removeAt<T>(array: ReadonlyArray<T>, index: number, count = 1): T[] {
+	const position = resolveIndex('removeAt', 'index', index, array.length, false);
+	assertInteger('removeAt', 'count', count, 0);
+	const result: T[] = [];
+	for (let i = 0; i < position; i++) result.push(array[i]);
+	for (let i = position + count; i < array.length; i++) result.push(array[i]);
+	return result;
+}
+
+/**
+ * Default comparator of {@link sortedIndex} and {@link binarySearch}: orders numbers, strings or bigints with `<`.
+ * @param {unknown} a - The first value
+ * @param {unknown} b - The second value
+ * @returns {number} `-1`, `0` or `1`
+ */
+function naturalCompare(a: unknown, b: unknown): number {
+	const x = a as number | string | bigint;
+	const y = b as number | string | bigint;
+	return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/**
+ * Binary search for the lowest index at which `value` could be inserted while keeping `sortedArray` sorted.
+ * @template T
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {ReadonlyArray<T>} sortedArray - An array sorted according to `compare`
+ * @param {T} value - The value to locate
+ * @param {Comparator<T> | undefined} compare - The comparator (`undefined` for the natural `<` order)
+ * @returns {[number, Comparator<T>]} The lower-bound index and the comparator actually used
+ * @throws {RangeError} when `value` is `NaN` and no comparator is given
+ */
+function lowerBound<T>(caller: string, sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T> | undefined): [number, Comparator<T>] {
+	if (compare === undefined && Number.isNaN(value)) throw new RangeError(`${caller}: cannot locate NaN with the default comparator`);
+	const order: Comparator<T> = compare ?? naturalCompare;
+	let low = 0;
+	let high = sortedArray.length;
+	while (low < high) {
+		const middle = (low + high) >>> 1;
+		if (order(sortedArray[middle], value) < 0) low = middle + 1;
+		else high = middle;
+	}
+	return [low, order];
+}
+
+/**
+ * Find, by binary search (O(log n)), the LOWEST index at which `value` can be inserted into `sortedArray` keeping it sorted
+ * (before any equal items). Without a comparator, numbers, strings or bigints are ordered with `<` (strings by UTF-16 code units).
+ * The array must already be sorted in that order (and contain no `NaN`); otherwise the result is unspecified.
+ * @template T - A number, string or bigint type
+ * @param {ReadonlyArray<T>} sortedArray - An array sorted in ascending `<` order
+ * @param {T} value - The value to locate
+ * @returns {number} An index in `[0, length]`
+ * @throws {RangeError} when `value` is `NaN`
+ * @example
+ * sortedIndex([10, 20, 20, 30], 20); // 1
+ * sortedIndex([10, 20, 30], 99); // 3
+ */
+export function sortedIndex<T extends number | string | bigint>(sortedArray: ReadonlyArray<T>, value: T): number;
+/**
+ * Find, by binary search (O(log n)), the LOWEST index at which `value` can be inserted into `sortedArray` keeping it sorted
+ * according to `compare` (before any items comparing equal). The array must already be sorted by `compare`.
+ * @template T
+ * @param {ReadonlyArray<T>} sortedArray - An array sorted according to `compare`
+ * @param {T} value - The value to locate
+ * @param {Comparator<T>} compare - The comparator the array is sorted by
+ * @returns {number} An index in `[0, length]`
+ * @example
+ * sortedIndex([{ n: 1 }, { n: 5 }], { n: 3 }, function (a, b) { return a.n - b.n; }); // 1
+ */
+export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T>): number;
+/**
+ * Implementation of {@link sortedIndex}.
+ * @template T
+ * @param {ReadonlyArray<T>} sortedArray - A sorted array
+ * @param {T} value - The value to locate
+ * @param {Comparator<T>} [compare] - The comparator the array is sorted by
+ * @returns {number} The lowest insertion index
+ * @throws {RangeError} when `value` is `NaN` and no comparator is given
+ * @example
+ * sortedIndex([1, 3], 2); // 1
+ */
+export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare?: Comparator<T>): number {
+	return lowerBound('sortedIndex', sortedArray, value, compare)[0];
+}
+
+/**
+ * Find the index of `value` in `sortedArray` by binary search (O(log n)); with duplicates, the LOWEST matching index is returned.
+ * Without a comparator, numbers, strings or bigints are ordered with `<`. The array must already be sorted in that order.
+ * @template T - A number, string or bigint type
+ * @param {ReadonlyArray<T>} sortedArray - An array sorted in ascending `<` order
+ * @param {T} value - The value to find
+ * @returns {number} The index of `value`, or `-1` when it is absent
+ * @throws {RangeError} when `value` is `NaN`
+ * @example
+ * binarySearch([1, 3, 5, 7], 5); // 2
+ * binarySearch([1, 3, 5, 7], 4); // -1
+ */
+export function binarySearch<T extends number | string | bigint>(sortedArray: ReadonlyArray<T>, value: T): number;
+/**
+ * Find the index of an item comparing equal (`compare(item, value) === 0`) to `value` in `sortedArray` by binary search;
+ * with several equal items, the LOWEST index is returned. The array must already be sorted by `compare`.
+ * @template T
+ * @param {ReadonlyArray<T>} sortedArray - An array sorted according to `compare`
+ * @param {T} value - The value to find
+ * @param {Comparator<T>} compare - The comparator the array is sorted by
+ * @returns {number} The index of a matching item, or `-1`
+ * @example
+ * binarySearch(['b', 'c'], 'B', function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }); // 0
+ */
+export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T>): number;
+/**
+ * Implementation of {@link binarySearch}.
+ * @template T
+ * @param {ReadonlyArray<T>} sortedArray - A sorted array
+ * @param {T} value - The value to find
+ * @param {Comparator<T>} [compare] - The comparator the array is sorted by
+ * @returns {number} The lowest matching index, or `-1`
+ * @throws {RangeError} when `value` is `NaN` and no comparator is given
+ * @example
+ * binarySearch([1, 3], 3); // 1
+ */
+export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare?: Comparator<T>): number {
+	const [index, order] = lowerBound('binarySearch', sortedArray, value, compare);
+	return index < sortedArray.length && order(sortedArray[index], value) === 0 ? index : -1;
+}
+
+/**
+ * Return the cartesian product of the given arrays: every tuple taking one item from each array, in lexicographic order
+ * (the LAST array varies fastest). The result has `product of the lengths` tuples: it is empty when any array is empty,
+ * and is `[[]]` (one empty tuple) when called without arrays.
+ * @template T - The tuple of input array types
+ * @param {...ReadonlyArray<unknown>} arrays - The arrays to combine
+ * @returns {Array<Zipped<T>>} A new array of fresh tuples
+ * @throws {RangeError} when the result would have more items than an array can hold
+ * @example
+ * cartesianProduct([1, 2], ['a', 'b']); // [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']] typed as [number, string][]
+ */
+export function cartesianProduct<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Array<Zipped<T>> {
+	let total = 1;
+	for (const array of arrays) total *= array.length;
+	if (total > MAX_ARRAY_LENGTH) throw new RangeError(`cartesianProduct: the product would contain ${total} tuples, more than an array can hold`);
+	const result: Array<Zipped<T>> = [];
+	if (total === 0) return result;
+	const positions = new Array<number>(arrays.length).fill(0);
+	for (let count = 0; count < total; count++) {
+		const tuple: unknown[] = [];
+		for (let k = 0; k < arrays.length; k++) tuple.push(arrays[k][positions[k]]);
+		result.push(tuple as Zipped<T>);
+		// Odometer increment: the last position turns fastest.
+		for (let k = arrays.length - 1; k >= 0; k--) {
+			positions[k]++;
+			if (positions[k] < arrays[k].length) break;
+			positions[k] = 0;
+		}
+	}
+	return result;
+}
+
+/**
+ * Return a copy of an array with `separator` inserted between every two consecutive items.
+ * @template T - The item type
+ * @template S - The separator type
+ * @param {ReadonlyArray<T>} array - The source array
+ * @param {S} separator - The value to insert
+ * @returns {Array<T | S>} A new array of length `max(0, 2 * length - 1)`
+ * @example
+ * intersperse([1, 2, 3], 0); // [1, 0, 2, 0, 3]
+ * intersperse(['a'], ','); // ['a']
+ */
+export function intersperse<T, S>(array: ReadonlyArray<T>, separator: S): Array<T | S> {
+	const result: Array<T | S> = [];
+	for (let i = 0; i < array.length; i++) {
+		if (i > 0) result.push(separator);
+		result.push(array[i]);
+	}
+	return result;
+}
+
+/**
+ * Collects the keys `keyFn` returns for every item of an iterable.
+ * @template U
+ * @param {Iterable<U>} iterable - The items
+ * @param {(item: U) => unknown} keyFn - Returns the key of an item
+ * @returns {Set<unknown>} The set of keys
+ */
+function keySet<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): Set<unknown> {
+	const keys = new Set<unknown>();
+	for (const item of iterable) keys.add(keyFn(item));
+	return keys;
+}
+
+/**
+ * Like {@link difference}, but items are compared by the key `keyFn` returns (SameValueZero): the items of `a` whose key is
+ * not the key of any item of `b`, keeping only the FIRST item of `a` per key. `differenceBy(a, b, identity)` equals `difference(a, b)`.
+ * `keyFn` is called once per item of both iterables.
+ * @template T - The item type of `a`
+ * @template U - The item type of `b`
+ * @param {Iterable<T>} a - The items to take from (defines the output order)
+ * @param {Iterable<U>} b - The items whose keys are excluded
+ * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
+ * @returns {T[]} The items of `a` with a distinct key missing from `b`, in first-appearance order
+ * @example
+ * differenceBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // [{ id: 1 }]
+ * differenceBy([1.2, 2.5, 3.1], [2.1], Math.floor); // [1.2, 3.1]
+ */
+export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
+	const excluded = keySet(b, keyFn);
+	const result: T[] = [];
+	for (const item of a) {
+		const key = keyFn(item);
+		if (!excluded.has(key)) {
+			excluded.add(key);
+			result.push(item);
+		}
+	}
+	return result;
+}
+
+/**
+ * Like {@link intersection}, but items are compared by the key `keyFn` returns (SameValueZero): the items of `a` whose key is
+ * also the key of an item of `b`, keeping only the FIRST item of `a` per key. `intersectionBy(a, b, identity)` equals `intersection(a, b)`.
+ * `keyFn` is called once per item of both iterables.
+ * @template T - The item type of `a`
+ * @template U - The item type of `b`
+ * @param {Iterable<T>} a - The items to take from (defines the output order)
+ * @param {Iterable<U>} b - The items whose keys are kept
+ * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
+ * @returns {T[]} The items of `a` with a distinct key also present in `b`, in first-appearance order
+ * @example
+ * intersectionBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // [{ id: 2 }]
+ */
+export function intersectionBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
+	const remaining = keySet(b, keyFn);
+	const result: T[] = [];
+	for (const item of a) {
+		if (remaining.delete(keyFn(item))) result.push(item);
+	}
+	return result;
 }

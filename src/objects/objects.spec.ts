@@ -982,4 +982,395 @@ describe('Objects helpers', function () {
 			expect(helpers.isWeakSet(new WeakSet())).toBe(true);
 		});
 	});
+
+	describe('round 2 regressions', function () {
+		it('omit drops numeric keys (they are strings at runtime)', function () {
+			const result = helpers.omit({ 1: 'a', 2: 'b', x: true }, [1, 'x']);
+			assertType<Equals<typeof result, { 2: string }>>(true);
+			expect(result).toEqual({ 2: 'b' });
+			expect(Object.keys(result)).toEqual(['2']);
+		});
+
+		it('mapValues returns an array for an array input, as its return type says', function () {
+			const input = [1, 2, 3];
+			const result = helpers.mapValues(input, function (value) {
+				return String(value);
+			});
+			assertType<Equals<typeof result, string[]>>(true);
+			expect(Array.isArray(result)).toBe(true);
+			expect(result).toEqual(['1', '2', '3']);
+			// eslint-disable-next-line no-sparse-arrays
+			const sparse = helpers.mapValues([1, , 3], function (value) {
+				return value;
+			});
+			expect(sparse).toHaveLength(3);
+			expect(1 in sparse).toBe(false);
+		});
+
+		it('setInObjectByKeys never writes through inherited properties (built-ins stay untouched)', function () {
+			const target: Record<string, any> = {};
+			helpers.setInObjectByKeys(target, 'toString.polluted', 1);
+			expect((Object.prototype.toString as any).polluted).toBeUndefined();
+			expect(target.toString).toEqual({ polluted: 1 });
+			expect(Object.prototype.hasOwnProperty.call(target, 'toString')).toBe(true);
+
+			const list: any[] = [];
+			helpers.setInObjectByKeys(list, 'map.polluted', 1);
+			expect((Array.prototype.map as any).polluted).toBeUndefined();
+
+			const shared = { defaults: { a: 1 } };
+			const instance = Object.create(shared) as Record<string, any>;
+			helpers.setInObjectByKeys(instance, 'defaults.a', 2);
+			expect(shared.defaults.a).toBe(1);
+			expect(instance.defaults).toEqual({ a: 2 });
+		});
+
+		it('setInObjectByKeys only creates arrays for canonical array indices', function () {
+			const target: Record<string, any> = {};
+			helpers.setInObjectByKeys(target, 'a.01', 1);
+			helpers.setInObjectByKeys(target, 'b.4294967295', 2);
+			helpers.setInObjectByKeys(target, 'c.4294967294', 3);
+			helpers.setInObjectByKeys(target, 'd.0', 4);
+			expect(Array.isArray(target.a)).toBe(false);
+			expect(target.a).toEqual({ '01': 1 });
+			expect(Array.isArray(target.b)).toBe(false);
+			expect(Array.isArray(target.c)).toBe(true);
+			expect(target.d).toEqual([4]);
+			expect(JSON.parse(JSON.stringify(target.a))).toEqual({ '01': 1 });
+		});
+	});
+
+	describe('typedKeys / typedEntries / typedFromEntries', function () {
+		it('return own enumerable string keys with precise types', function () {
+			const sym = Symbol('s');
+			const input = { a: 1, b: 'x', 3: true, [sym]: 0 };
+			const keys = helpers.typedKeys(input);
+			assertType<Equals<typeof keys, Array<'a' | 'b' | '3'>>>(true);
+			expect(keys).toEqual(['3', 'a', 'b']);
+			const entries = helpers.typedEntries(input);
+			assertType<Equals<typeof entries, Array<['a', number] | ['b', string] | ['3', boolean]>>>(true);
+			expect(entries).toEqual([
+				['3', true],
+				['a', 1],
+				['b', 'x']
+			]);
+			expect(helpers.typedKeys(Object.create({ inherited: 1 }))).toEqual([]);
+		});
+
+		it('typedEntries keeps undefined in optional value types', function () {
+			const input: { a?: number } = { a: undefined };
+			const entries = helpers.typedEntries(input);
+			assertType<Equals<typeof entries, Array<['a', number | undefined]>>>(true);
+			expect(entries).toEqual([['a', undefined]]);
+		});
+
+		it('typedFromEntries builds a typed object, last duplicate wins, __proto__ is a plain key', function () {
+			const entries: Array<['a', number] | ['b', string]> = [
+				['a', 1],
+				['b', 'x'],
+				['a', 2]
+			];
+			const result = helpers.typedFromEntries(entries);
+			assertType<Equals<typeof result, { a: number; b: string }>>(true);
+			expect(result).toEqual({ a: 2, b: 'x' });
+
+			const unsafe = helpers.typedFromEntries([['__proto__', { polluted: true }] as [string, unknown]]);
+			expect(Object.getPrototypeOf(unsafe)).toBe(Object.prototype);
+			expect(Object.prototype.hasOwnProperty.call(unsafe, '__proto__')).toBe(true);
+			expect(({} as any).polluted).toBeUndefined();
+
+			const sym = Symbol('s');
+			expect(
+				helpers.typedFromEntries(
+					new Map<symbol | number, number>([
+						[sym, 1],
+						[2, 3]
+					])
+				)
+			).toEqual({ [sym]: 1, 2: 3 });
+		});
+
+		it('round-trips through typedEntries', function () {
+			const input = { a: 1, b: [2] };
+			expect(helpers.typedFromEntries(helpers.typedEntries(input))).toEqual(input);
+		});
+	});
+
+	describe('pickBy / omitBy', function () {
+		it('pickBy keeps properties matching the predicate', function () {
+			const sym = Symbol('s');
+			const input = { a: 1, b: null, c: 3, [sym]: 4 };
+			const result = helpers.pickBy(input, function (value) {
+				return typeof value === 'number' && value > 1;
+			});
+			assertType<Equals<typeof result, Partial<typeof input>>>(true);
+			expect(result).toEqual({ c: 3, [sym]: 4 });
+		});
+
+		it('omitBy drops properties matching the predicate and passes key and object', function () {
+			const input = { a: 1, _b: 2 };
+			const seen: unknown[] = [];
+			const result = helpers.omitBy(input, function (_value, key, object) {
+				seen.push(object);
+				return String(key).startsWith('_');
+			});
+			expect(result).toEqual({ a: 1 });
+			expect(seen).toEqual([input, input]);
+			expect(input).toEqual({ a: 1, _b: 2 });
+		});
+
+		it('store __proto__ keys as plain own properties', function () {
+			const input = JSON.parse('{"__proto__": {"polluted": true}, "a": 1}') as Record<string, unknown>;
+			const result = helpers.pickBy(input, function () {
+				return true;
+			});
+			expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+			expect(({} as any).polluted).toBeUndefined();
+		});
+	});
+
+	describe('compactObject', function () {
+		it('removes only undefined values', function () {
+			const sym = Symbol('s');
+			const input: { a: number; b: string | undefined; c: null; d?: boolean; e: number; [sym]: undefined } = {
+				a: 0,
+				b: undefined,
+				c: null,
+				d: false,
+				e: NaN,
+				[sym]: undefined
+			};
+			const result = helpers.compactObject(input);
+			assertType<Equals<typeof result, { a: number; c: null; e: number; b?: string; d?: boolean; [sym]?: never }>>(true);
+			expect(result).toEqual({ a: 0, c: null, d: false, e: NaN });
+			expect(Object.keys(result)).toEqual(['a', 'c', 'd', 'e']);
+			expect(Object.getOwnPropertySymbols(result)).toEqual([]);
+			expect(input.b).toBeUndefined();
+			expect('b' in input).toBe(true);
+		});
+
+		it('is shallow', function () {
+			const nested = { x: undefined };
+			const result = helpers.compactObject({ nested });
+			expect(result.nested).toBe(nested);
+		});
+	});
+
+	describe('flattenObject / unflattenObject', function () {
+		it('flattens nested objects and arrays into leaf paths', function () {
+			const when = new Date(0);
+			expect(helpers.flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {}, f: [], when, n: null })).toEqual({
+				'a.b': 1,
+				'a.c.0': 2,
+				'a.c.1.d': 3,
+				e: {},
+				f: [],
+				when,
+				n: null
+			});
+			expect(helpers.flattenObject({})).toEqual({});
+			expect(helpers.flattenObject([1, [2]])).toEqual({ 0: 1, '1.0': 2 });
+		});
+
+		it('supports custom separators and keeps leaves by reference', function () {
+			const map = new Map();
+			const result = helpers.flattenObject({ a: { b: map } }, { separator: '/' });
+			expect(result).toEqual({ 'a/b': map });
+			expect(result['a/b']).toBe(map);
+			expect(helpers.flattenObject({ a: { b: 1 } }, { separator: '::' })).toEqual({ 'a::b': 1 });
+		});
+
+		it('recurses into null-prototype objects, skips symbols and holes, and stores __proto__ safely', function () {
+			const bare = Object.create(null) as Record<string, unknown>;
+			bare.x = 1;
+			// eslint-disable-next-line no-sparse-arrays
+			const result = helpers.flattenObject({ bare, [Symbol('s')]: 1, list: [1, , 3] });
+			expect(result).toEqual({ 'bare.x': 1, 'list.0': 1, 'list.2': 3 });
+			const unsafe = helpers.flattenObject(JSON.parse('{"__proto__": {"polluted": true}}'));
+			expect(Object.keys(unsafe)).toEqual(['__proto__.polluted']);
+			expect(({} as any).polluted).toBeUndefined();
+		});
+
+		it('rejects invalid input, separators and circular structures', function () {
+			const circular: Record<string, unknown> = { a: 1 };
+			circular.self = { back: circular };
+			expect(function () {
+				helpers.flattenObject(circular);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.flattenObject(new Date());
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.flattenObject({}, { separator: '' });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.flattenObject({}, { separator: 1 as any });
+			}).toThrow(TypeError);
+		});
+
+		it('flattens shared (non-circular) references', function () {
+			const shared = { v: 1 };
+			expect(helpers.flattenObject({ a: shared, b: shared })).toEqual({ 'a.v': 1, 'b.v': 1 });
+		});
+
+		it('unflattens paths, creating arrays for numeric segments', function () {
+			expect(helpers.unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} })).toEqual({ a: { b: 1, c: [2, { d: 3 }] }, e: {} });
+			expect(helpers.unflattenObject({ 'a/b': 1 }, { separator: '/' })).toEqual({ a: { b: 1 } });
+			expect(helpers.unflattenObject({})).toEqual({});
+			const nested = helpers.unflattenObject({ 'x.01': 1, 'y.1': 2 }) as Record<string, any>;
+			expect(Array.isArray(nested.x)).toBe(false);
+			expect(Array.isArray(nested.y)).toBe(true);
+			expect(nested.y).toHaveLength(2);
+		});
+
+		it('round-trips', function () {
+			const input = { a: { b: 1, c: [2, { d: [3, []] }] }, e: {}, f: 'x' };
+			expect(helpers.unflattenObject(helpers.flattenObject(input))).toEqual(input);
+		});
+
+		it('rejects unsafe segments, empty segments and bad separators', function () {
+			for (const key of ['__proto__.polluted', 'a.constructor', 'prototype']) {
+				expect(function () {
+					helpers.unflattenObject({ [key]: 1 });
+				}).toThrow(TypeError);
+			}
+			expect(function () {
+				helpers.unflattenObject(JSON.parse('{"__proto__": {"polluted": true}}'));
+			}).toThrow(TypeError);
+			expect(({} as any).polluted).toBeUndefined();
+			expect(function () {
+				helpers.unflattenObject({ 'a..b': 1 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.unflattenObject({ '': 1 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.unflattenObject({}, { separator: '' });
+			}).toThrow(RangeError);
+		});
+
+		it('rejects conflicting keys in any order and never mutates the input', function () {
+			const leaf = {};
+			const record = { a: leaf, 'a.b': 1 };
+			expect(function () {
+				helpers.unflattenObject(record);
+			}).toThrow(/already set/);
+			expect(leaf).toEqual({});
+			expect(function () {
+				helpers.unflattenObject({ 'a.b': 1, a: 2 });
+			}).toThrow(/already holds/);
+			expect(function () {
+				helpers.unflattenObject({ a: null, 'a.b': 1 });
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('hasInObjectByKeys / deleteFromObjectByKeys', function () {
+		it('hasInObjectByKeys follows own properties only', function () {
+			const target = { a: { b: [undefined], s: 'text', n: null }, fn: Object.assign(function () {}, { x: 1 }) };
+			expect(helpers.hasInObjectByKeys(target, 'a')).toBe(true);
+			expect(helpers.hasInObjectByKeys(target, 'a.b.0')).toBe(true);
+			expect(helpers.hasInObjectByKeys(target, 'a.n')).toBe(true);
+			expect(helpers.hasInObjectByKeys(target, 'fn.x')).toBe(true);
+			expect(helpers.hasInObjectByKeys({ fn: Object.assign(function () {}, { inner: { z: 1 } }) }, 'fn.inner.z')).toBe(true);
+			expect(helpers.hasInObjectByKeys(target, 'a.b.1')).toBe(false);
+			expect(helpers.hasInObjectByKeys(target, 'a.toString')).toBe(false);
+			expect(helpers.hasInObjectByKeys(target, 'a.s.length')).toBe(false);
+			expect(helpers.hasInObjectByKeys(target, 'a.n.x')).toBe(false);
+			expect(helpers.hasInObjectByKeys(target, 'missing.x.y')).toBe(false);
+			expect(helpers.hasInObjectByKeys(Object.create({ a: { b: 1 } }), 'a.b')).toBe(false);
+		});
+
+		it('deleteFromObjectByKeys deletes own properties and reports success', function () {
+			const target: Record<string, any> = { a: { b: 1, c: 2 }, list: [1, 2, 3] };
+			expect(helpers.deleteFromObjectByKeys(target, 'a.b')).toBe(true);
+			expect(target).toEqual({ a: { c: 2 }, list: [1, 2, 3] });
+			expect(helpers.deleteFromObjectByKeys(target, 'a.b')).toBe(false);
+			expect(helpers.deleteFromObjectByKeys(target, 'list.1')).toBe(true);
+			expect(target.list).toHaveLength(3);
+			expect(1 in target.list).toBe(false);
+			expect(helpers.deleteFromObjectByKeys(target, 'a.toString')).toBe(false);
+			expect(helpers.deleteFromObjectByKeys(target, 'nope.x')).toBe(false);
+			expect(helpers.deleteFromObjectByKeys(target, 'a')).toBe(true);
+			expect(target).toEqual({ list: [1, , 3] }); // eslint-disable-line no-sparse-arrays
+		});
+
+		it('deleteFromObjectByKeys never deletes inherited properties and returns false for non-configurable ones', function () {
+			const proto = { shared: 1 };
+			const child = Object.create(proto) as Record<string, unknown>;
+			expect(helpers.deleteFromObjectByKeys(child, 'shared')).toBe(false);
+			expect(proto.shared).toBe(1);
+			const locked = Object.defineProperty({}, 'fixed', { value: 1, configurable: false });
+			expect(helpers.deleteFromObjectByKeys(locked, 'fixed')).toBe(false);
+			expect(helpers.deleteFromObjectByKeys([1, 2], 'length')).toBe(false);
+		});
+	});
+
+	describe('diff', function () {
+		it('lists added paths in the order of b and removed paths in the order of a', function () {
+			const a = { a: [], z: 1 };
+			const b = { c: 0, a: [0] };
+			expect(helpers.diff(a, b)).toEqual({ added: ['c', 'a.0'], removed: ['z'], changed: [] });
+			expect(helpers.diff(b, a)).toEqual({ added: ['z'], removed: ['c', 'a.0'], changed: [] });
+		});
+
+		it('reports added, removed and changed dot paths', function () {
+			expect(helpers.diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 })).toEqual({
+				added: ['b.d.1', 'e'],
+				removed: ['a'],
+				changed: ['b.c']
+			});
+		});
+
+		it('compares leaves with isEqual and reports kind changes as changed', function () {
+			const result = helpers.diff(
+				{ date: new Date(0), same: new Date(1), nan: NaN, kind: [1], set: new Set([1]), nil: null },
+				{ date: new Date(5), same: new Date(1), nan: NaN, kind: { 0: 1 }, set: new Set([1]), nil: undefined }
+			);
+			expect(result).toEqual({ added: [], removed: [], changed: ['date', 'kind', 'nil'] });
+		});
+
+		it('handles arrays at the root, holes and identical inputs', function () {
+			expect(helpers.diff([1, 2, 3], [1, 5])).toEqual({ added: [], removed: ['2'], changed: ['1'] });
+			// eslint-disable-next-line no-sparse-arrays
+			expect(helpers.diff([1, , 3], [1, 2, 3])).toEqual({ added: ['1'], removed: [], changed: [] });
+			const tree = { a: { b: [1, { c: 2 }] } };
+			expect(helpers.diff(tree, tree)).toEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff(tree, helpers.deepClone(tree))).toEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff({ a: {} }, { a: { x: { y: 1 } } })).toEqual({ added: ['a.x'], removed: [], changed: [] });
+		});
+
+		it('only considers own enumerable string keys', function () {
+			const hidden = Object.defineProperty({ a: 1 }, 'h', { value: 1, enumerable: false });
+			expect(helpers.diff(hidden, { a: 1, h: 1 })).toEqual({ added: ['h'], removed: [], changed: [] });
+			expect(helpers.diff({ a: 1, h: 1 }, hidden)).toEqual({ added: [], removed: ['h'], changed: [] });
+			expect(helpers.diff({ [Symbol('s')]: 1 }, {})).toEqual({ added: [], removed: [], changed: [] });
+		});
+
+		it('works when one tree contains the other', function () {
+			const inner = { p: {} };
+			// `b` is the subtree `a.p`: it must not be mistaken for a cycle; it is compared like any other pair.
+			expect(helpers.diff({ p: inner }, inner)).toEqual({ added: [], removed: ['p.p'], changed: [] });
+			expect(helpers.diff({ p: inner }, { p: { q: 1 } })).toEqual({ added: ['p.q'], removed: ['p.p'], changed: [] });
+		});
+
+		it('rejects mismatched roots and circular structures', function () {
+			expect(function () {
+				helpers.diff({}, []);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.diff(new Date(), new Date());
+			}).toThrow(TypeError);
+			const a: Record<string, unknown> = {};
+			a.self = a;
+			const b: Record<string, unknown> = {};
+			b.self = b;
+			expect(function () {
+				helpers.diff(a, b);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.diff({ x: 1 }, b);
+			}).not.toThrow();
+		});
+	});
 });

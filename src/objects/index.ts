@@ -445,6 +445,7 @@ export function pick<T extends object, K extends keyof T>(object: T, keys: Reado
 
 /**
  * Creates a new object with every own enumerable (string and symbol) property except the given keys. The input is not mutated.
+ * Numeric keys match their string form (`omit({ 1: 'a' }, [1])` drops the key `'1'`).
  * @template T - The object type
  * @template K - The omitted keys
  * @param {T} object - The source object
@@ -452,9 +453,15 @@ export function pick<T extends object, K extends keyof T>(object: T, keys: Reado
  * @returns {Omit<T, K>} A new object without those keys
  * @example
  * omit({ a: 1, b: 2, c: 3 }, ['b']); // { a: 1, c: 3 }
+ * omit({ 1: 'a', 2: 'b' }, [1]); // { 2: 'b' }
  */
 export function omit<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Omit<T, K> {
-	const excluded = new Set<PropertyKey>(keys);
+	// Property keys are strings or symbols at runtime: numeric keys (`omit(o, [1])`) must match the string key `'1'`.
+	const excluded = new Set<PropertyKey>(
+		keys.map(function (key): PropertyKey {
+			return typeof key === 'number' ? String(key) : key;
+		})
+	);
 	const result = {} as Omit<T, K>;
 	for (const key of ownEnumerableKeys(object)) {
 		if (!excluded.has(key)) defineValue(result, key, read(object, key));
@@ -464,6 +471,7 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
 
 /**
  * Creates a new object with the same own enumerable (string and symbol) keys, whose values are the results of `fn`.
+ * An array input gives an array of the same length (holes stay holes; keys are passed to `fn` as strings, e.g. `'0'`), matching the return type.
  * @template T - The object type
  * @template R - The mapped value type
  * @param {T} object - The source object
@@ -473,7 +481,8 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
  * mapValues({ a: 1, b: 2 }, function (n) { return n * 10; }); // { a: 10, b: 20 }
  */
 export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => R): { [K in keyof T]: R } {
-	const result = {} as { [K in keyof T]: R };
+	// For array types the mapped return type is an array type, so the runtime result must be an array too.
+	const result = (Array.isArray(object) ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
 	for (const key of ownEnumerableKeys(object)) {
 		defineValue(result, key, fn(read(object, key) as T[keyof T], key as keyof T, object));
 	}
@@ -525,20 +534,84 @@ export function invert<T extends Record<PropertyKey, PropertyKey>>(object: T): I
 // Paths
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** Largest length a JavaScript array can have (array indices are integers in `[0, MAX_ARRAY_LENGTH)`). */
+const MAX_ARRAY_LENGTH = 2 ** 32 - 1;
+
+/** Canonical decimal form of a non-negative integer (no sign, no leading zeros). */
+const CANONICAL_INDEX = /^(?:0|[1-9]\d*)$/;
+
 /**
- * Splits a dot-separated path and validates its segments for writing.
+ * Whether a path segment is a canonical array index (`'0'`, `'12'`, but not `'01'`, `'-1'`, `'1.5'` or `'4294967295'`),
+ * i.e. a key that an array stores as an element rather than as an extra property.
+ * @param {string} segment - The path segment
+ * @returns {boolean} Whether the segment is an array index
+ */
+function isArrayIndex(segment: string): boolean {
+	return CANONICAL_INDEX.test(segment) && Number(segment) < MAX_ARRAY_LENGTH;
+}
+
+/**
+ * Splits a path on `separator` and validates its segments for writing.
  * @param {string} path - The path, e.g. `'a.b.0.c'`
+ * @param {string} separator - The segment separator
  * @returns {string[]} The segments
  * @throws {RangeError} when a segment is empty (e.g. `''`, `'a..b'`, `'a.'`)
  * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype`
  */
-function parseWritablePath(path: string): string[] {
-	const segments = path.split('.');
+function parseWritablePath(path: string, separator: string): string[] {
+	const segments = path.split(separator);
 	for (const segment of segments) {
 		if (segment === '') throw new RangeError(`Invalid path "${path}": empty path segment`);
 		if (UNSAFE_KEYS.has(segment)) throw new TypeError(`Invalid path "${path}": unsafe path segment "${segment}"`);
 	}
 	return segments;
+}
+
+/**
+ * Writes `value` at the (already validated) `segments` inside `target`, creating missing containers. Shared by
+ * {@link setInObjectByKeys} and {@link unflattenObject}.
+ * Only OWN properties are traversed: an inherited value (e.g. `Object.prototype.toString`) is never written through; it is shadowed
+ * by a new own container instead, so shared prototypes and built-ins cannot be modified.
+ * @param {object} target - The object to modify
+ * @param {ReadonlyArray<string>} segments - The validated path segments
+ * @param {unknown} value - The value to store
+ * @param {string} path - The original path, for error messages
+ * @param {string} separator - The separator, for error messages
+ * @param {WeakSet<object>} [owned] - Strict mode used by {@link unflattenObject}: the containers created so far. When given, every
+ * created container is added to it, only those containers may be traversed, and an existing property is never overwritten
+ * (any of these is a conflict between two keys)
+ * @returns {void}
+ * @throws {TypeError} when an existing intermediate value is a primitive
+ * @throws {TypeError} in strict mode, when the path conflicts with a previously written one
+ */
+function assignPath(target: object, segments: ReadonlyArray<string>, value: unknown, path: string, separator: string, owned?: WeakSet<object>): void {
+	let current = target as Record<string, unknown>;
+	const last = segments.length - 1;
+
+	for (let index = 0; index < last; index++) {
+		const segment = segments[index];
+		const exists = hasOwn(current, segment);
+		let next = exists ? current[segment] : undefined;
+
+		if (owned !== undefined && exists && !owned.has(next as object)) {
+			throw new TypeError(`Cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is already set by another key`);
+		}
+		if (next == null) {
+			const container: object = isArrayIndex(segments[index + 1]) ? [] : {};
+			defineValue(current, segment, container);
+			owned?.add(container);
+			next = container;
+		} else if (!isObject(next) && !isFunction(next)) {
+			throw new TypeError(`Cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is a ${typeof next}, not an object`);
+		}
+
+		current = next as Record<string, unknown>;
+	}
+
+	if (owned !== undefined && hasOwn(current, segments[last])) {
+		throw new TypeError(`Cannot set "${path}": "${segments.join(separator)}" already holds values set by other keys`);
+	}
+	current[segments[last]] = value;
 }
 
 /**
@@ -586,8 +659,10 @@ export function getFromObjectByKeys(target: object, keys: string, defaultValue?:
 
 /**
  * Sets a nested value through a dot-separated path. MUTATES `target` and returns it.
- * Missing (or `null`/`undefined`) intermediates are created: an array when the next segment is a non-negative integer (`'list.0'`),
- * a plain object otherwise.
+ * Missing (or `null`/`undefined`) intermediates are created: an array when the next segment is a canonical array index
+ * (`'list.0'`, `'list.12'`; not `'01'`), a plain object otherwise.
+ * Only OWN properties are traversed: an inherited intermediate (such as `toString` from `Object.prototype`, or a getter defined on a class)
+ * is shadowed by a new own container, so prototypes and built-ins are never modified. The final property is set by plain assignment.
  * @template T - The object type
  * @param {T} target - The object to modify
  * @param {string} path - The dot-separated path, e.g. `'a.b.0.c'`
@@ -600,24 +675,7 @@ export function getFromObjectByKeys(target: object, keys: string, defaultValue?:
  * setInObjectByKeys({}, 'a.list.0.id', 7); // { a: { list: [{ id: 7 }] } }
  */
 export function setInObjectByKeys<T extends object>(target: T, path: string, value: unknown): T {
-	const segments = parseWritablePath(path);
-	let current = target as Record<string, unknown>;
-
-	for (let index = 0; index < segments.length - 1; index++) {
-		const segment = segments[index];
-		let next = current[segment];
-
-		if (next == null) {
-			next = /^\d+$/.test(segments[index + 1]) ? [] : {};
-			current[segment] = next;
-		} else if (!isObject(next) && !isFunction(next)) {
-			throw new TypeError(`Cannot set "${path}": "${segments.slice(0, index + 1).join('.')}" is a ${typeof next}, not an object`);
-		}
-
-		current = next as Record<string, unknown>;
-	}
-
-	current[segments[segments.length - 1]] = value;
+	assignPath(target, parseWritablePath(path, '.'), value, path, '.');
 	return target;
 }
 
@@ -997,4 +1055,382 @@ export function deepFreeze<T>(object: T): DeepReadonly<T> {
 	}
 
 	return object as DeepReadonly<T>;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Typed key/entry wrappers
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The own enumerable STRING keys `Object.keys` can return for `T`: symbol keys are excluded and numeric keys become strings.
+ * @example
+ * type K = StringKeyOf<{ a: 1; 2: 'x'; [s]: true }>; // 'a' | '2'
+ */
+export type StringKeyOf<T> = `${Exclude<keyof T, symbol>}`;
+
+/**
+ * The `[key, value]` pairs `Object.entries` can return for `T` (string keys only).
+ * @example
+ * type E = EntryOf<{ a: number; b?: string }>; // ['a', number] | ['b', string | undefined]
+ */
+export type EntryOf<T> = { [K in Exclude<keyof T, symbol>]: [`${K}`, T[K]] }[Exclude<keyof T, symbol>];
+
+/**
+ * The object type built by {@link typedFromEntries} from a union of `[key, value]` entry types.
+ * @example
+ * type O = FromEntries<['a', number] | ['b', string]>; // { a: number; b: string }
+ */
+export type FromEntries<E extends readonly [PropertyKey, unknown]> = Simplify<{ [Entry in E as Entry[0]]: Entry[1] }>;
+
+/**
+ * `Object.keys` with a precise return type: the OWN ENUMERABLE STRING keys of an object (symbol keys and inherited keys are excluded,
+ * numeric keys are returned as strings). TypeScript object types are open (a value may carry more keys than its type declares),
+ * so the type is only exact for objects that have no keys beyond their type.
+ * @template T - The object type
+ * @param {T} object - The object to inspect
+ * @returns {Array<StringKeyOf<T>>} The own enumerable string keys, in `Object.keys` order
+ * @example
+ * typedKeys({ a: 1, b: 2 }); // ['a', 'b'] typed as ('a' | 'b')[]
+ */
+export function typedKeys<T extends object>(object: T): Array<StringKeyOf<T>> {
+	return Object.keys(object) as Array<StringKeyOf<T>>;
+}
+
+/**
+ * `Object.entries` with a precise return type: `[key, value]` pairs for the OWN ENUMERABLE STRING keys of an object
+ * (symbol keys and inherited keys are excluded). Like {@link typedKeys}, the type assumes no keys beyond the declared ones.
+ * @template T - The object type
+ * @param {T} object - The object to inspect
+ * @returns {Array<EntryOf<T>>} The entries, in `Object.keys` order
+ * @example
+ * typedEntries({ a: 1, b: 'x' }); // [['a', 1], ['b', 'x']] typed as (['a', number] | ['b', string])[]
+ */
+export function typedEntries<T extends object>(object: T): Array<EntryOf<T>> {
+	return Object.entries(object) as Array<EntryOf<T>>;
+}
+
+/**
+ * `Object.fromEntries` with a precise return type: builds a new object from `[key, value]` pairs (later duplicates win).
+ * A `'__proto__'` key becomes a plain own property (no prototype change). The type assumes every key of the entry type occurs,
+ * which holds for round-trips such as `typedFromEntries(typedEntries(object))`.
+ * @template E - The entry type
+ * @param {Iterable<E>} entries - The `[key, value]` pairs
+ * @returns {FromEntries<E>} A new object
+ * @example
+ * typedFromEntries([['a', 1], ['b', 'x']] as Array<['a', number] | ['b', string]>); // { a: 1, b: 'x' } typed as { a: number; b: string }
+ */
+export function typedFromEntries<E extends readonly [PropertyKey, unknown]>(entries: Iterable<E>): FromEntries<E> {
+	const result = {};
+	for (const [key, value] of entries) defineValue(result, key, value);
+	return result as FromEntries<E>;
+}
+
+/**
+ * Creates a new object with the own enumerable (string and symbol) properties for which `predicate` returns true. The input is not mutated.
+ * @template T - The object type
+ * @param {T} object - The source object
+ * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is kept
+ * @returns {Partial<T>} A new object with the selected properties
+ * @example
+ * pickBy({ a: 1, b: null, c: 3 }, function (value) { return value !== null; }); // { a: 1, c: 3 }
+ */
+export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
+	const result: Partial<T> = {};
+	for (const key of ownEnumerableKeys(object)) {
+		const value = read(object, key) as T[keyof T];
+		if (predicate(value, key as keyof T, object)) defineValue(result, key, value);
+	}
+	return result;
+}
+
+/**
+ * Creates a new object without the own enumerable (string and symbol) properties for which `predicate` returns true
+ * (the complement of {@link pickBy}). The input is not mutated.
+ * @template T - The object type
+ * @param {T} object - The source object
+ * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is dropped
+ * @returns {Partial<T>} A new object with the remaining properties
+ * @example
+ * omitBy({ a: 1, _b: 2 }, function (_value, key) { return String(key).startsWith('_'); }); // { a: 1 }
+ */
+export function omitBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
+	return pickBy(object, function (value, key, source) {
+		return !predicate(value, key, source);
+	});
+}
+
+/**
+ * The type produced by {@link compactObject}: keys that may hold `undefined` become optional and lose `undefined` from their type.
+ * @example
+ * type C = CompactObject<{ a: number; b: string | undefined; c?: boolean }>; // { a: number; b?: string; c?: boolean }
+ */
+export type CompactObject<T> = Simplify<
+	{ [K in keyof T as undefined extends T[K] ? never : K]: T[K] } & { [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined> }
+>;
+
+/**
+ * Creates a SHALLOW copy of an object without the own properties whose value is `undefined`. Only `undefined` is removed:
+ * `null`, `0`, `''`, `false` and `NaN` are kept. Own enumerable string and symbol keys are considered. The input is not mutated.
+ * @template T - The object type
+ * @param {T} object - The source object
+ * @returns {CompactObject<T>} A new object without `undefined` values
+ * @example
+ * compactObject({ a: 1, b: undefined, c: null }); // { a: 1, c: null }
+ */
+export function compactObject<T extends object>(object: T): CompactObject<T> {
+	return pickBy(object, function (value) {
+		return value !== undefined;
+	}) as CompactObject<T>;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Flattening
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Options of {@link flattenObject} and {@link unflattenObject}.
+ */
+export interface FlattenOptions {
+	/** The string joining path segments (non-empty). Defaults to `'.'`. */
+	separator?: string;
+}
+
+/**
+ * Validates and returns the separator of {@link FlattenOptions}.
+ * @param {string} caller - Name of the public function, used in error messages
+ * @param {FlattenOptions} options - The options
+ * @returns {string} The separator
+ * @throws {TypeError} when the separator is not a string
+ * @throws {RangeError} when the separator is empty
+ */
+function readSeparator(caller: string, options: FlattenOptions): string {
+	const separator = options.separator ?? '.';
+	if (typeof separator !== 'string') throw new TypeError(`${caller}: \`separator\` must be a string, got ${typeof separator}`);
+	if (separator === '') throw new RangeError(`${caller}: \`separator\` must not be empty`);
+	return separator;
+}
+
+/**
+ * Whether a value is a container that the path helpers recurse into: an array or a plain object.
+ * @param {unknown} value - The value to check
+ * @returns {boolean} Whether the value is an array or a plain object
+ */
+function isContainer(value: unknown): value is object {
+	return Array.isArray(value) || isPlainObject(value);
+}
+
+/**
+ * Recursive worker of {@link flattenObject}.
+ * @param {object} source - The container being flattened
+ * @param {string} prefix - The path of `source` followed by the separator (empty at the root)
+ * @param {string} separator - The segment separator
+ * @param {Record<string, unknown>} result - The flat record being built (mutated)
+ * @param {Set<object>} ancestors - Containers on the current path (cycle detection)
+ * @returns {void}
+ * @throws {TypeError} when `source` contains a circular reference
+ */
+function flattenInto(source: object, prefix: string, separator: string, result: Record<string, unknown>, ancestors: Set<object>): void {
+	if (ancestors.has(source)) throw new TypeError('flattenObject: cannot flatten a circular structure');
+	ancestors.add(source);
+	for (const key of Object.keys(source)) {
+		const value = read(source, key);
+		const path = prefix + key;
+		if (isContainer(value) && Object.keys(value).length > 0) flattenInto(value, path + separator, separator, result, ancestors);
+		else defineValue(result, path, value);
+	}
+	ancestors.delete(source);
+}
+
+/**
+ * Flattens nested plain objects and arrays into a single-level record mapping each LEAF path to its value.
+ * - Paths join own enumerable string keys with `separator`; array elements use numeric segments (`'list.0.id'`). Symbol keys and holes are skipped.
+ * - Leaves are every value that is not a plain object or array (dates, maps, class instances... are leaves, stored by reference),
+ *   plus EMPTY plain objects and arrays (so they survive {@link unflattenObject}).
+ * - The result is a fresh object; a `'__proto__'` key is stored as a plain own property.
+ *
+ * Round-trip caveats (`unflattenObject(flattenObject(x))` equals `x` only when none apply): keys containing the separator or empty keys,
+ * numeric-looking keys of plain objects (they come back as arrays), sparse arrays, unsafe keys (`__proto__`...), a root array
+ * (it comes back as an object), null-prototype objects (they come back with `Object.prototype`).
+ * Very deeply nested inputs (thousands of levels) can exceed the call stack.
+ * @param {object} object - The plain object (or array) to flatten
+ * @param {FlattenOptions} [options={}] - `separator` (default `'.'`)
+ * @returns {Record<string, unknown>} A new flat record of leaf paths
+ * @throws {TypeError} when `object` is not a plain object or an array, or contains a circular reference
+ * @throws {TypeError} when `separator` is not a string
+ * @throws {RangeError} when `separator` is empty
+ * @example
+ * flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {} }); // { 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} }
+ * flattenObject({ a: { b: 1 } }, { separator: '/' }); // { 'a/b': 1 }
+ */
+export function flattenObject(object: object, options: FlattenOptions = {}): Record<string, unknown> {
+	const separator = readSeparator('flattenObject', options);
+	if (!isContainer(object)) throw new TypeError('flattenObject: the input must be a plain object or an array');
+	const result: Record<string, unknown> = {};
+	flattenInto(object, '', separator, result, new Set());
+	return result;
+}
+
+/**
+ * Rebuilds a nested object from a flat record of paths (the inverse of {@link flattenObject}). Keys are processed in `Object.keys` order;
+ * each one is split on `separator` and its value written like {@link setInObjectByKeys} does: a missing container is created as an array
+ * when the next segment is a canonical array index (`'0'`, `'12'`), as a plain object otherwise. The root is always a plain object.
+ * Keys that CONFLICT (one is a prefix path of another, such as `'a'` and `'a.b'`) throw a `TypeError` whatever their order, so values
+ * are never written into a leaf value of the input: the input is not mutated (leaf values are reused by reference).
+ * @param {Readonly<Record<string, unknown>>} record - The flat record
+ * @param {FlattenOptions} [options={}] - `separator` (default `'.'`)
+ * @returns {Record<string, unknown>} A new nested object
+ * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
+ * @throws {RangeError} when a key has an empty segment (`''`, `'a..b'`)
+ * @throws {TypeError} when two keys conflict (`{ a: 1, 'a.b': 2 }`)
+ * @throws {TypeError} when `separator` is not a string
+ * @throws {RangeError} when `separator` is empty
+ * @example
+ * unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3 }); // { a: { b: 1, c: [2, { d: 3 }] } }
+ * unflattenObject({ 'a/b': 1 }, { separator: '/' }); // { a: { b: 1 } }
+ */
+export function unflattenObject(record: Readonly<Record<string, unknown>>, options: FlattenOptions = {}): Record<string, unknown> {
+	const separator = readSeparator('unflattenObject', options);
+	const result: Record<string, unknown> = {};
+	const owned = new WeakSet<object>([result]);
+	for (const key of Object.keys(record)) {
+		assignPath(result, parseWritablePath(key, separator), record[key], key, separator, owned);
+	}
+	return result;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Path queries
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Walks the OWN properties along `segments`, stopping before the last one.
+ * @param {unknown} target - The root value
+ * @param {ReadonlyArray<string>} segments - The path segments
+ * @returns {object | undefined} The object holding the last segment, or `undefined` when an intermediate is missing or a primitive
+ */
+function resolveParent(target: unknown, segments: ReadonlyArray<string>): object | undefined {
+	let current = target;
+	for (let index = 0; index < segments.length - 1; index++) {
+		if (!(isObject(current) || isFunction(current)) || !hasOwn(current, segments[index])) return undefined;
+		current = read(current, segments[index]);
+	}
+	return isObject(current) || isFunction(current) ? current : undefined;
+}
+
+/**
+ * Checks whether a dot-separated path exists in an object through OWN properties only (inherited properties such as `toString`
+ * do not count). A property holding `undefined` exists. Primitives along the way have no properties, so `'name.length'` is `false`
+ * for a string `name`. Array elements are addressed with numeric segments (`'list.0'`).
+ * @param {object} target - The object to inspect
+ * @param {string} path - The dot-separated path, e.g. `'a.b.0'`
+ * @returns {boolean} Whether every segment of the path is an own property
+ * @example
+ * hasInObjectByKeys({ a: { b: [undefined] } }, 'a.b.0'); // true
+ * hasInObjectByKeys({ a: {} }, 'a.toString'); // false (inherited)
+ */
+export function hasInObjectByKeys(target: object, path: string): boolean {
+	const segments = path.split('.');
+	const parent = resolveParent(target, segments);
+	return parent !== undefined && hasOwn(parent, segments[segments.length - 1]);
+}
+
+/**
+ * Deletes the property at a dot-separated path. MUTATES `target`. Only OWN properties are followed and deleted
+ * (an inherited property is never removed from a prototype). Deleting an array element leaves a hole (the length is unchanged).
+ * @param {object} target - The object to modify
+ * @param {string} path - The dot-separated path, e.g. `'a.b.0'`
+ * @returns {boolean} `true` when an own property was found and deleted; `false` when the path does not exist or the property is non-configurable
+ * @example
+ * const config = { a: { b: 1, c: 2 } };
+ * deleteFromObjectByKeys(config, 'a.b'); // true, config is now { a: { c: 2 } }
+ * deleteFromObjectByKeys(config, 'a.x'); // false
+ */
+export function deleteFromObjectByKeys(target: object, path: string): boolean {
+	const segments = path.split('.');
+	const parent = resolveParent(target, segments);
+	const key = segments[segments.length - 1];
+	if (parent === undefined || !hasOwn(parent, key)) return false;
+	return Reflect.deleteProperty(parent, key);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Diff
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Result of {@link diff}: dot-separated paths. `removed` and `changed` follow the depth-first key order of `a`, `added` that of `b`.
+ */
+export interface ObjectDiff {
+	/** Paths present in `b` but not in `a`. */
+	added: string[];
+	/** Paths present in `a` but not in `b`. */
+	removed: string[];
+	/** Paths present in both whose values differ (and are not both plain objects / both arrays). */
+	changed: string[];
+}
+
+/**
+ * Recursive worker of {@link diff}: walks `a` depth-first and records the paths missing from `b` and, optionally, the changed leaves.
+ * @param {object} a - The container being walked
+ * @param {object} b - The container it is compared with (same kind as `a`)
+ * @param {string} prefix - The path of the containers followed by `'.'` (empty at the root)
+ * @param {string[]} missing - Receives the paths of `a` that `b` lacks (mutated)
+ * @param {string[] | undefined} changed - Receives the paths of differing leaves (mutated); `undefined` to skip leaf comparisons
+ * @param {[Set<object>, Set<object>]} ancestors - Containers of `a`'s tree and of `b`'s tree on the current path (cycle detection)
+ * @returns {void}
+ * @throws {TypeError} when a tree contains a circular reference
+ */
+function diffWalk(a: object, b: object, prefix: string, missing: string[], changed: string[] | undefined, ancestors: [Set<object>, Set<object>]): void {
+	const [ancestorsA, ancestorsB] = ancestors;
+	if (ancestorsA.has(a) || ancestorsB.has(b)) throw new TypeError('diff: cannot diff circular structures');
+	ancestorsA.add(a);
+	ancestorsB.add(b);
+
+	for (const key of Object.keys(a)) {
+		const path = prefix + key;
+		if (!Object.prototype.propertyIsEnumerable.call(b, key)) {
+			missing.push(path);
+			continue;
+		}
+		const left = read(a, key);
+		const right = read(b, key);
+		if (left === right) continue;
+		if ((Array.isArray(left) && Array.isArray(right)) || (isPlainObject(left) && isPlainObject(right))) {
+			diffWalk(left, right, path + '.', missing, changed, ancestors);
+		} else if (changed !== undefined && !isEqual(left, right)) {
+			changed.push(path);
+		}
+	}
+
+	ancestorsA.delete(a);
+	ancestorsB.delete(b);
+}
+
+/**
+ * Computes the structural differences between two trees of plain objects and arrays, as dot-separated paths
+ * (array elements use numeric segments: `'list.0'`).
+ * - Recurses wherever BOTH sides are plain objects, or BOTH are arrays (array elements are compared by index; holes count as missing).
+ * - Other values (incl. a plain object versus an array) are leaves compared with {@link isEqual}.
+ * - Only own enumerable string keys are considered; prototypes of plain objects are not compared.
+ * - `removed` and `changed` are listed in the depth-first key order of `a`, `added` in that of `b`, so `diff(a, b).added`
+ *   is exactly `diff(b, a).removed`. Keys containing `'.'` make paths ambiguous.
+ * @param {object} a - The old tree (a plain object or an array)
+ * @param {object} b - The new tree (the same kind as `a`)
+ * @returns {ObjectDiff} The `added`, `removed` and `changed` paths
+ * @throws {TypeError} when `a` and `b` are not both plain objects or both arrays
+ * @throws {TypeError} when a tree contains a circular reference
+ * @example
+ * diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 });
+ * // { added: ['b.d.1', 'e'], removed: ['a'], changed: ['b.c'] }
+ */
+export function diff(a: object, b: object): ObjectDiff {
+	if (!((Array.isArray(a) && Array.isArray(b)) || (isPlainObject(a) && isPlainObject(b)))) {
+		throw new TypeError('diff: both arguments must be plain objects, or both must be arrays');
+	}
+	const result: ObjectDiff = { added: [], removed: [], changed: [] };
+	if (a !== b) {
+		diffWalk(a, b, '', result.removed, result.changed, [new Set(), new Set()]);
+		diffWalk(b, a, '', result.added, undefined, [new Set(), new Set()]);
+	}
+	return result;
 }
