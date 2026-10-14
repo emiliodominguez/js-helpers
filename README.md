@@ -1,57 +1,86 @@
-# js-helpers
-
 ![js-helpers: Small utilities. Solid foundations. Yellow, graphite and aluminum code-shaped building blocks.](https://raw.githubusercontent.com/emiliodominguez/js-helpers/main/docs/assets/js-helpers-banner.jpg)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/emiliodominguez/js-helpers/tests.yml?branch=main&style=for-the-badge&label=CI&labelColor=161b22&logo=githubactions&logoColor=white)](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml)
-[![TypeScript: strict](https://img.shields.io/badge/TypeScript-strict-3178c6?style=for-the-badge&labelColor=161b22&logo=typescript&logoColor=white)](./tsconfig.json)
-[![Dependencies: 0](https://img.shields.io/badge/dependencies-0-2ea44f?style=for-the-badge&labelColor=161b22&logo=npm&logoColor=white)](./package.json)
-[![Property-tested: fast-check](https://img.shields.io/badge/property--tested-fast--check-8250df?style=for-the-badge&labelColor=161b22&logo=jest&logoColor=white)](#testing-philosophy)
+[![TypeScript: strict](https://img.shields.io/badge/TS-strict-3178c6?style=for-the-badge&labelColor=161b22&logo=typescript&logoColor=white)](./tsconfig.json)
+[![Runtime dependencies: 0](https://img.shields.io/badge/deps-0-2ea44f?style=for-the-badge&labelColor=161b22&logo=npm&logoColor=white)](./package.json)
+[![Property tests: fast-check](https://img.shields.io/badge/tests-fast--check-8250df?style=for-the-badge&labelColor=161b22&logo=jest&logoColor=white)](#testing-philosophy)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3da639?style=for-the-badge&labelColor=161b22&logo=opensourceinitiative&logoColor=white)](./LICENSE)
 
-Strictly-typed, zero-dependency TypeScript utilities, verified with property-based tests.
+**Strictly typed utilities for everyday JavaScript.**
 
-**380+ functions** across 18 modules: `arrays`, `iterables`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `format`, `validate`, `color`, `url`, `cache`, `emitter`, `store`, `random` and `decorators`.
+18 focused modules. Zero runtime dependencies. Import the helpers you need, with types and examples available in your editor.
 
-- **Correct first.** Unicode-aware strings, DST-safe dates, compensated summation, injection-safe string replacement, a deep merge that blocks prototype pollution, and deep clone/equality that handle circular references.
-- **Typed for real.** Type predicates that narrow, path-aware getters (`'user.posts.0.title'` resolves to `string | undefined`), tuple-typed `zip`, typed `curry`/`compose`/`pipe`, and a left-to-right `Merge` type.
-- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 2,500+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
-- **Docs that can't lie.** Every one of the 400+ JSDoc `@example` blocks is executed and its `// => result` comments are asserted (`yarn test:docs`), so the examples you see on hover are verified.
-- **Pure and predictable.** Nothing mutates its input unless the name says so. Bad arguments throw a descriptive `RangeError`/`TypeError` instead of returning garbage, looping forever or overflowing the stack.
-- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 31 kB gzipped; a typical module is 1–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
+[Install](#install) · [Quick start](#usage) · [Modules](#modules) · [Examples](#examples) · [API reference](./docs/API.md) · [Contributing](./CONTRIBUTING.md)
 
 ## Install
 
 ```bash
 npm install @emiliodominguez/js-helpers
-# or
-yarn add @emiliodominguez/js-helpers
 ```
 
-The package is ESM-only and requires Node 20.19+ (where `require()` of ES modules works too), any modern browser, or a bundler. `Intl.Segmenter` is used when available, with a code-point fallback.
+<details>
+<summary>Using Yarn or pnpm?</summary>
+
+```bash
+yarn add @emiliodominguez/js-helpers
+pnpm add @emiliodominguez/js-helpers
+```
+
+</details>
+
+**Compatibility:** ESM-only. Node.js 20.19+, modern browsers, or a bundler. Node.js 20.19+ also supports loading this package with `require()`. `Intl.Segmenter` is used when available, with a code-point fallback.
 
 ## Usage
 
-Import a module directly. This is the best option for tree-shaking:
+Import directly from a module so your bundler can keep only what you use:
 
 ```ts
-import { chunk, groupBy, sortBy } from '@emiliodominguez/js-helpers/arrays';
-import { toKebabCase, toSlug } from '@emiliodominguez/js-helpers/strings';
+import { chunk } from '@emiliodominguez/js-helpers/arrays';
+import { isDefined } from '@emiliodominguez/js-helpers/guards';
+import { round } from '@emiliodominguez/js-helpers/math';
+import { toSlug } from '@emiliodominguez/js-helpers/strings';
 
 chunk([1, 2, 3, 4, 5], 2); // [[1, 2], [3, 4], [5]]
-toKebabCase('XMLHttpRequest'); // 'xml-http-request'
+[1, null, 2, undefined].filter(isDefined); // [1, 2], inferred as number[]
+round(1.005, 2); // 1.01
 toSlug('Café Society!'); // 'cafe-society'
 ```
 
-Or use the namespaced root entry. Namespaces avoid name clashes such as `strings.isEmpty` vs `objects.isEmpty`:
+<details>
+<summary>Prefer namespaced imports?</summary>
+
+The root entry groups helpers by module, avoiding name clashes such as `strings.isEmpty` and `objects.isEmpty`:
 
 ```ts
-import { arrays, math, objects } from '@emiliodominguez/js-helpers';
+import { math, objects } from '@emiliodominguez/js-helpers';
 
 math.round(1.005, 2); // 1.01 (naive Math.round(x * 100) / 100 gives 1)
 objects.isEqual(new Map([[1, { a: [1] }]]), new Map([[1, { a: [1] }]])); // true
 ```
 
+</details>
+
+## Why js-helpers?
+
+- **Types that follow your data.** Narrowing predicates, path-aware getters, tuple-typed `zip`, and typed `curry`, `compose` and `pipe`.
+- **Care with the edge cases.** Unicode-aware strings, DST-safe date arithmetic, compensated summation, circular-reference support and prototype-pollution checks.
+- **Small imports, complete docs.** Minified ESM modules with no runtime dependencies. Type declarations retain the JSDoc, so editor documentation stays useful.
+- **Behavior you can verify.** Example tests, [fast-check](https://fast-check.dev) properties and executable JSDoc examples. Inputs stay unchanged unless mutation is part of the named operation.
+
 ## Modules
+
+Start with the task. Each module links to its full API reference.
+
+| What you need                                  | Modules                                                                                                                                                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transform collections and inspect data         | [`arrays`](./docs/API.md#arrays), [`iterables`](./docs/API.md#iterables), [`objects`](./docs/API.md#objects), [`guards`](./docs/API.md#guards)                             |
+| Clean text, validate input and build URLs      | [`strings`](./docs/API.md#strings), [`validate`](./docs/API.md#validate), [`url`](./docs/API.md#url)                                                                       |
+| Calculate, format and work with dates or color | [`math`](./docs/API.md#math), [`date`](./docs/API.md#date), [`format`](./docs/API.md#format), [`color`](./docs/API.md#color)                                               |
+| Coordinate async work, functions and state     | [`async`](./docs/API.md#async), [`functions`](./docs/API.md#functions), [`cache`](./docs/API.md#cache), [`emitter`](./docs/API.md#emitter), [`store`](./docs/API.md#store) |
+| Generate random values and decorate methods    | [`random`](./docs/API.md#random), [`decorators`](./docs/API.md#decorators)                                                                                                 |
+
+<details>
+<summary>Browse the helpers in all 18 modules</summary>
 
 | Module                                   | Highlights                                                                                                                       |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -74,9 +103,18 @@ objects.isEqual(new Map([[1, { a: [1] }]]), new Map([[1, { a: [1] }]])); // true
 | [`random`](./docs/API.md#random)         | seeded `createRandom` (cross-platform deterministic), secure `randomId`/`randomUUID`/`randomBytes`, `weightedRandom`             |
 | [`decorators`](./docs/API.md#decorators) | `@memoize`/`@once` (per instance), `@bound`, `@debounced`, `@throttled`, `@retryable`, `@timeout`, `@readonly`, `@deprecated`    |
 
-📖 **[Full API reference →](./docs/API.md)**. Every export is listed there with its summary. The JSDoc on each function documents its parameters, return value, thrown errors and examples, so your editor shows them on hover. Run `yarn docs` to get a browsable TypeDoc site.
+</details>
 
-## A taste
+**[Full API reference](./docs/API.md)** · Parameters, return values, errors and examples are also available through editor hover. Run `yarn docs` to generate a browsable TypeDoc site.
+
+## Examples
+
+Choose a recipe to see the imports and usage together.
+
+<details>
+<summary>Everyday helpers: typed data, retries, dates and formatting</summary>
+
+These integration snippets use application-provided values such as `user`, `defaults`, `userInput`, `url`, `urls`, `input`, `fetchPage` and `persist`.
 
 ```ts
 import { getFromObjectByKeys, deepMerge } from '@emiliodominguez/js-helpers/objects';
@@ -125,7 +163,12 @@ isEmail(input); // narrows `unknown` to `string`
 ['1.0.0', '1.0.0-rc.1', '0.9.9'].sort(compareSemver); // ['0.9.9', '1.0.0-rc.1', '1.0.0']
 ```
 
-### Building blocks
+</details>
+
+<details>
+<summary>Application building blocks: caching, events, state and lazy iterables</summary>
+
+The caching example wraps your application's `fetchUser` function. The remaining examples are self-contained.
 
 ```ts
 import { createLRUCache } from '@emiliodominguez/js-helpers/cache';
@@ -169,7 +212,10 @@ const rng = createRandom('docs');
 [rng.int(1, 6), rng.int(1, 6), rng.int(1, 6)]; // [3, 3, 5] on every platform
 ```
 
-### Decorators
+</details>
+
+<details>
+<summary>Decorators: memoize, debounce and bind class methods</summary>
 
 The decorators detect at runtime which decorator style they were applied with. They work with all three:
 
@@ -196,9 +242,16 @@ class SearchBox {
 
 > `@readonly` with `experimentalDecorators` requires `useDefineForClassFields: false`. That is the default for targets below ES2022. With define semantics the class field shadows the decorator's accessor.
 
+</details>
+
 ## Size
 
-Zero dependencies. Sizes are for the minified ESM build; bundlers only include the functions you import.
+**About 32 kB gzipped for all modules combined.** Deep imports and tree-shaking reduce that to the helpers your application actually uses. The package has no runtime dependencies, and `yarn check:size` enforces its size budget.
+
+<details>
+<summary>See the size of each module</summary>
+
+Sizes below are for the minified ESM build.
 
 | Module       | Minified | Gzipped |
 | ------------ | -------: | ------: |
@@ -221,9 +274,16 @@ Zero dependencies. Sizes are for the minified ESM build; bundlers only include t
 | `url`        |   2.8 kB |  1.3 kB |
 | `validate`   |   5.6 kB |  2.3 kB |
 
-All modules together are about 31 kB gzipped. CI enforces the total with `yarn check:size`.
+</details>
 
 ## Testing philosophy
+
+Example-based tests cover known edge cases. Property tests check algebraic laws and invariants over generated inputs. The JSDoc examples are executed too, with their documented results asserted by `yarn test:docs`.
+
+The local validation suite runs tests in UTC, New York, Lord Howe and Kolkata. CI is configured for Node.js 20, 22, 24 and 26, with additional time-zone jobs on Node.js 22.
+
+<details>
+<summary>Explore the test strategy and commands</summary>
 
 Every module has two test files:
 
@@ -245,9 +305,14 @@ yarn test:docs       # execute every JSDoc @example
 yarn validate        # everything: lint, format, types, tests in 4 time zones, doctests, build, dist smoke test, size, exports
 ```
 
+</details>
+
 ## Migrating from 1.x
 
-2.0 fixes a number of bugs, and some of those fixes change behaviour. Here is what to check:
+Version 2 introduces ESM-only packaging, stricter types and corrected edge-case behavior. Review these changes before upgrading.
+
+<details>
+<summary>Read the 1.x to 2.x migration notes</summary>
 
 **arrays**
 
@@ -293,9 +358,13 @@ yarn validate        # everything: lint, format, types, tests in 4 time zones, d
 - `guards` checks for built-ins (`isMap`, `isDate`, …) verify internal slots, so objects built with `Object.create(Map.prototype)`, and proxies of real instances, are no longer accepted.
 - `memoize` cache keys now tell `NaN`, `Infinity`, `-0` and `undefined` apart. Previously they collided.
 
+</details>
+
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). In short: no arrow functions, full JSDoc, no `any`, and every behaviour change ships with a regression test and, where it makes sense, a property.
+Start with the [contributing guide](./CONTRIBUTING.md) for setup, code conventions and testing. Behavior changes should include a regression test and, where useful, a property test.
+
+[Report a bug](https://github.com/emiliodominguez/js-helpers/issues) · [Read the changelog](./CHANGELOG.md)
 
 ## License
 
