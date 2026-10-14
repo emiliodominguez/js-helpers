@@ -22,13 +22,14 @@ const MODULES = [
  */
 function summarize(doc) {
 	if (!doc || !doc.comment) return '';
-	const text = typeof doc.comment === 'string'
-		? doc.comment
-		: doc.comment
-				.map(function (part) {
-					return part.kind === ts.SyntaxKind.JSDocText ? part.text : '`' + (part.name ? part.name.getText() : part.text) + '`';
-				})
-				.join('');
+	const text =
+		typeof doc.comment === 'string'
+			? doc.comment
+			: doc.comment
+					.map(function (part) {
+						return part.kind === ts.SyntaxKind.JSDocText ? part.text : '`' + (part.name ? part.name.getText() : part.text) + '`';
+					})
+					.join('');
 	const flat = text
 		.replace(/\s*\n\s*/g, ' ')
 		.trim()

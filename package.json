@@ -34,29 +34,16 @@
 		"url": "https://github.com/emiliodominguez/js-helpers/issues"
 	},
 	"homepage": "https://github.com/emiliodominguez/js-helpers#readme",
-	"main": "./dist/cjs/index.js",
-	"module": "./dist/esm/index.js",
-	"types": "./dist/cjs/index.d.ts",
+	"type": "module",
+	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
-			"import": {
-				"types": "./dist/esm/index.d.ts",
-				"default": "./dist/esm/index.js"
-			},
-			"require": {
-				"types": "./dist/cjs/index.d.ts",
-				"default": "./dist/cjs/index.js"
-			}
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
 		},
 		"./*": {
-			"import": {
-				"types": "./dist/esm/*/index.d.ts",
-				"default": "./dist/esm/*/index.js"
-			},
-			"require": {
-				"types": "./dist/cjs/*/index.d.ts",
-				"default": "./dist/cjs/*/index.js"
-			}
+			"types": "./dist/*/index.d.ts",
+			"default": "./dist/*/index.js"
 		},
 		"./package.json": "./package.json"
 	},
@@ -67,12 +54,12 @@
 	],
 	"sideEffects": false,
 	"engines": {
-		"node": ">=18"
+		"node": ">=20.19"
 	},
 	"scripts": {
 		"clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-		"build": "yarn clean && tsc -p tsconfig.build.json && tsc -p tsconfig.esm.json && node scripts/finalize-dist.mjs",
-		"dev:watch": "tsc -p tsconfig.esm.json -w",
+		"build": "yarn clean && tsc -p tsconfig.build.json && node scripts/build.mjs",
+		"dev:watch": "tsc -p tsconfig.build.json -w",
 		"typecheck": "tsc --noEmit",
 		"prettier": "prettier --write \"src/**/*.ts\"",
 		"format:check": "prettier --check \"src/**/*.ts\"",
@@ -81,12 +68,14 @@
 		"test": "jest",
 		"test:watch": "jest --watch",
 		"test:coverage": "jest --coverage",
-		"validate": "yarn lint && yarn typecheck && yarn test && yarn build",
-		"prepare": "husky",
-		"prepublishOnly": "yarn validate",
+		"test:dist": "node scripts/smoke-dist.mjs",
+		"check:exports": "attw --pack . --profile esm-only",
+		"check:size": "node scripts/check-size.mjs",
 		"docs": "typedoc",
 		"docs:api": "node scripts/generate-api-docs.mjs && prettier --write docs/API.md",
-		"check:exports": "attw --pack . --profile node16"
+		"validate": "yarn lint --max-warnings 0 && yarn typecheck && yarn test && yarn build && yarn test:dist && yarn check:size",
+		"prepare": "husky",
+		"prepublishOnly": "yarn validate"
 	},
 	"lint-staged": {
 		"src/**/*.ts": [
@@ -96,24 +85,27 @@
 	},
 	"devDependencies": {
 		"@arethetypeswrong/cli": "^0.18.5",
-		"@types/jest": "^29.5.14",
-		"@types/node": "^22.20.5",
-		"@typescript-eslint/eslint-plugin": "^7.18.0",
-		"@typescript-eslint/parser": "^7.18.0",
-		"eslint": "^8.57.1",
-		"eslint-config-prettier": "^9.1.2",
-		"eslint-import-resolver-typescript": "^3",
-		"eslint-plugin-import": "^2.32.0",
+		"@eslint/js": "^10.0.1",
+		"@types/jest": "^30.0.0",
+		"@types/node": "^20.19.43",
+		"esbuild": "^0.28.2",
+		"eslint": "^10.12.0",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-import-resolver-typescript": "^4.4.5",
+		"eslint-plugin-import-x": "^4.17.1",
+		"eslint-plugin-jsdoc": "^65.3.2",
 		"eslint-plugin-prettier": "^5.5.7",
-		"eslint-plugin-unused-imports": "^3.2.0",
+		"eslint-plugin-unused-imports": "^4.4.1",
 		"fast-check": "^4.10.2",
+		"globals": "^17.13.0",
 		"husky": "^9.1.7",
-		"jest": "^29.7.0",
-		"lint-staged": "^15.5.2",
+		"jest": "^30.5.2",
+		"lint-staged": "^17.6.0",
 		"prettier": "^3.9.10",
 		"ts-jest": "^29.4.14",
-		"typedoc": "^0.28",
-		"typescript": "^5.9.3"
+		"typedoc": "^0.28.20",
+		"typescript": "^6.0.3",
+		"typescript-eslint": "^8.71.2"
 	},
 	"publishConfig": {
 		"access": "public",

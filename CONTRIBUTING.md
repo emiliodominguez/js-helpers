@@ -4,7 +4,7 @@
 
 ```bash
 yarn install   # also installs the husky pre-commit hook (lint-staged)
-yarn validate  # lint + typecheck + tests + build — the same gates CI runs
+yarn validate  # lint + typecheck + tests + build + dist smoke test + size budget — the same gates CI runs
 ```
 
 ## Module layout
