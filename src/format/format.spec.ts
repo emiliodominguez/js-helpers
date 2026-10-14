@@ -1,0 +1,487 @@
+import * as helpers from '.';
+
+/** Replaces the non-breaking spaces some ICU versions emit (U+00A0, U+202F) with plain spaces. */
+function normalizeSpaces(text: string): string {
+	return text.replace(/[\u00a0\u202f]/g, ' ');
+}
+
+const INSTANT = Date.UTC(2024, 0, 15, 13, 45, 30);
+
+describe('Format helpers', function () {
+	describe('locale handling', function () {
+		it('should default to en-US regardless of the host locale', function () {
+			expect(helpers.formatNumber(1234.5)).toBe('1,234.5');
+			expect(helpers.formatNumber(1234.5, { locale: undefined })).toBe('1,234.5');
+		});
+
+		it('should accept a single locale and a priority list', function () {
+			expect(helpers.formatNumber(1234.5, { locale: 'de-DE' })).toBe('1.234,5');
+			expect(helpers.formatNumber(1234.5, { locale: ['de-DE', 'en-US'] })).toBe('1.234,5');
+			expect(helpers.formatNumber(1234.5, { locale: Object.freeze(['en-US']) })).toBe('1,234.5');
+		});
+
+		it('should treat an empty locale list as en-US', function () {
+			expect(helpers.formatNumber(1234.5, { locale: [] })).toBe('1,234.5');
+		});
+
+		it('should fall back to en-US (not the host default) for unsupported locales', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1.25, { locale: 'zz', minimumIntegerDigits: 3 });
+			expect(spy).toHaveBeenCalledWith(['zz', 'en-US'], { minimumIntegerDigits: 3 });
+			expect(helpers.formatNumber(1234.5, { locale: 'zz' })).toBe('1,234.5');
+		});
+
+		it('should throw the Intl RangeError for malformed locales', function () {
+			expect(function () {
+				helpers.formatNumber(1, { locale: 'en_US' });
+			}).toThrow(RangeError);
+		});
+
+		it('should throw a TypeError when the locale is neither a string nor an array', function () {
+			expect(function () {
+				helpers.formatNumber(1, { locale: 42 as any });
+			}).toThrow(new TypeError('format: locale must be a string or an array of strings, received number'));
+			expect(function () {
+				helpers.formatList(['a'], { locale: null as any });
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('formatter cache', function () {
+		it('should reuse formatters for identical (locale, options)', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			expect(helpers.formatNumber(1.5, { minimumIntegerDigits: 17 })).toBe('00,000,000,000,000,001.5');
+			expect(helpers.formatNumber(2.5, { minimumIntegerDigits: 17 })).toBe('00,000,000,000,000,002.5');
+			expect(spy).toHaveBeenCalledTimes(1);
+		});
+
+		it('should evict the least recently used formatter beyond 50 entries', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1, { minimumIntegerDigits: 19, maximumFractionDigits: 0 });
+			expect(spy).toHaveBeenCalledTimes(1);
+
+			for (let digits = 0; digits <= 50; digits++) {
+				helpers.formatNumber(1, { minimumIntegerDigits: 18, maximumFractionDigits: digits });
+			}
+			expect(spy).toHaveBeenCalledTimes(52);
+
+			// The most recently used entry is still cached; the first one was evicted.
+			helpers.formatNumber(1, { minimumIntegerDigits: 18, maximumFractionDigits: 50 });
+			expect(spy).toHaveBeenCalledTimes(52);
+			helpers.formatNumber(1, { minimumIntegerDigits: 19, maximumFractionDigits: 0 });
+			expect(spy).toHaveBeenCalledTimes(53);
+		});
+
+		it('should not cache formatters whose construction failed', function () {
+			expect(function () {
+				helpers.formatNumber(1, { minimumFractionDigits: 5, maximumFractionDigits: 2 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatNumber(1, { minimumFractionDigits: 5, maximumFractionDigits: 2 });
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('formatNumber', function () {
+		it('should format with grouping and pass Intl options through', function () {
+			expect(helpers.formatNumber(1234567.891)).toBe('1,234,567.891');
+			expect(helpers.formatNumber(0)).toBe('0');
+			expect(helpers.formatNumber(-1234.5)).toBe('-1,234.5');
+			expect(helpers.formatNumber(1234.5, { minimumFractionDigits: 2 })).toBe('1,234.50');
+			expect(helpers.formatNumber(3.14159, { maximumFractionDigits: 2 })).toBe('3.14');
+			expect(helpers.formatNumber(1234.5, { useGrouping: false })).toBe('1234.5');
+			expect(helpers.formatNumber(5, { signDisplay: 'always' })).toBe('+5');
+			expect(helpers.formatNumber(1500, { notation: 'scientific' })).toBe('1.5E3');
+		});
+
+		it('should format bigints exactly', function () {
+			expect(helpers.formatNumber(12345678901234567890n)).toBe('12,345,678,901,234,567,890');
+			expect(helpers.formatNumber(-5n)).toBe('-5');
+		});
+
+		it('should reject non-numbers with a TypeError', function () {
+			expect(function () {
+				helpers.formatNumber('12' as any);
+			}).toThrow(new TypeError('formatNumber: value must be a number, received string'));
+			expect(function () {
+				helpers.formatNumber(null as any);
+			}).toThrow(new TypeError('formatNumber: value must be a number, received null'));
+			expect(function () {
+				helpers.formatNumber(undefined as any);
+			}).toThrow(TypeError);
+		});
+
+		it('should reject NaN and infinities with a RangeError', function () {
+			expect(function () {
+				helpers.formatNumber(NaN);
+			}).toThrow(new RangeError('formatNumber: value must be finite, received NaN'));
+			expect(function () {
+				helpers.formatNumber(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatNumber(-Infinity);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('formatCurrency', function () {
+		it('should format amounts with the currency defaults', function () {
+			expect(helpers.formatCurrency(1234.5, 'USD')).toBe('$1,234.50');
+			expect(helpers.formatCurrency(1234.5, 'EUR')).toBe('€1,234.50');
+			expect(helpers.formatCurrency(1234.5, 'JPY')).toBe('¥1,235');
+			expect(helpers.formatCurrency(1234.5, 'usd')).toBe('$1,234.50');
+			expect(helpers.formatCurrency(10n, 'USD')).toBe('$10.00');
+		});
+
+		it('should support every display mode', function () {
+			expect(helpers.formatCurrency(1, 'USD', { display: 'symbol' })).toBe('$1.00');
+			expect(helpers.formatCurrency(1, 'USD', { display: 'narrowSymbol' })).toBe('$1.00');
+			expect(normalizeSpaces(helpers.formatCurrency(1, 'USD', { display: 'code' }))).toBe('USD 1.00');
+			expect(helpers.formatCurrency(1234.5, 'USD', { display: 'name' })).toBe('1,234.50 US dollars');
+		});
+
+		it('should pass other Intl options through', function () {
+			expect(helpers.formatCurrency(-5, 'USD', { currencySign: 'accounting' })).toBe('($5.00)');
+			expect(helpers.formatCurrency(5, 'USD', { maximumFractionDigits: 0 })).toBe('$5');
+			expect(normalizeSpaces(helpers.formatCurrency(1234.5, 'EUR', { locale: 'de-DE' }))).toBe('1.234,50 €');
+		});
+
+		it('should accept well-formed unknown codes', function () {
+			expect(normalizeSpaces(helpers.formatCurrency(1, 'XYZ'))).toBe('XYZ 1.00');
+		});
+
+		it('should let the Intl RangeError for malformed codes propagate', function () {
+			expect(function () {
+				helpers.formatCurrency(1, 'US');
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatCurrency(1, 'US$$');
+			}).toThrow(RangeError);
+		});
+
+		it('should validate the value and the currency type', function () {
+			expect(function () {
+				helpers.formatCurrency(NaN, 'USD');
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatCurrency('1' as any, 'USD');
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.formatCurrency(1, 840 as any);
+			}).toThrow(new TypeError('formatCurrency: currency must be a string, received number'));
+		});
+	});
+
+	describe('formatPercent', function () {
+		it('should format ratios as percentages', function () {
+			expect(helpers.formatPercent(0.256)).toBe('26%');
+			expect(helpers.formatPercent(0)).toBe('0%');
+			expect(helpers.formatPercent(1.5)).toBe('150%');
+			expect(helpers.formatPercent(-0.25)).toBe('-25%');
+		});
+
+		it('should use exactly `decimals` fraction digits', function () {
+			expect(helpers.formatPercent(0.256, { decimals: 1 })).toBe('25.6%');
+			expect(helpers.formatPercent(0.5, { decimals: 2 })).toBe('50.00%');
+			expect(helpers.formatPercent(0.256, { decimals: 0 })).toBe('26%');
+			expect(helpers.formatPercent(0.256, { decimals: 1, maximumFractionDigits: 5, minimumFractionDigits: 4 })).toBe('25.6%');
+		});
+
+		it('should pass fraction digit options through without decimals', function () {
+			expect(helpers.formatPercent(0.1234, { maximumFractionDigits: 2 })).toBe('12.34%');
+			expect(normalizeSpaces(helpers.formatPercent(0.256, { locale: 'de-DE', decimals: 1 }))).toBe('25,6 %');
+		});
+
+		it('should not mutate the options object', function () {
+			const options = Object.freeze({ decimals: 1 });
+			expect(helpers.formatPercent(0.5, options)).toBe('50.0%');
+			expect(options).toEqual({ decimals: 1 });
+		});
+
+		it('should reject invalid decimals', function () {
+			for (const decimals of [-1, 1.5, 101, NaN, Infinity]) {
+				expect(function () {
+					helpers.formatPercent(0.5, { decimals });
+				}).toThrow(RangeError);
+			}
+			expect(helpers.formatPercent(0.5, { decimals: 100 })).toMatch(/^50\.0{100}%$/);
+		});
+
+		it('should validate the value', function () {
+			expect(function () {
+				helpers.formatPercent(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatPercent(1n as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('formatCompact', function () {
+		it('should use short compact notation by default', function () {
+			expect(helpers.formatCompact(1234)).toBe('1.2K');
+			expect(helpers.formatCompact(3_400_000)).toBe('3.4M');
+			expect(helpers.formatCompact(999)).toBe('999');
+			expect(helpers.formatCompact(-1500)).toBe('-1.5K');
+			expect(helpers.formatCompact(2_000_000_000n)).toBe('2B');
+		});
+
+		it('should support long display and fraction options', function () {
+			expect(helpers.formatCompact(1234, { display: 'long' })).toBe('1.2 thousand');
+			expect(helpers.formatCompact(3_400_000, { display: 'long' })).toBe('3.4 million');
+			expect(helpers.formatCompact(1_234_567, { maximumFractionDigits: 2 })).toBe('1.23M');
+		});
+
+		it('should validate the value', function () {
+			expect(function () {
+				helpers.formatCompact(NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatCompact({} as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('formatUnit', function () {
+		it('should format simple and compound units', function () {
+			expect(helpers.formatUnit(50, 'kilometer-per-hour')).toBe('50 km/h');
+			expect(helpers.formatUnit(50, 'kilometer-per-hour', { display: 'long' })).toBe('50 kilometers per hour');
+			expect(helpers.formatUnit(1, 'liter', { display: 'long' })).toBe('1 liter');
+			expect(helpers.formatUnit(2, 'liter', { display: 'long' })).toBe('2 liters');
+			expect(helpers.formatUnit(50, 'kilometer-per-hour', { display: 'narrow' })).toBe('50km/h');
+			expect(helpers.formatUnit(1.234, 'megabyte', { maximumFractionDigits: 1 })).toBe('1.2 MB');
+			expect(helpers.formatUnit(3n, 'second', { display: 'long' })).toBe('3 seconds');
+		});
+
+		it('should let the Intl RangeError for unsupported units propagate', function () {
+			expect(function () {
+				helpers.formatUnit(1, 'parsec');
+			}).toThrow(RangeError);
+		});
+
+		it('should validate the value and the unit type', function () {
+			expect(function () {
+				helpers.formatUnit(Infinity, 'meter');
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatUnit(1, undefined as any);
+			}).toThrow(new TypeError('formatUnit: unit must be a string, received undefined'));
+		});
+	});
+
+	describe('formatList', function () {
+		it('should join items with the locale conjunction', function () {
+			expect(helpers.formatList(['a', 'b', 'c'])).toBe('a, b, and c');
+			expect(helpers.formatList(['a', 'b'])).toBe('a and b');
+			expect(helpers.formatList(['a'])).toBe('a');
+			expect(helpers.formatList([])).toBe('');
+		});
+
+		it('should support types and styles', function () {
+			expect(helpers.formatList(['a', 'b', 'c'], { type: 'disjunction' })).toBe('a, b, or c');
+			expect(helpers.formatList(['5 ft', '2 in'], { type: 'unit' })).toBe('5 ft, 2 in');
+			expect(helpers.formatList(['5 ft', '2 in'], { type: 'unit', style: 'narrow' })).toBe('5 ft 2 in');
+			expect(helpers.formatList(['a', 'b', 'c'], { style: 'short' })).toBe('a, b, & c');
+			expect(helpers.formatList(['a', 'b', 'c'], { locale: 'es-ES' })).toBe('a, b y c');
+		});
+
+		it('should accept any iterable and keep unicode items intact', function () {
+			expect(helpers.formatList(new Set(['x', 'y']))).toBe('x and y');
+			expect(
+				helpers.formatList(
+					(function* () {
+						yield '👩‍👩‍👧';
+						yield 'é';
+					})()
+				)
+			).toBe('👩‍👩‍👧 and é');
+		});
+
+		it('should reject strings, non-iterables and non-string items', function () {
+			expect(function () {
+				helpers.formatList('abc');
+			}).toThrow(new TypeError('formatList: items must be an iterable of strings, received string'));
+			expect(function () {
+				helpers.formatList(5 as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.formatList(null as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.formatList(['a', 1] as any);
+			}).toThrow(new TypeError('formatList: every item must be a string, received number'));
+		});
+	});
+
+	describe('formatDateTime', function () {
+		it('should format in UTC by default', function () {
+			expect(helpers.formatDateTime(INSTANT)).toBe('1/15/2024');
+			expect(helpers.formatDateTime(INSTANT, { dateStyle: 'medium' })).toBe('Jan 15, 2024');
+			expect(helpers.formatDateTime(new Date(INSTANT), { dateStyle: 'full' })).toBe('Monday, January 15, 2024');
+			expect(helpers.formatDateTime(Date.UTC(2024, 0, 15, 23, 30), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })).toBe('23:30');
+		});
+
+		it('should honour an explicit time zone', function () {
+			const options = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } as const;
+			expect(helpers.formatDateTime(INSTANT, { ...options, timeZone: 'Asia/Tokyo' })).toBe('22:45');
+			expect(helpers.formatDateTime(Date.UTC(2024, 0, 15, 23, 30), { dateStyle: 'medium', timeZone: 'Asia/Tokyo' })).toBe('Jan 16, 2024');
+		});
+
+		it('should combine date and time styles (comparing whitespace loosely)', function () {
+			expect(normalizeSpaces(helpers.formatDateTime(INSTANT, { dateStyle: 'medium', timeStyle: 'short' }))).toBe('Jan 15, 2024, 1:45 PM');
+			expect(normalizeSpaces(helpers.formatDateTime(INSTANT, { timeStyle: 'medium' }))).toBe('1:45:30 PM');
+		});
+
+		it('should format other locales', function () {
+			expect(helpers.formatDateTime(INSTANT, { locale: 'de-DE', year: 'numeric', month: '2-digit', day: '2-digit' })).toBe('15.01.2024');
+		});
+
+		it('should reject invalid dates and non-dates', function () {
+			expect(function () {
+				helpers.formatDateTime(new Date(NaN));
+			}).toThrow(new RangeError('formatDateTime: Invalid date'));
+			expect(function () {
+				helpers.formatDateTime(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatDateTime(8.64e15 + 1);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatDateTime('2024-01-15' as any);
+			}).toThrow(new TypeError('formatDateTime: date must be a Date or a number, received string'));
+		});
+
+		it('should let Intl errors for invalid options propagate', function () {
+			expect(function () {
+				helpers.formatDateTime(INSTANT, { timeZone: 'Mars/Olympus' });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatDateTime(INSTANT, { dateStyle: 'short', hour: 'numeric' });
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('formatRelativeTime', function () {
+		it('should format explicit amounts of a unit', function () {
+			expect(helpers.formatRelativeTime(3, 'day')).toBe('in 3 days');
+			expect(helpers.formatRelativeTime(-2, 'hours')).toBe('2 hours ago');
+			expect(helpers.formatRelativeTime(-1, 'day')).toBe('1 day ago');
+			expect(helpers.formatRelativeTime(0, 'second')).toBe('in 0 seconds');
+			expect(helpers.formatRelativeTime(1.5, 'year')).toBe('in 1.5 years');
+		});
+
+		it('should pass numeric and style through', function () {
+			expect(helpers.formatRelativeTime(-1, 'day', { numeric: 'auto' })).toBe('yesterday');
+			expect(helpers.formatRelativeTime(0, 'second', { numeric: 'auto' })).toBe('now');
+			expect(helpers.formatRelativeTime(5, 'minute', { style: 'short' })).toBe('in 5 min.');
+			expect(helpers.formatRelativeTime(-1, 'day', { locale: 'es-ES', numeric: 'auto' })).toBe('ayer');
+		});
+
+		it('should validate value and unit', function () {
+			expect(function () {
+				helpers.formatRelativeTime(Infinity, 'day');
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatRelativeTime('1' as any, 'day');
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.formatRelativeTime(1, 'fortnight' as any);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('formatOrdinal', function () {
+		it('should use English suffixes for English locales', function () {
+			const expected: Record<number, string> = {
+				1: '1st',
+				2: '2nd',
+				3: '3rd',
+				4: '4th',
+				11: '11th',
+				12: '12th',
+				13: '13th',
+				21: '21st',
+				22: '22nd',
+				23: '23rd',
+				101: '101st',
+				111: '111th'
+			};
+			for (const [n, text] of Object.entries(expected)) {
+				expect(helpers.formatOrdinal(Number(n))).toBe(text);
+			}
+			expect(helpers.formatOrdinal(2, { locale: 'en-GB' })).toBe('2nd');
+		});
+
+		it('should localize the number', function () {
+			expect(helpers.formatOrdinal(1001)).toBe('1,001st');
+			expect(helpers.formatOrdinal(1e21)).toBe('1,000,000,000,000,000,000,000th');
+		});
+
+		it('should handle zero and negatives', function () {
+			expect(helpers.formatOrdinal(0)).toBe('0th');
+			expect(helpers.formatOrdinal(-0)).toBe('0th');
+			expect(helpers.formatOrdinal(-1)).toBe('-1st');
+			expect(helpers.formatOrdinal(-12)).toBe('-12th');
+			expect(helpers.formatOrdinal(-23)).toBe('-23rd');
+		});
+
+		it('should fall back to a trailing period for other locales', function () {
+			expect(helpers.formatOrdinal(3, { locale: 'de-DE' })).toBe('3.');
+			expect(helpers.formatOrdinal(1000, { locale: 'de-DE' })).toBe('1.000.');
+		});
+
+		it('should use custom suffixes, falling back to `other`', function () {
+			const french = { one: 'er', other: 'e' };
+			expect(helpers.formatOrdinal(1, { locale: 'fr-FR', suffixes: french })).toBe('1er');
+			expect(helpers.formatOrdinal(2, { locale: 'fr-FR', suffixes: french })).toBe('2e');
+			expect(helpers.formatOrdinal(2, { suffixes: { other: 'º' } })).toBe('2º');
+		});
+
+		it('should treat unsupported locales as en-US', function () {
+			expect(helpers.formatOrdinal(2, { locale: 'zz' })).toBe('2nd');
+		});
+
+		it('should reject non-integers and non-numbers', function () {
+			expect(function () {
+				helpers.formatOrdinal(1.5);
+			}).toThrow(new RangeError('formatOrdinal: n must be an integer, received 1.5'));
+			expect(function () {
+				helpers.formatOrdinal(NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatOrdinal(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatOrdinal('1' as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('pluralRule', function () {
+		it('should return cardinal categories by default', function () {
+			expect(helpers.pluralRule(1)).toBe('one');
+			expect(helpers.pluralRule(2)).toBe('other');
+			expect(helpers.pluralRule(0)).toBe('other');
+			expect(helpers.pluralRule(-1)).toBe('one');
+			expect(helpers.pluralRule(1.5)).toBe('other');
+		});
+
+		it('should honour type, locale and digit options', function () {
+			expect(helpers.pluralRule(2, { type: 'ordinal' })).toBe('two');
+			expect(helpers.pluralRule(3, { type: 'ordinal' })).toBe('few');
+			expect(helpers.pluralRule(1, { minimumFractionDigits: 1 })).toBe('other');
+			expect(helpers.pluralRule(3, { locale: 'ar' })).toBe('few');
+			expect(helpers.pluralRule(0, { locale: 'ar' })).toBe('zero');
+			expect(helpers.pluralRule(5, { locale: 'ru' })).toBe('many');
+		});
+
+		it('should validate the count', function () {
+			expect(function () {
+				helpers.pluralRule(NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.pluralRule(null as any);
+			}).toThrow(TypeError);
+		});
+	});
+});
