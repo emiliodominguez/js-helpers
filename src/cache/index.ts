@@ -108,10 +108,10 @@ function assertTTL(ttl: number | undefined): void {
  *   It is called after the cache has been updated; an exception it throws propagates to the caller, but the cache stays consistent.
  * - For a TTL-only cache use `max: Infinity` (see the second example).
  * Type arguments: pass them explicitly for standalone use (`createLRUCache<string, User>(...)`), or let them be inferred from a contextual
- * type or `onEvict`. When nothing determines them they default to `unknown` keys and `never` values, which is what lets a bare
- * `createLRUCache({ max })` slot into `memoize(fn, { cache: ... })` (whose cache must return the function's result type).
+ * type or `onEvict`. When nothing determines them they default to `unknown`, so a bare `createLRUCache({ max })` works standalone and
+ * slots straight into `memoize(fn, { cache: ... })`.
  * @template K - The key type (defaults to `unknown`)
- * @template V - The value type (defaults to `never` when it cannot be inferred)
+ * @template V - The value type (defaults to `unknown`)
  * @param {LRUCacheOptions<K, V>} options - `max` (required), and optional `ttl`, `now`, `onEvict`, `updateAgeOnGet`
  * @returns {LRUCache<K, V>} A new, empty cache
  * @throws {TypeError} when `options` is not an object, or `now`/`onEvict` is provided but not a function
@@ -131,7 +131,7 @@ function assertTTL(ttl: number | undefined): void {
  * // Bounded memoization
  * const slowSquare = memoize(function (n: number): number { return n * n; }, { cache: createLRUCache({ max: 100 }) });
  */
-export function createLRUCache<K = unknown, V = never>(options: LRUCacheOptions<K, V>): LRUCache<K, V> {
+export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOptions<K, V>): LRUCache<K, V> {
 	if (typeof options !== 'object' || options === null) throw new TypeError('createLRUCache: options must be an object');
 
 	const { max, ttl: defaultTTL = Infinity, now = Date.now, onEvict, updateAgeOnGet = false } = options;

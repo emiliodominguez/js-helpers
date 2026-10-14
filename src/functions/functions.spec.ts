@@ -273,6 +273,47 @@ describe('Functions helpers', function () {
 	});
 
 	describe('memoize', function () {
+		it('should recompute instead of returning undefined when a cache entry expires between lookups', function () {
+			// A cache whose entry is still visible to `has` but already gone for `get` (as an expiring cache can be).
+			const store = new Map<unknown, unknown>([[2, 4]]);
+			const expiringCache = {
+				has: function (key: unknown): boolean {
+					return store.has(key);
+				},
+				get: function (key: unknown): unknown {
+					store.delete(key);
+					return undefined;
+				},
+				set: function (key: unknown, value: unknown): void {
+					store.set(key, value);
+				},
+				delete: function (key: unknown): boolean {
+					return store.delete(key);
+				},
+				clear: function (): void {
+					store.clear();
+				}
+			};
+			const square = jest.fn(function (n: number): number {
+				return n * n;
+			});
+			const memo = helpers.memoize(square, { cache: expiringCache });
+
+			expect(memo(2)).toBe(4);
+			expect(square).toHaveBeenCalledTimes(1);
+		});
+
+		it('should still serve a cached undefined result', function () {
+			const fn = jest.fn(function (): undefined {
+				return undefined;
+			});
+			const memo = helpers.memoize(fn);
+
+			expect(memo()).toBeUndefined();
+			expect(memo()).toBeUndefined();
+			expect(fn).toHaveBeenCalledTimes(1);
+		});
+
 		it('should memoize a function', function () {
 			const fn = jest.fn(function (a: number, b: number): number {
 				return a + b;

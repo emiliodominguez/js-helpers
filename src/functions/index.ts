@@ -313,7 +313,7 @@ export function pipe(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * The subset of the `Map` API used by {@link memoize} as a cache. A `Map` (or e.g. an LRU cache with the same API) satisfies it.
+ * The subset of the `Map` API used by {@link memoize} as a cache. A `Map`, or the LRU cache from the `cache` module, satisfies it.
  * @template K - The cache key type
  * @template V - The cached value type
  */
@@ -330,7 +330,7 @@ export interface MemoizeCache<K, V> {
  * @template F - The memoized function type
  * @template C - The cache type
  */
-export interface MemoizeOptions<F extends AnyFunction, C extends MemoizeCache<unknown, ReturnType<F>> = Map<unknown, ReturnType<F>>> {
+export interface MemoizeOptions<F extends AnyFunction, C extends MemoizeCache<unknown, unknown> = Map<unknown, ReturnType<F>>> {
 	/** Computes the cache key from the call arguments (`this` is forwarded). Defaults to {@link defaultMemoizeKey}. */
 	resolver?: (...args: Parameters<F>) => unknown;
 	/** The cache to use. Defaults to a new `Map`. */
@@ -342,7 +342,7 @@ export interface MemoizeOptions<F extends AnyFunction, C extends MemoizeCache<un
  * @template F - The original function type
  * @template C - The cache type (a `Map` unless a custom cache was supplied)
  */
-export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, ReturnType<F>> = Map<unknown, ReturnType<F>>> = F & {
+export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, unknown> = Map<unknown, ReturnType<F>>> = F & {
 	/** The underlying cache, keyed by the resolver's result. */
 	readonly cache: C;
 	/** Empties the cache. */
@@ -413,7 +413,7 @@ export function defaultMemoizeKey(...args: unknown[]): unknown {
  * square.cache.size; // 1
  * square.clear();
  */
-export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, ReturnType<F>> = Map<unknown, ReturnType<F>>>(
+export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, unknown> = Map<unknown, ReturnType<F>>>(
 	fn: F,
 	options: MemoizeOptions<F, C> = {}
 ): Memoized<F, C> {
@@ -422,7 +422,8 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, R
 	const resolver = (options.resolver ?? defaultMemoizeKey) as UnknownFunction;
 	assertFunction('memoize', resolver);
 
-	const cache: MemoizeCache<unknown, ReturnType<F>> = options.cache ?? new Map<unknown, ReturnType<F>>();
+	// Only `memoize` writes to the cache, so every stored value is a `ReturnType<F>` whatever the cache's declared value type.
+	const cache = (options.cache ?? new Map<unknown, ReturnType<F>>()) as MemoizeCache<unknown, ReturnType<F>>;
 	const call = fn as unknown as UnknownFunction;
 
 	/**
@@ -433,7 +434,10 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, R
 	function memoized(this: unknown, ...args: unknown[]): unknown {
 		const key = resolver.apply(this, args);
 
-		if (cache.has(key)) return cache.get(key);
+		// Read once, then fall back to `has` only for a cached `undefined`: an expiring cache (e.g. an LRU with a TTL) could
+		// otherwise drop the entry between a `has` and a `get` and make the wrapper return `undefined`.
+		const cached = cache.get(key);
+		if (cached !== undefined || cache.has(key)) return cached;
 
 		const result = call.apply(this, args) as ReturnType<F>;
 		cache.set(key, result);

@@ -375,7 +375,7 @@ describe('createLRUCache', function () {
 			}
 			const memo = memoize(square, { cache: createLRUCache({ max: 100 }) });
 			const result: number = memo(4);
-			const cache: LRUCache<unknown, never> = memo.cache;
+			const cache: LRUCache<unknown, unknown> = memo.cache;
 			expect(result).toBe(16);
 			expect([...cache.keys()]).toEqual([4]);
 		});
