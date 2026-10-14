@@ -59,10 +59,16 @@ const spacedLowerWords = fc.array(lowerLetterWord, { minLength: 1, maxLength: 6 
 });
 
 /**
- * Text mixing characters below U+0300 (each a grapheme on its own) with sequences that form multi-code-unit graphemes: CR LF,
- * combining marks, ZWJ and emoji with modifiers.
+ * Text mixing characters that are graphemes on their own (below U+0300, Latin Extended Additional, General Punctuation, CJK
+ * ideographs...) with sequences that form multi-code-unit graphemes (CR LF, combining marks, ZWJ, emoji with modifiers, Hangul jamo,
+ * prepend characters, spacing marks), including the code points on each side of the ranges the implementation treats as plain text.
  */
-const mixedText = fc.string({ unit: fc.constantFrom('a', 'Z', '0', ' ', '.', 'é', 'ÿ', '\n', '\r', '\r\n', '\u0301', 'e\u0301', '\u200d', '👍🏽', '中') });
+const mixedText = fc.string({
+	unit: fc.constantFrom(
+		...['a', 'Z', '0', ' ', '.', 'é', 'ÿ', '\n', '\r', '\r\n', '\u0301', 'e\u0301', '\u200d', '👍🏽', '中', '—', '\u2070', '\u1e01', '\u1dff', '\u4e00'],
+		...['\u9fff', '\u4dff', '\ua000', '\u3099', 'か', '\u200c', '\u206f', '\u20d0', 'Ω', 'ж', '\u0483', '\u1100', '\u1161', '\u11a8', '가', '\u0600', '\u0e33', 'ก']
+	)
+});
 
 const caseFunctions = [helpers.toSnakeCase, helpers.toKebabCase, helpers.toConstantCase, helpers.toCamelCase, helpers.toPascalCase];
 
@@ -97,6 +103,14 @@ describe('String helpers (properties)', function () {
 		it('matches Intl.Segmenter on text mixing plain characters with CR LF, combining marks and emoji', function () {
 			fc.assert(
 				fc.property(mixedText, function (s) {
+					expect(helpers.reverse(s)).toBe(graphemes(s).reverse().join(''));
+				})
+			);
+		});
+
+		it('matches Intl.Segmenter on arbitrary code points', function () {
+			fc.assert(
+				fc.property(fc.string({ unit: 'binary' }), function (s) {
 					expect(helpers.reverse(s)).toBe(graphemes(s).reverse().join(''));
 				})
 			);

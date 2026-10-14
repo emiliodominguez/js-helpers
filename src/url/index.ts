@@ -52,12 +52,8 @@ function encodeComponent(value: string): string {
 	try {
 		return encodeURIComponent(value);
 	} catch {
-		// Only a lone surrogate makes `encodeURIComponent` throw (URIError): replace them and encode again.
-		return encodeURIComponent(
-			value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (match: string): string {
-				return match.length === 2 ? match : '�';
-			})
-		);
+		// Only a lone surrogate (a `Cs` code point in a `u` regular expression, unlike a valid pair) makes `encodeURIComponent` throw.
+		return encodeURIComponent(value.replace(/\p{Cs}/gu, '\ufffd'));
 	}
 }
 
@@ -132,22 +128,24 @@ export function buildQueryString(params: QueryParams, options: BuildQueryStringO
 
 		if (value === undefined) continue;
 
+		const name = encodeComponent(key);
+
 		if (value === null) {
 			if (!skipNull) {
-				query += separator + encodeComponent(key);
+				query += separator + name;
 				separator = '&';
 			}
 			continue;
 		}
 
 		if (!Array.isArray(value)) {
-			query += separator + encodeComponent(key) + '=' + encodeComponent(serializeValue(key, value));
+			query += separator + name + '=' + encodeComponent(serializeValue(key, value));
 			separator = '&';
 			continue;
 		}
 
 		const list = value as ReadonlyArray<unknown>;
-		const prefix = encodeComponent(key) + (arrayFormat === 'brackets' ? '[]=' : '=');
+		const prefix = name + (arrayFormat === 'brackets' ? '[]=' : '=');
 		const itemSeparator = arrayFormat === 'comma' ? ',' : '&' + prefix;
 		let written = false;
 
@@ -296,24 +294,30 @@ export function joinUrl(...parts: string[]): string {
 		paths[lastIndex] = last.slice(0, suffixIndex);
 	}
 
-	const scheme = /^[a-z][a-z\d+.-]*:\/*/i.exec(paths[0]);
-	let prefix: string;
-
-	if (scheme !== null) prefix = scheme[0];
-	else if (/^\/\/[^/]/.test(paths[0])) prefix = '//';
-	else if (paths[0].startsWith('/')) prefix = '/';
-	else prefix = '';
+	// A scheme with its slashes, else `//` before a host, else a single `/` (or nothing): the last alternative always matches.
+	const prefix = (/^[a-z][a-z\d+.-]*:\/*|^\/\/(?=[^/])|^\/?/i.exec(paths[0]) as RegExpExecArray)[0];
 
 	paths[0] = paths[0].slice(prefix.length);
 
-	const trailingSlash = paths[lastIndex].endsWith('/');
-	// Joining with `/`, collapsing every run of slashes and trimming the ends leaves the non-empty segments separated by exactly one `/`.
-	const body = paths
-		.join('/')
-		.replace(/\/+/g, '/')
-		.replace(/^\/|\/$/g, '');
+	// The non-empty slash-free segments, separated by exactly one `/`: each part without its leading and trailing slashes, and the runs
+	// of slashes inside a part (rare) collapsed afterwards.
+	let body = '';
 
-	return prefix + body + (trailingSlash && body !== '' ? '/' : '') + suffix;
+	for (const path of paths) {
+		let start = 0;
+		let end = path.length;
+
+		while (path[start] === '/') start++;
+
+		// A part made only of slashes ends up with `end < start` (skipped below).
+		while (path[end - 1] === '/') end--;
+
+		if (end > start) body += (body === '' ? '' : '/') + path.slice(start, end);
+	}
+
+	if (body.includes('//')) body = body.replace(/\/\/+/g, '/');
+
+	return prefix + body + (paths[lastIndex].endsWith('/') && body !== '' ? '/' : '') + suffix;
 }
 
 /**
@@ -348,5 +352,5 @@ export function getQueryParam(url: string, key: string): string | undefined {
  * isAbsoluteUrl('mailto:someone@example.com'); // => false
  */
 export function isAbsoluteUrl(string: string): boolean {
-	return /^[a-z][a-z\d+.-]*:\/\//i.test(string) || string.startsWith('//');
+	return /^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(string);
 }

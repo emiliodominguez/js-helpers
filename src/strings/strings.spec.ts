@@ -674,6 +674,24 @@ describe('String helpers', function () {
 			expect(helpers.interpolate('{name.length} {name.0}', { name: 'Ada' })).toEqual('{name.length} {name.0}');
 		});
 
+		it('should apply a template (parsed once) to many values, and alternate between templates', function () {
+			for (let round = 0; round < 3; round++) {
+				expect(helpers.interpolate('{a}-{b}', { a: round, b: 'x' })).toEqual(`${round}-x`);
+				expect(helpers.interpolate('{a}-{b}', { a: 'y' })).toEqual('y-{b}');
+				expect(helpers.interpolate('[{b}]', { b: round })).toEqual(`[${round}]`);
+			}
+		});
+
+		it('should support values whose getters interpolate another template', function () {
+			const values = {
+				get inner(): string {
+					return helpers.interpolate('<{x}>', { x: 1 });
+				},
+				outer: 2
+			};
+			expect(helpers.interpolate('{inner} {outer} {inner}', values)).toEqual('<1> 2 <1>');
+		});
+
 		it('should not read inherited properties', function () {
 			expect(helpers.interpolate('{constructor} {toString} {__proto__}', {})).toEqual('{constructor} {toString} {__proto__}');
 		});

@@ -209,6 +209,43 @@ describe('Format helpers', function () {
 			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digits })).toBe('1.25');
 		});
 
+		it('should never serve a stale formatter for a reused and mutated options object', function () {
+			const options: any = { dateStyle: 'short' };
+			expect(helpers.formatDateTime(0, options)).toBe('1/1/70');
+			options.dateStyle = 'medium';
+			expect(helpers.formatDateTime(0, options)).toBe('Jan 1, 1970');
+			options.locale = 'de-DE';
+			expect(helpers.formatDateTime(0, options)).toBe('01.01.1970');
+			delete options.dateStyle;
+			expect(helpers.formatDateTime(0, options)).toBe('1.1.1970');
+		});
+
+		it('should ignore inherited options, even when they equal the previous call ones', function () {
+			expect(helpers.formatNumber(1, { minimumFractionDigits: 2 })).toBe('1.00');
+			expect(helpers.formatNumber(1, Object.create({ minimumFractionDigits: 2 }))).toBe('1');
+			// `locale` is read even when inherited.
+			expect(helpers.formatNumber(1.5, { locale: 'de-DE' })).toBe('1,5');
+			expect(helpers.formatNumber(1.5, Object.create({ locale: 'de-DE' }))).toBe('1,5');
+			expect(helpers.formatNumber(1.5)).toBe('1.5');
+			// Named options are read through the prototype chain too (here a class getter, which `for...in` does not see).
+			class CodeDisplay {
+				get display(): 'code' {
+					return 'code';
+				}
+			}
+			expect(helpers.formatCurrency(1, 'USD', {})).toBe('$1.00');
+			expect(helpers.formatCurrency(1, 'USD', new CodeDisplay())).toBe('USD 1.00');
+			expect(helpers.formatCurrency(1, 'USD', {})).toBe('$1.00');
+		});
+
+		it('should tell apart calls that only differ by the currency or the unit', function () {
+			const options = { display: 'code' as const };
+			expect(helpers.formatCurrency(1, 'USD', options)).toBe('USD 1.00');
+			expect(helpers.formatCurrency(1, 'EUR', options)).toBe('EUR 1.00');
+			expect(helpers.formatUnit(1, 'meter', { display: 'long' })).toBe('1 meter');
+			expect(helpers.formatUnit(1, 'liter', { display: 'long' })).toBe('1 liter');
+		});
+
 		it('should not cache formatters whose construction failed', function () {
 			expect(function () {
 				helpers.formatNumber(1, { minimumFractionDigits: 5, maximumFractionDigits: 2 });
@@ -510,6 +547,15 @@ describe('Format helpers', function () {
 			expect(function () {
 				helpers.formatDateTime(8.64e15 + 1);
 			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatDateTime(-8.64e15 - 1);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatDateTime(-Infinity);
+			}).toThrow(RangeError);
+			// The extremes of the `Date` range are valid.
+			expect(helpers.formatDateTime(8.64e15, { year: 'numeric' })).toBe('275760');
+			expect(helpers.formatDateTime(-8.64e15, { year: 'numeric', era: 'short' })).toBe('271822 BC');
 			expect(function () {
 				helpers.formatDateTime('2024-01-15' as any);
 			}).toThrow(new TypeError('formatDateTime: `date` must be a Date or a number, got string'));

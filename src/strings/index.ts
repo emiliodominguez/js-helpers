@@ -42,22 +42,29 @@ function getGraphemeSegmenter(): Intl.Segmenter | null {
 }
 
 /**
- * Matches any code unit that may join a neighbour into a multi-code-unit grapheme cluster: `\r` (of `\r\n`) and everything from U+0300 on
- * (combining marks, surrogates, ZWJ, variation selectors...). Below U+0300 every other code unit is a grapheme on its own.
+ * Matches any code unit that may join a neighbour into a multi-code-unit grapheme cluster: `\r` (of `\r\n`), every surrogate, every BMP
+ * code point whose grapheme-break property is Extend, ZWJ, SpacingMark, Prepend or a Hangul L/V/T jamo (combining marks, ZWJ/ZWNJ,
+ * variation selectors, Indic vowel signs...), and, to keep the pattern short, the blocks around them. Below U+0300, in Latin Extended
+ * Additional, Greek Extended and General Punctuation (U+1E00–U+206F, except ZWNJ and ZWJ) and in the CJK Unified Ideographs (U+4E00–U+9FFF),
+ * every other code unit is a grapheme on its own: no grapheme-break rule joins two of them.
  */
-const COMPLEX_TEXT = /[\u0300-\uffff\r]/;
+const COMPLEX_TEXT = /[\u0300-\u1dff\u200c-\u200d\u2070-\u4dff\ua000-\uffff\r]/;
+
+/** The {@link COMPLEX_TEXT} code units, as the body of a character class. */
+const COMPLEX = COMPLEX_TEXT.source.slice(1, -1);
 
 /**
  * Tells whether every UTF-16 code unit of a string is a grapheme cluster on its own, so it can be processed without a segmenter.
  * @param {string} string - The string to inspect
- * @returns {boolean} `true` when the string has no `\r` and no code unit from U+0300 on
+ * @returns {boolean} `true` when the string has no code unit that {@link COMPLEX_TEXT} matches
  */
 function isSimpleText(string: string): boolean {
 	return !COMPLEX_TEXT.test(string);
 }
 
 /**
- * Tells whether a code unit is a grapheme cluster on its own (see {@link COMPLEX_TEXT}).
+ * Tells whether a code unit is a grapheme cluster on its own, with a quick test that only accepts the code units below U+0300 other
+ * than `\r` (see {@link COMPLEX_TEXT}).
  * @param {number} code - The code unit (`NaN` past the end of a string, which counts as simple)
  * @returns {boolean} `true` when the code unit is below U+0300 and not `\r`
  */
@@ -66,17 +73,16 @@ function isSimpleCode(code: number): boolean {
 }
 
 /**
- * A region of text that may hold multi-code-unit grapheme clusters: runs of the code units {@link COMPLEX_TEXT} matches, the single other
- * code units between them, and the other code unit on each side (which a combining mark, `\n` after `\r`, a prepend character or an
- * emoji ZWJ sequence may join). Two consecutive code units below U+0300 other than `\r` are always separated by a grapheme boundary
- * (no grapheme-break rule joins them or looks back across them), so the text outside these regions is one grapheme per code unit
- * and every region can be segmented on its own.
+ * A region of text that may hold multi-code-unit grapheme clusters: runs of the code units {@link COMPLEX_TEXT} matches, the single other code units
+ * between them, and the other code unit on each side (which a combining mark, `\n` after `\r`, a prepend character or an emoji ZWJ
+ * sequence may join). Two consecutive other code units are always separated by a grapheme boundary (no grapheme-break rule joins them or
+ * looks back across them), so the text outside these regions is one grapheme per code unit and every region can be segmented on its own.
  */
-const COMPLEX_REGION = /[^\u0300-\uffff\r]?(?:[\u0300-\uffff\r]+[^\u0300-\uffff\r]?)+/g;
+const COMPLEX_REGION = new RegExp(`[^${COMPLEX}]?(?:[${COMPLEX}]+[^${COMPLEX}]?)+`, 'g');
 
 /**
  * Splits a string into grapheme clusters (or code points when `Intl.Segmenter` is unavailable). Only the regions that may hold
- * multi-code-unit clusters go through the (slow) segmenter; every other code unit is a grapheme on its own.
+ * multi-code-unit clusters (see {@link COMPLEX_REGION}) go through the (slow) segmenter; every other code unit is a grapheme on its own.
  * @param {string} string - The string to split
  * @param {number} [limit=Infinity] - Stop once more than `limit` graphemes have been collected (the ones returned are exact)
  * @returns {string[]} The graphemes of `string` (only the first ones, at least `limit + 1`, when it has more than `limit`)
@@ -546,9 +552,9 @@ export function toSlug(string: string): string {
 }
 
 /**
- * Values recognized as `true` by {@link toBoolean} (compared after trimming and lower-casing).
+ * Matches the values recognized as `true` by {@link toBoolean} (compared after trimming and lower-casing).
  */
-const TRUTHY_STRINGS: ReadonlySet<string> = new Set(['true', '1', 'yes', 'y', 'on']);
+const TRUTHY_STRING = /^(?:true|1|yes|y|on)$/;
 
 /**
  * Converts a string to a boolean, which is handy for environment variables and query parameters.
@@ -562,7 +568,7 @@ const TRUTHY_STRINGS: ReadonlySet<string> = new Set(['true', '1', 'yes', 'y', 'o
  * toBoolean('anything else'); // => false
  */
 export function toBoolean(string: string): boolean {
-	return TRUTHY_STRINGS.has(string.trim().toLowerCase());
+	return TRUTHY_STRING.test(string.trim().toLowerCase());
 }
 
 /**
@@ -704,9 +710,12 @@ const HTML_ESCAPES: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt
  * escapeHtml('<a href="x">Tom & Jerry\'s</a>'); // => '&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;'
  */
 export function escapeHtml(string: string): string {
-	return string.replace(/[&<>"']/g, function (char: string): string {
-		return HTML_ESCAPES[char];
-	});
+	// Testing first saves the (slower) replace call on text without special characters, the common case.
+	return /[&<>"']/.test(string)
+		? string.replace(/[&<>"']/g, function (char: string): string {
+				return HTML_ESCAPES[char];
+			})
+		: string;
 }
 
 /**
@@ -767,7 +776,15 @@ function resolvePath(source: unknown, path: string): unknown {
 }
 
 /** A `{...}` placeholder of {@link interpolate}, capturing its path. */
-const PLACEHOLDER = /\{([^{}]+)\}/g;
+const PLACEHOLDER = /\{([^{}]+)\}/;
+
+/**
+ * The template {@link interpolate} parsed last (templates are usually constants, applied to many value objects), split into the text
+ * parts at even indices (first and last included, possibly empty) and the raw paths between braces at odd ones.
+ */
+let lastTemplate: string | undefined;
+/** @see lastTemplate */
+let lastParts: string[] = [];
 
 /**
  * Replaces `{key}` and `{nested.key}` placeholders (whitespace inside the braces is ignored) with values from an object.
@@ -781,11 +798,21 @@ const PLACEHOLDER = /\{([^{}]+)\}/g;
  * interpolate('Hi {missing}', {}); // => 'Hi {missing}'
  */
 export function interpolate(template: string, values: InterpolationValues): string {
-	return template.replace(PLACEHOLDER, function (placeholder: string, path: string): string {
-		const value = resolvePath(values, path.trim());
+	if (template !== lastTemplate) {
+		lastParts = template.split(PLACEHOLDER);
+		lastTemplate = template;
+	}
 
-		return value === undefined ? placeholder : String(value);
-	});
+	const parts = lastParts;
+	let result = parts[0];
+
+	for (let index = 1; index < parts.length; index += 2) {
+		const value = resolvePath(values, parts[index].trim());
+
+		result += (value === undefined ? `{${parts[index]}}` : String(value)) + parts[index + 1];
+	}
+
+	return result;
 }
 
 /**
@@ -889,104 +916,71 @@ export function similarity(a: string, b: string): number {
  */
 function dedentParts(parts: ReadonlyArray<string>): string[] {
 	const joined = parts.join('');
+	// The offsets in `joined` where the values are inserted (between two parts).
 	const valueOffsets: number[] = [];
 	let offset = 0;
 
-	for (let index = 0; index < parts.length - 1; index++) {
-		offset += parts[index].length;
-		valueOffsets.push(offset);
-	}
+	for (let index = 1; index < parts.length; index++) valueOffsets.push((offset += parts[index - 1].length));
 
 	const valueAt = new Set(valueOffsets);
-	const lines: Array<{ start: number; end: number; next: number; indentation: string; blank: boolean }> = [];
+	const removed = new Uint8Array(joined.length);
+	// The starts of the non-blank lines, whose common indentation is removed once it is known.
+	const indented: number[] = [];
 	const separator = /\r\n|\r|\n/g;
-	let start = 0;
+	let common: string | undefined;
 	let valueIndex = 0;
+	let start = 0;
+	let previousEnd = 0;
 
 	for (;;) {
 		const match = separator.exec(joined);
 		const end = match === null ? joined.length : match.index;
-		const next = match === null ? joined.length : match.index + match[0].length;
+		const next = match === null ? end : separator.lastIndex;
+		const firstValue = valueIndex;
 		let indentationEnd = start;
-		let hasValue = false;
 
 		// The line separator (or the end of the text) stops the scan.
 		while ((joined[indentationEnd] === ' ' || joined[indentationEnd] === '\t') && !valueAt.has(indentationEnd)) indentationEnd++;
 
 		// A value belongs to this line when it is inserted before the next line starts (or anywhere after the start of the last line).
-		while (valueIndex < valueOffsets.length && (match === null || valueOffsets[valueIndex] < next)) {
-			hasValue = true;
-			valueIndex++;
-		}
+		while (valueIndex < valueOffsets.length && (match === null || valueOffsets[valueIndex] < next)) valueIndex++;
 
-		lines.push({ start, end, next, indentation: joined.slice(start, indentationEnd), blank: !hasValue && indentationEnd === end });
+		if (valueIndex === firstValue && indentationEnd === end) {
+			// A blank line is emptied; the first line (the only one starting at 0) is dropped with its line separator, and the last one
+			// with the separator before it (for a single line, that is the whole text either way).
+			removed.fill(1, start, start === 0 ? next : end);
+
+			if (match === null) removed.fill(1, previousEnd);
+		} else {
+			const indentation = joined.slice(start, indentationEnd);
+			let length = 0;
+
+			// Past the end of the indentation, `indentation[length]` is `undefined` and stops the loop.
+			while (common !== undefined && length < common.length && common[length] === indentation[length]) length++;
+
+			common = common === undefined ? indentation : common.slice(0, length);
+			indented.push(start);
+		}
 
 		if (match === null) break;
 
+		previousEnd = end;
 		start = next;
 	}
 
-	const removed = new Uint8Array(joined.length);
-	const first = 0;
-	const last = lines.length - 1;
-	const dropFirst = lines[first].blank;
-	const dropLast = last > first && lines[last].blank;
+	for (const lineStart of indented) removed.fill(1, lineStart, lineStart + (common as string).length);
 
-	/**
-	 * Marks the code units in `[from, to)` as removed.
-	 * @param {number} from - First removed index
-	 * @param {number} to - End of the removed range (exclusive)
-	 * @returns {void}
-	 */
-	function remove(from: number, to: number): void {
-		removed.fill(1, from, to);
-	}
-
-	if (dropFirst) remove(lines[first].start, lines[first].next);
-
-	if (dropLast) remove(lines[last - 1].end, lines[last].next);
-
-	let common: string | undefined;
-
-	// The dropped first/last lines are blank, so they never affect the common indentation (and are already removed).
-	for (const line of lines) {
-		if (line.blank) continue;
-
-		if (common === undefined) {
-			common = line.indentation;
-			continue;
-		}
-
-		let length = 0;
-
-		// Past the end of the indentation, `line.indentation[length]` is `undefined` and stops the loop.
-		while (length < common.length && common[length] === line.indentation[length]) length++;
-
-		common = common.slice(0, length);
-	}
-
-	const commonLength = common === undefined ? 0 : common.length;
-
-	for (const line of lines) {
-		if (line.blank) remove(line.start, line.end);
-		else remove(line.start, line.start + commonLength);
-	}
-
-	const result: string[] = [];
 	let base = 0;
 
-	for (const part of parts) {
+	return parts.map(function (part: string): string {
 		let text = '';
 
-		for (let index = 0; index < part.length; index++) {
-			if (removed[base + index] === 0) text += part[index];
-		}
+		for (let index = 0; index < part.length; index++) if (removed[base + index] === 0) text += part[index];
 
-		result.push(text);
 		base += part.length;
-	}
 
-	return result;
+		return text;
+	});
 }
 
 /**

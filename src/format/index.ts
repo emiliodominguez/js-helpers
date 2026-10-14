@@ -578,11 +578,14 @@ export function formatDateTime(date: DateInput, options: FormatDateTimeOptions =
 	const time = isDate(date) ? date.getTime() : date;
 
 	if (typeof time !== 'number') throw new TypeError(`formatDateTime: \`date\` must be a Date or a number, got ${describe(date)}`);
-	if (Number.isNaN(new Date(time).getTime())) throw new RangeError('formatDateTime: `date` must be a valid date, got Invalid Date');
+	// The range of `Date` (8.64e15 ms on each side of the epoch), checked without constructing one; `NaN` fails the comparison.
+	if (!(Math.abs(time) <= 8.64e15)) throw new RangeError('formatDateTime: `date` must be a valid date, got Invalid Date');
 
-	const { locale, timeZone = 'UTC', ...rest } = options;
+	const { locale, ...rest } = options;
 
-	return getFormatter('date', Intl.DateTimeFormat, locale, { ...rest, timeZone }, DATE_MEMO).format(time);
+	rest.timeZone ??= 'UTC';
+
+	return getFormatter('date', Intl.DateTimeFormat, locale, rest, DATE_MEMO).format(time);
 }
 
 /**

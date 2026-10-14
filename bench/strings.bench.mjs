@@ -66,6 +66,11 @@ const values = { user: { name: 'Ada', email: 'ada@example.com' }, count: 3, send
 const lodashTemplate = 'Hello ${user.name}, you have ${count} new messages from ${sender} (${user.email}).';
 const compiledLodash = lodash.template(lodashTemplate);
 const compiledEs = esTemplate(lodashTemplate);
+const otherTemplate = 'Order {id} shipped to {address.city} on {date}.';
+const otherValues = { id: 42, address: { city: 'Paris' }, date: '2024-01-15' };
+const otherLodashTemplate = 'Order ${id} shipped to ${address.city} on ${date}.';
+const otherCompiledLodash = lodash.template(otherLodashTemplate);
+const otherCompiledEs = esTemplate(otherLodashTemplate);
 
 /**
  * Maps a function over a list (the shape every case-conversion case uses).
@@ -286,6 +291,21 @@ export default [
 			},
 			'lodash (compile per call)': function () {
 				return lodash.template(lodashTemplate)(values);
+			}
+		}
+	},
+	{
+		// interpolate remembers the last template it parsed: alternating templates is its slowest pattern.
+		name: 'interpolate ~ template (2 alternating templates)',
+		fn: function () {
+			return interpolate(template, values) + interpolate(otherTemplate, otherValues);
+		},
+		competitors: {
+			'es-toolkit (precompiled)': function () {
+				return compiledEs(values) + otherCompiledEs(otherValues);
+			},
+			'lodash (precompiled)': function () {
+				return compiledLodash(values) + otherCompiledLodash(otherValues);
 			}
 		}
 	},
