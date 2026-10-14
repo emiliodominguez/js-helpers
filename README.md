@@ -12,9 +12,9 @@ Strictly-typed, zero-dependency TypeScript utilities, verified with property-bas
 
 - **Correct first.** Unicode-aware strings, DST-safe dates, compensated summation, injection-safe string replacement, a deep merge that blocks prototype pollution, and deep clone/equality that handle circular references.
 - **Typed for real.** Type predicates that narrow, path-aware getters (`'user.posts.0.title'` resolves to `string | undefined`), tuple-typed `zip`, typed `curry`/`compose`/`pipe`, and a left-to-right `Merge` type.
-- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 890+ tests at ~100% coverage, run in CI on Node 18–24 and in time zones with awkward DST rules.
+- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 890+ tests at ~100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
 - **Pure and predictable.** Nothing mutates its input unless the name says so. Bad arguments throw a descriptive `RangeError`/`TypeError` instead of returning garbage, looping forever or overflowing the stack.
-- **Ships everywhere.** Dual ESM/CJS build, `exports` map with per-module deep imports, `sideEffects: false`, and declaration maps. Resolution is verified with [are-the-types-wrong](https://github.com/arethetypeswrong/arethetypeswrong.github.io).
+- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. All ~200 functions together are about 40 kB of JavaScript before gzip, and the whole tarball is about 54 kB. JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
 
 ## Install
 
@@ -24,7 +24,7 @@ npm install @emiliodominguez/js-helpers
 yarn add @emiliodominguez/js-helpers
 ```
 
-Requires Node 18+ or any modern browser. `Intl.Segmenter` is used when available, with a code-point fallback.
+The package is ESM-only and requires Node 20.19+ (where `require()` of ES modules works too), any modern browser, or a bundler. `Intl.Segmenter` is used when available, with a code-point fallback.
 
 ## Usage
 
@@ -190,6 +190,7 @@ yarn validate        # lint + typecheck + tests + build (what CI runs)
 **Imports**
 
 - The root entry exports namespaces (`import { strings } from …`). Use deep imports to get individual functions.
+- The package is ESM-only and requires Node 20.19+. CommonJS code on those versions can still `require()` it.
 
 ## Contributing
 

@@ -9,12 +9,17 @@ Full review and rewrite: every module is strictly typed, documented with complet
 - **New modules:** `guards`, `async` and `date`. The `date` module replaces an empty stub.
 - **~120 new utilities.** See [docs/API.md](./docs/API.md).
 - **Packaging:**
-    - dual ESM/CJS build;
+    - ESM-only, minified, unbundled build (one file per module), with JSDoc kept in the declarations;
     - `exports` map with per-module deep imports;
     - namespaced root entry;
     - declaration maps.
 - **Docs:** API reference generated from the JSDoc (`yarn docs:api`) and a TypeDoc site (`yarn docs`).
-- **CI:** runs on Node 18–24, in DST-heavy time zones, and checks type resolution with are-the-types-wrong.
+- **CI:**
+    - runs on Node 20–26 and in DST-heavy time zones;
+    - smoke-tests the built package;
+    - checks type resolution with are-the-types-wrong;
+    - enforces a size budget.
+- **Toolchain:** TypeScript 6, Jest 30, ESLint 10 (flat config), esbuild for the runtime build.
 
 ### Fixed
 
