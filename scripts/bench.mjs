@@ -1,7 +1,9 @@
 // Micro-benchmark runner. Runs every `bench/*.bench.mjs` (or the ones named on the command line) against the BUILT
 // package, so run `yarn build` first. Each bench file default-exports an array of cases:
-//   { name: string, fn: () => unknown, baseline?: () => unknown }
+//   { name: string, fn: () => unknown, baseline?: () => unknown, competitors?: Record<string, () => unknown> }
 // `baseline` is an optional reference implementation (e.g. the naive approach) reported side by side.
+// `competitors` maps library names (es-toolkit, lodash-es, date-fns, ...) to equivalent calls; each is reported as a ratio.
+// Pass --json to print machine-readable results instead (one object per case).
 // Usage: yarn bench [arrays objects ...]
 import { readdirSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
@@ -55,7 +57,12 @@ function formatRate(rate) {
 	return `${rate.toFixed(1)} ops/s`;
 }
 
-const only = process.argv.slice(2);
+const args = process.argv.slice(2);
+const json = args.includes('--json');
+const only = args.filter(function (arg) {
+	return !arg.startsWith('--');
+});
+const results = [];
 const files = readdirSync(new URL('../bench/', import.meta.url))
 	.filter(function (file) {
 		return file.endsWith('.bench.mjs') && (only.length === 0 || only.includes(file.replace('.bench.mjs', '')));
@@ -64,19 +71,24 @@ const files = readdirSync(new URL('../bench/', import.meta.url))
 
 for (const file of files) {
 	const { default: cases } = await import(pathToFileURL(new URL(`../bench/${file}`, import.meta.url).pathname).href);
-	console.log(`\n${file.replace('.bench.mjs', '')}`);
+	if (!json) console.log(`\n${file.replace('.bench.mjs', '')}`);
 
 	for (const benchCase of cases) {
 		const rate = measure(benchCase.fn);
+		const result = { module: file.replace('.bench.mjs', ''), name: benchCase.name, rate, others: {} };
 		let line = `  ${benchCase.name.padEnd(48)} ${formatRate(rate).padStart(16)}`;
+		const others = Object.assign(benchCase.baseline ? { baseline: benchCase.baseline } : {}, benchCase.competitors ?? {});
 
-		if (benchCase.baseline) {
-			const baselineRate = measure(benchCase.baseline);
-			line += `   baseline ${formatRate(baselineRate).padStart(16)}   ×${(rate / baselineRate).toFixed(2)}`;
+		for (const [label, fn] of Object.entries(others)) {
+			const otherRate = measure(fn);
+			result.others[label] = otherRate;
+			line += `   ${label} ×${(rate / otherRate).toFixed(2)}`;
 		}
 
-		console.log(line);
+		results.push(result);
+		if (!json) console.log(line);
 	}
 }
 
+if (json) console.log(JSON.stringify(results, null, '\t'));
 if (sink === Symbol.for('never')) console.log(sink);
