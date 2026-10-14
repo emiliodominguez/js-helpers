@@ -14,5 +14,5 @@ export default {
 	concurrency: 2,
 	timeoutMS: 5000,
 	tempDirName: '.stryker-tmp',
-	ignorePatterns: ['dist', 'coverage', 'docs', 'reports']
+	ignorePatterns: ['dist', 'coverage', 'docs', 'reports', 'bench', '.stryker-tmp*']
 };

@@ -15,7 +15,8 @@ function loadWithoutSegmenter(): typeof helpers {
 		jest.isolateModules(function () {
 			isolated = jest.requireActual<typeof helpers>('./index');
 		});
-		isolated!.reverse('warm-up');
+		// The segmenter is resolved lazily (and only for text that is not plain ASCII/Latin), so trigger it while Intl.Segmenter is still missing.
+		isolated!.reverse('warm-up \u{1F44D}');
 	} finally {
 		intl.Segmenter = original;
 	}
@@ -57,6 +58,12 @@ const spacedLowerWords = fc.array(lowerLetterWord, { minLength: 1, maxLength: 6 
 	return words.join(' ');
 });
 
+/**
+ * Text mixing characters below U+0300 (each a grapheme on its own) with sequences that form multi-code-unit graphemes: CR LF,
+ * combining marks, ZWJ and emoji with modifiers.
+ */
+const mixedText = fc.string({ unit: fc.constantFrom('a', 'Z', '0', ' ', '.', 'é', 'ÿ', '\n', '\r', '\r\n', '\u0301', 'e\u0301', '\u200d', '👍🏽', '中') });
+
 const caseFunctions = [helpers.toSnakeCase, helpers.toKebabCase, helpers.toConstantCase, helpers.toCamelCase, helpers.toPascalCase];
 
 describe('String helpers (properties)', function () {
@@ -87,6 +94,14 @@ describe('String helpers (properties)', function () {
 			);
 		});
 
+		it('matches Intl.Segmenter on text mixing plain characters with CR LF, combining marks and emoji', function () {
+			fc.assert(
+				fc.property(mixedText, function (s) {
+					expect(helpers.reverse(s)).toBe(graphemes(s).reverse().join(''));
+				})
+			);
+		});
+
 		it('is an involution on arbitrary code points in the fallback mode', function () {
 			const fallback = loadWithoutSegmenter();
 
@@ -110,6 +125,16 @@ describe('String helpers (properties)', function () {
 	});
 
 	describe('capitalize / uncapitalize', function () {
+		it('changes exactly the first grapheme of mixed plain and complex text', function () {
+			fc.assert(
+				fc.property(mixedText, function (s) {
+					const first = graphemes(s)[0] ?? '';
+					expect(helpers.capitalize(s)).toBe(first.toUpperCase() + s.slice(first.length));
+					expect(helpers.uncapitalize(s)).toBe(first.toLowerCase() + s.slice(first.length));
+				})
+			);
+		});
+
 		it('round-trips strings starting with a lowercase ASCII letter', function () {
 			fc.assert(
 				fc.property(fc.stringMatching(/^[a-z]/), fc.string({ unit: 'grapheme' }), function (head, rest) {
@@ -314,6 +339,15 @@ describe('String helpers (properties)', function () {
 	});
 
 	describe('truncate', function () {
+		it('keeps exactly the first length graphemes of mixed plain and complex text', function () {
+			fc.assert(
+				fc.property(mixedText, fc.nat(12), function (s, length) {
+					const all = graphemes(s);
+					expect(helpers.truncate(s, length, '…')).toBe(all.length > length ? all.slice(0, length).join('') + '…' : s);
+				})
+			);
+		});
+
 		it('returns a prefix plus the suffix, bounded by length graphemes', function () {
 			fc.assert(
 				fc.property(fc.string({ unit: 'grapheme' }), fc.nat(20), fc.string({ maxLength: 3 }), function (s, length, suffix) {

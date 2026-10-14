@@ -14,6 +14,12 @@ describe('Format helpers', function () {
 			expect(helpers.formatNumber(1234.5, { locale: undefined })).toBe('1,234.5');
 		});
 
+		it('should request en-US explicitly instead of relying on the host default', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1, { minimumIntegerDigits: 11 });
+			expect(spy).toHaveBeenCalledWith(['en-US'], { minimumIntegerDigits: 11 });
+		});
+
 		it('should accept a single locale and a priority list', function () {
 			expect(helpers.formatNumber(1234.5, { locale: 'de-DE' })).toBe('1.234,5');
 			expect(helpers.formatNumber(1234.5, { locale: ['de-DE', 'en-US'] })).toBe('1.234,5');
@@ -108,6 +114,43 @@ describe('Format helpers', function () {
 			expect(helpers.formatDateTime(0, { hour: 'numeric', hourCycle: 'h23', timeZone: zone('Europe/Madrid') })).toBe('01');
 		});
 
+		it('should not let option objects or functions that stringify alike share a formatter', function () {
+			// Intl reads numeric options through `valueOf`, which `String()` (and therefore a cache key) does not see.
+			function digits(count: number): any {
+				return {
+					valueOf(): number {
+						return count;
+					}
+				};
+			}
+			function digitsFunction(count: number): any {
+				function value(): void {}
+				value.valueOf = function (): number {
+					return count;
+				};
+				return value;
+			}
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digits(0) })).toBe('1');
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digits(3) })).toBe('1.25');
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digitsFunction(0) })).toBe('1');
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digitsFunction(3) })).toBe('1.25');
+		});
+
+		it('should bypass the cache for Intl.Locale objects in the locale list', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			const locales = [new Intl.Locale('de-DE')] as any;
+			expect(helpers.formatNumber(1.5, { locale: locales })).toBe('1,5');
+			expect(helpers.formatNumber(1.5, { locale: locales })).toBe('1,5');
+			expect(spy).toHaveBeenCalledTimes(2);
+		});
+
+		it('should cache formatters for null option values', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1, { minimumIntegerDigits: 12, maximumFractionDigits: null as any });
+			helpers.formatNumber(2, { minimumIntegerDigits: 12, maximumFractionDigits: null as any });
+			expect(spy).toHaveBeenCalledTimes(1);
+		});
+
 		it('should share a formatter between an absent option and an undefined one', function () {
 			const spy = jest.spyOn(Intl, 'NumberFormat');
 			helpers.formatNumber(1, { minimumIntegerDigits: 21 });
@@ -122,6 +165,32 @@ describe('Format helpers', function () {
 			expect(function () {
 				helpers.formatNumber(1, { minimumFractionDigits: 5, maximumFractionDigits: 2 });
 			}).toThrow(RangeError);
+		});
+	});
+
+	describe('error messages', function () {
+		it('should name the throwing function', function () {
+			expect(function () {
+				helpers.formatCurrency(NaN, 'USD');
+			}).toThrow(new RangeError('formatCurrency: `value` must be finite, got NaN'));
+			expect(function () {
+				helpers.formatPercent(Infinity);
+			}).toThrow(new RangeError('formatPercent: `value` must be finite, got Infinity'));
+			expect(function () {
+				helpers.formatCompact('1' as any);
+			}).toThrow(new TypeError('formatCompact: `value` must be a number, got string'));
+			expect(function () {
+				helpers.formatUnit(-Infinity, 'meter');
+			}).toThrow(new RangeError('formatUnit: `value` must be finite, got -Infinity'));
+			expect(function () {
+				helpers.formatRelativeTime(NaN, 'day');
+			}).toThrow(new RangeError('formatRelativeTime: `value` must be finite, got NaN'));
+			expect(function () {
+				helpers.formatOrdinal(undefined as any);
+			}).toThrow(new TypeError('formatOrdinal: `n` must be a number, got undefined'));
+			expect(function () {
+				helpers.pluralRule(NaN);
+			}).toThrow(new RangeError('pluralRule: `count` must be finite, got NaN'));
 		});
 	});
 

@@ -49,11 +49,16 @@ const ARRAY_FORMATS: ReadonlySet<string> = new Set<ArrayFormat>(['repeat', 'comm
  * @returns {string} The encoded text
  */
 function encodeComponent(value: string): string {
-	const wellFormed = value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (match: string): string {
-		return match.length === 2 ? match : '�';
-	});
-
-	return encodeURIComponent(wellFormed);
+	try {
+		return encodeURIComponent(value);
+	} catch {
+		// Only a lone surrogate makes `encodeURIComponent` throw (URIError): replace them and encode again.
+		return encodeURIComponent(
+			value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (match: string): string {
+				return match.length === 2 ? match : '�';
+			})
+		);
+	}
 }
 
 /**
@@ -127,9 +132,10 @@ export function buildQueryString(params: QueryParams, options: BuildQueryStringO
 
 	for (const key of keys) {
 		const value = params[key];
-		const encodedKey = encodeComponent(key) + (arrayFormat === 'brackets' && isValueList(value) ? '[]' : '');
 
 		if (value === undefined) continue;
+
+		const encodedKey = encodeComponent(key) + (arrayFormat === 'brackets' && isValueList(value) ? '[]' : '');
 
 		if (value === null) {
 			if (!skipNull) pairs.push(encodedKey);
@@ -141,13 +147,9 @@ export function buildQueryString(params: QueryParams, options: BuildQueryStringO
 			continue;
 		}
 
-		const items = value
-			.filter(function (item: unknown): boolean {
-				return item != null;
-			})
-			.map(function (item: unknown): string {
-				return encodeComponent(serializeValue(key, item));
-			});
+		const items: string[] = [];
+
+		for (const item of value) if (item != null) items.push(encodeComponent(serializeValue(key, item)));
 
 		if (items.length === 0) continue;
 
@@ -266,18 +268,18 @@ export function withQuery(url: string, params: QueryParams, options: BuildQueryS
  * joinUrl('//cdn.example.com', 'lib.js'); // => '//cdn.example.com/lib.js'
  */
 export function joinUrl(...parts: string[]): string {
-	const nonEmpty = parts.filter(function (part: unknown): boolean {
+	// The non-empty parts, in a fresh array whose items are then replaced by their path text.
+	const paths = parts.filter(function (part: unknown): boolean {
 		if (typeof part !== 'string') throw new TypeError(`joinUrl: \`parts\` must only contain strings, got ${describe(part)}`);
 
 		return part !== '';
 	});
 
-	if (nonEmpty.length === 0) return '';
+	if (paths.length === 0) return '';
 
-	const lastIndex = nonEmpty.length - 1;
-	const last = nonEmpty[lastIndex];
+	const lastIndex = paths.length - 1;
+	const last = paths[lastIndex];
 	const suffixIndex = last.search(/[?#]/);
-	const paths = nonEmpty.slice();
 	let suffix = '';
 
 	if (suffixIndex !== -1) {
@@ -293,7 +295,7 @@ export function joinUrl(...parts: string[]): string {
 	else if (paths[0].startsWith('/')) prefix = '/';
 	else prefix = '';
 
-	if (scheme !== null) paths[0] = paths[0].slice(prefix.length);
+	paths[0] = paths[0].slice(prefix.length);
 
 	const trailingSlash = paths[lastIndex].endsWith('/');
 	const segments = paths.flatMap(function (path: string): string[] {

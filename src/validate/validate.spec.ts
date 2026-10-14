@@ -244,10 +244,12 @@ describe('isUrl', function () {
 
 		it('rejects http(s) URLs whose parsed host is empty', function () {
 			(globalThis as any).URL = function (this: any) {
-				this.protocol = 'https:';
 				this.hostname = '';
 			};
 			expect(helpers.isUrl('https://x')).toBe(false);
+			expect(helpers.isUrl('http://x')).toBe(false);
+			// Other schemes may have an empty host.
+			expect(helpers.isUrl('ws://x', { protocols: ['ws'] })).toBe(true);
 		});
 	});
 });
@@ -633,7 +635,9 @@ describe('isIsoDateTimeString', function () {
 		'2024-02-29t00:00:00z',
 		'2024-01-01T23:59:59.123456789+23:59',
 		'2024-01-01T00:00:00-00:00',
-		'1970-01-01T00:00:00.000Z'
+		'1970-01-01T00:00:00.000Z',
+		'2024-01-01T20:19:09+14:45',
+		'2024-01-01T10:00:00-20:00'
 	])('accepts %s', function (dateTime) {
 		expect(helpers.isIsoDateTimeString(dateTime)).toBe(true);
 	});
@@ -658,7 +662,10 @@ describe('isIsoDateTimeString', function () {
 		'2024-01-01T00:00:00,5Z',
 		'2024-01-01T1:00:00Z',
 		'2024-01-01T00:00:00Z ',
-		'+002024-01-01T00:00:00Z'
+		' 2024-01-01T00:00:00Z',
+		'+002024-01-01T00:00:00Z',
+		'2024-01-01T30:00:00Z',
+		'2024-01-01T00:00:00-30:00'
 	])('rejects %s', function (dateTime) {
 		expect(helpers.isIsoDateTimeString(dateTime)).toBe(false);
 	});
@@ -809,5 +816,63 @@ describe('isNumericString', function () {
 		'١٢٣'
 	])('rejects %s', function (number) {
 		expect(helpers.isNumericString(number)).toBe(false);
+	});
+});
+
+describe('edge cases', function () {
+	it('isUrl: names the problem when protocols is not an array', function () {
+		expect(function () {
+			helpers.isUrl('https://example.com', { protocols: 'https' as any });
+		}).toThrow(new TypeError('isUrl: `protocols` must be an array of strings, got string'));
+	});
+
+	it('isUrl: only ignores a trailing colon in protocols', function () {
+		expect(helpers.isUrl('ab://example.com', { protocols: ['a:b'] })).toBe(false);
+		expect(helpers.isUrl('ab://example.com', { protocols: ['AB:'] })).toBe(true);
+	});
+
+	it('isUrl: requires exactly two slashes after every special scheme', function () {
+		expect(helpers.isUrl('https:example.com')).toBe(false);
+		expect(helpers.isUrl('wss:example.com', { protocols: ['wss'] })).toBe(false);
+		expect(helpers.isUrl('ftp:example.com', { protocols: ['ftp'] })).toBe(false);
+		expect(helpers.isUrl('http://\\example.com')).toBe(false);
+		expect(helpers.isUrl('http:///example.com')).toBe(false);
+	});
+
+	it('isUrl: requireTld rejects empty labels and TLDs that are not only letters', function () {
+		const options = { requireTld: true };
+		expect(helpers.isUrl('http://.example.com', options)).toBe(false);
+		expect(helpers.isUrl('http://example.1com', options)).toBe(false);
+		expect(helpers.isUrl('http://example.com1', options)).toBe(false);
+		expect(helpers.isUrl('http://example.com..', options)).toBe(false);
+	});
+
+	it('isUuid and isBase64: name the invalid option', function () {
+		expect(function () {
+			helpers.isUuid('x', 9 as any);
+		}).toThrow(new RangeError("isUuid: `version` must be 1-8, 'nil' or 'max', got 9"));
+		expect(function () {
+			helpers.isBase64('x', { padding: 'none' as any });
+		}).toThrow(new RangeError("isBase64: `padding` must be 'optional', 'required' or 'forbidden', got none"));
+	});
+
+	it('isIPv6: rejects a second :: even after eight full groups', function () {
+		expect(helpers.isIPv6('1:2:3:4:5:6:7:8::a::b')).toBe(false);
+		expect(helpers.isIPv6('a')).toBe(false);
+		expect(helpers.isIPv6('')).toBe(false);
+	});
+
+	it('compareSemver: numeric pre-release identifiers sort before alphanumeric ones whatever their length', function () {
+		expect(helpers.compareSemver('1.0.0-123', '1.0.0-a')).toBe(-1);
+		expect(helpers.compareSemver('1.0.0-a', '1.0.0-123')).toBe(1);
+	});
+
+	it('isHexColor: anchors the opaque pattern', function () {
+		expect(helpers.isHexColor('x#ffffff', { alpha: false })).toBe(false);
+	});
+
+	it('isNumericString: accepts bare fractions with several digits', function () {
+		expect(helpers.isNumericString('.25')).toBe(true);
+		expect(helpers.isNumericString('-.125e2')).toBe(true);
 	});
 });

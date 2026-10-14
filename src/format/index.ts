@@ -24,6 +24,7 @@
 import { createLRUCache } from '../cache/index.js';
 import type { DateInput } from '../date/index.js';
 import { isDate, isIterable, isString } from '../guards/index.js';
+import { describe } from '../utils/assert.js';
 
 /**
  * A BCP 47 language tag (`'de-DE'`) or a priority list of tags (`['fr-CA', 'fr']`).
@@ -159,6 +160,9 @@ const GENERIC_ORDINAL_SUFFIXES: OrdinalSuffixes = { other: '.' };
 /** Module-wide LRU cache of `Intl` formatter instances. */
 const formatterCache = createLRUCache<string, unknown>({ max: FORMATTER_CACHE_SIZE });
 
+/** The resolved language of every plural-rules formatter {@link formatOrdinal} has used (see `resolvedLanguage`). */
+const resolvedLanguages = new WeakMap<Intl.PluralRules, string>();
+
 /**
  * Normalizes a {@link LocaleInput} into the list passed to `Intl`, ending with `'en-US'` so negotiation never falls back to the host's
  * default locale.
@@ -168,7 +172,7 @@ const formatterCache = createLRUCache<string, unknown>({ max: FORMATTER_CACHE_SI
  */
 function resolveLocales(locale: LocaleInput | undefined): string[] {
 	if (locale === undefined) return [DEFAULT_LOCALE];
-	if (typeof locale !== 'string' && !Array.isArray(locale)) throw new TypeError(`format: \`locale\` must be a string or an array of strings, got ${typeName(locale)}`);
+	if (typeof locale !== 'string' && !Array.isArray(locale)) throw new TypeError(`format: \`locale\` must be a string or an array of strings, got ${describe(locale)}`);
 
 	const requested: string[] = typeof locale === 'string' ? [locale] : [...locale];
 
@@ -176,9 +180,20 @@ function resolveLocales(locale: LocaleInput | undefined): string[] {
 }
 
 /**
- * Builds the formatter cache key for `(kind, locales, options)`. Every option value is tagged with its type so that values `JSON`
- * would conflate (`NaN`, `±Infinity` and `null`; a number and an object whose `toJSON` returns it) get distinct keys. `undefined`
- * options are skipped, as `Intl` treats them as absent.
+ * Encodes a string as a self-delimiting cache-key field: its length, `:`, then the string itself.
+ * @param {string} text - The text to encode
+ * @returns {string} The field
+ */
+function field(text: string): string {
+	return `${text.length}:${text}`;
+}
+
+/**
+ * Builds the formatter cache key for `(kind, locales, options)`: the kind (letters only), a length-prefixed field per locale, then per
+ * option its length-prefixed name, its `typeof` (letters only) and its length-prefixed `String()` form. Fields start with a digit and
+ * `typeof` words do not, so the key can be decoded unambiguously (the field before the first word is the first option name): distinct
+ * inputs never share a key. Tagging values with their type keeps apart values that stringify alike (`null` and `'null'`). `undefined`
+ * options are skipped, as `Intl` treats them as absent. This runs on every call, so it only concatenates strings.
  * @param {string} kind - A key prefix identifying the formatter class
  * @param {readonly unknown[]} locales - The resolved locale list
  * @param {object} options - The options passed to the constructor
@@ -186,17 +201,20 @@ function resolveLocales(locale: LocaleInput | undefined): string[] {
  * a function: `Intl` reads those through `toString`/`valueOf`, which a key cannot capture
  */
 function cacheKey(kind: string, locales: readonly unknown[], options: object): string | undefined {
-	if (!locales.every(isString)) return undefined;
+	let key = kind;
 
-	const entries: string[] = [];
+	for (const locale of locales) {
+		if (!isString(locale)) return undefined;
+		key += field(locale);
+	}
 
 	for (const [name, value] of Object.entries(options)) {
 		if (value === undefined) continue;
 		if ((typeof value === 'object' && value !== null) || typeof value === 'function') return undefined;
-		entries.push(name, typeof value, String(value));
+		key += field(name) + typeof value + field(String(value));
 	}
 
-	return JSON.stringify([kind, locales, entries]);
+	return key;
 }
 
 /**
@@ -213,36 +231,48 @@ function cacheKey(kind: string, locales: readonly unknown[], options: object): s
 function getFormatter<T, O>(kind: string, Formatter: new (locales: string[], options: O) => T, locale: LocaleInput | undefined, options: O): T {
 	const locales = resolveLocales(locale);
 	const key = cacheKey(kind, locales, options as object);
-	const cached = key === undefined ? undefined : formatterCache.get(key);
 
-	if (cached !== undefined) return cached as T;
+	if (key === undefined) return new Formatter(locales, options);
+
+	const cached = formatterCache.get(key) as T | undefined;
+
+	if (cached !== undefined) return cached;
 
 	const formatter = new Formatter(locales, options);
-	if (key !== undefined) formatterCache.set(key, formatter);
+	formatterCache.set(key, formatter);
 
 	return formatter;
 }
 
 /**
- * Describes the type of a value for error messages (`null` is reported as `'null'`).
- * @param {unknown} value - Any value
- * @returns {string} The type description
+ * Returns the language subtag of the locale a plural-rules formatter resolved to. `resolvedOptions()` allocates and is several times
+ * slower than `select()`, so the answer is remembered per (usually cached) formatter.
+ * @param {Intl.PluralRules} rules - The formatter
+ * @returns {string} The language subtag (`'en'` for `'en-US'`)
  */
-function typeName(value: unknown): string {
-	return value === null ? 'null' : typeof value;
+function resolvedLanguage(rules: Intl.PluralRules): string {
+	let language = resolvedLanguages.get(rules);
+
+	if (language === undefined) {
+		language = rules.resolvedOptions().locale.split('-')[0];
+		resolvedLanguages.set(rules, language);
+	}
+
+	return language;
 }
 
 /**
  * Throws unless `value` is a finite number.
  * @param {string} name - The calling function's name, for the error message
  * @param {unknown} value - The value to check
+ * @param {string} [label='value'] - The parameter name, for the error message
  * @returns {void}
  * @throws {TypeError} when `value` is not a number
  * @throws {RangeError} when `value` is `NaN` or `±Infinity`
  */
-function assertFiniteNumber(name: string, value: unknown): asserts value is number {
-	if (typeof value !== 'number') throw new TypeError(`${name}: \`value\` must be a number, got ${typeName(value)}`);
-	if (!Number.isFinite(value)) throw new RangeError(`${name}: \`value\` must be finite, got ${value}`);
+function assertFiniteNumber(name: string, value: unknown, label: string = 'value'): asserts value is number {
+	if (typeof value !== 'number') throw new TypeError(`${name}: \`${label}\` must be a number, got ${describe(value)}`);
+	if (!Number.isFinite(value)) throw new RangeError(`${name}: \`${label}\` must be finite, got ${value}`);
 }
 
 /**
@@ -266,7 +296,7 @@ function assertNumeric(name: string, value: unknown): asserts value is number | 
  * @throws {TypeError} when `value` is not a string
  */
 function assertString(name: string, label: string, value: unknown): asserts value is string {
-	if (typeof value !== 'string') throw new TypeError(`${name}: \`${label}\` must be a string, got ${typeName(value)}`);
+	if (typeof value !== 'string') throw new TypeError(`${name}: \`${label}\` must be a string, got ${describe(value)}`);
 }
 
 /**
@@ -416,12 +446,12 @@ export function formatUnit(value: number | bigint, unit: string, options: Format
  * formatList([]); // => ''
  */
 export function formatList(items: Iterable<string>, options: FormatListOptions = {}): string {
-	if (typeof items === 'string' || !isIterable(items)) throw new TypeError(`formatList: \`items\` must be an iterable of strings, got ${typeName(items)}`);
+	if (typeof items === 'string' || !isIterable(items)) throw new TypeError(`formatList: \`items\` must be an iterable of strings, got ${describe(items)}`);
 
 	const list = Array.from(items);
 
 	for (const item of list) {
-		if (typeof item !== 'string') throw new TypeError(`formatList: every item must be a string, got ${typeName(item)}`);
+		if (typeof item !== 'string') throw new TypeError(`formatList: every item must be a string, got ${describe(item)}`);
 	}
 
 	const { locale, type = 'conjunction', style = 'long' } = options;
@@ -453,7 +483,7 @@ export function formatList(items: Iterable<string>, options: FormatListOptions =
 export function formatDateTime(date: DateInput, options: FormatDateTimeOptions = {}): string {
 	const time = isDate(date) ? date.getTime() : date;
 
-	if (typeof time !== 'number') throw new TypeError(`formatDateTime: \`date\` must be a Date or a number, got ${typeName(date)}`);
+	if (typeof time !== 'number') throw new TypeError(`formatDateTime: \`date\` must be a Date or a number, got ${describe(date)}`);
 	if (Number.isNaN(new Date(time).getTime())) throw new RangeError('formatDateTime: `date` must be a valid date, got Invalid Date');
 
 	const { locale, timeZone = 'UTC', ...rest } = options;
@@ -509,14 +539,13 @@ export function formatRelativeTime(value: number, unit: Intl.RelativeTimeFormatU
  * formatOrdinal(2, { locale: 'fr-FR', suffixes: { one: 'er', other: 'e' } }); // => '2e'
  */
 export function formatOrdinal(n: number, options: FormatOrdinalOptions = {}): string {
-	assertFiniteNumber('formatOrdinal', n);
+	assertFiniteNumber('formatOrdinal', n, 'n');
 	if (!Number.isInteger(n)) throw new RangeError(`formatOrdinal: \`n\` must be an integer, got ${n}`);
 
 	const { locale, suffixes } = options;
 	const value = n === 0 ? 0 : n;
 	const rules = getFormatter('plural', Intl.PluralRules, locale, { type: 'ordinal' });
-	const language = rules.resolvedOptions().locale.split('-')[0];
-	const table = suffixes ?? (language === 'en' ? ENGLISH_ORDINAL_SUFFIXES : GENERIC_ORDINAL_SUFFIXES);
+	const table = suffixes ?? (resolvedLanguage(rules) === 'en' ? ENGLISH_ORDINAL_SUFFIXES : GENERIC_ORDINAL_SUFFIXES);
 
 	return `${formatNumber(value, { locale })}${table[rules.select(value)] ?? table.other}`;
 }
@@ -538,7 +567,7 @@ export function formatOrdinal(n: number, options: FormatOrdinalOptions = {}): st
  * pluralRule(2, { type: 'ordinal' }); // => 'two'
  */
 export function pluralRule(count: number, options: PluralRuleOptions = {}): Intl.LDMLPluralRule {
-	assertFiniteNumber('pluralRule', count);
+	assertFiniteNumber('pluralRule', count, 'count');
 	const { locale, ...rest } = options;
 
 	return getFormatter('plural', Intl.PluralRules, locale, rest).select(count);

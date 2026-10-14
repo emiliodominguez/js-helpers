@@ -55,6 +55,27 @@ describe('Format helpers (property-based)', function () {
 			);
 		});
 
+		it('should never hand out a formatter built for another (locale list, options) pair', function () {
+			const tag = fc.constantFrom('en', 'en-US', 'de', 'de-DE', 'fr', 'fr-CH', 'ar-EG', 'hi-IN', 'ja');
+			const options = fc.record(
+				{
+					useGrouping: fc.constantFrom(true, false, 'always', 'min2'),
+					signDisplay: fc.constantFrom('auto', 'always', 'never', 'exceptZero'),
+					maximumFractionDigits: fc.integer({ min: 0, max: 3 }),
+					notation: fc.constantFrom('standard', 'scientific', 'compact')
+				},
+				{ requiredKeys: [] }
+			);
+			fc.assert(
+				fc.property(fc.array(fc.tuple(fc.array(tag, { minLength: 1, maxLength: 3 }), options), { minLength: 1, maxLength: 30 }), function (calls) {
+					for (const [locales, rest] of calls) {
+						const reference = new Intl.NumberFormat([...locales, 'en-US'], rest as Intl.NumberFormatOptions).format(-1234.5678);
+						expect(helpers.formatNumber(-1234.5678, { ...(rest as Intl.NumberFormatOptions), locale: locales })).toBe(reference);
+					}
+				})
+			);
+		});
+
 		it('should match uncached Intl output for currencies, units, compact numbers and dates', function () {
 			fc.assert(
 				fc.property(

@@ -13,7 +13,7 @@ export interface CountSubStringOptions {
  * Options accepted by {@link isPalindrome}.
  */
 export interface IsPalindromeOptions {
-	/** Compare case-insensitively. Defaults to `false`. */
+	/** Compare case-insensitively (the string is lower-cased with `String.prototype.toLowerCase`). Defaults to `false`. */
 	readonly ignoreCase?: boolean;
 	/** Ignore every character that is not a Unicode letter, combining mark or number (spaces, punctuation, symbols...). Defaults to `false`. */
 	readonly ignoreNonAlphanumeric?: boolean;
@@ -25,7 +25,7 @@ export interface IsPalindromeOptions {
 export type InterpolationValues = Readonly<Record<string, unknown>>;
 
 /**
- * Lazily created grapheme segmenter. `undefined` = not initialized yet, `null` = `Intl.Segmenter` is not available.
+ * Lazily created grapheme segmenter (grapheme is the default granularity). `undefined` = not initialized yet, `null` = `Intl.Segmenter` is not available.
  */
 let graphemeSegmenter: Intl.Segmenter | null | undefined;
 
@@ -35,10 +35,25 @@ let graphemeSegmenter: Intl.Segmenter | null | undefined;
  */
 function getGraphemeSegmenter(): Intl.Segmenter | null {
 	if (graphemeSegmenter === undefined) {
-		graphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+		graphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function' ? new Intl.Segmenter() : null;
 	}
 
 	return graphemeSegmenter;
+}
+
+/**
+ * Matches any code unit that may join a neighbour into a multi-code-unit grapheme cluster: `\r` (of `\r\n`) and everything from U+0300 on
+ * (combining marks, surrogates, ZWJ, variation selectors...). Below U+0300 every other code unit is a grapheme on its own.
+ */
+const COMPLEX_TEXT = /[\u0300-\uffff\r]/;
+
+/**
+ * Tells whether every UTF-16 code unit of a string is a grapheme cluster on its own, so it can be processed without a segmenter.
+ * @param {string} string - The string to inspect
+ * @returns {boolean} `true` when the string has no `\r` and no code unit from U+0300 on
+ */
+function isSimpleText(string: string): boolean {
+	return !COMPLEX_TEXT.test(string);
 }
 
 /**
@@ -49,12 +64,8 @@ function getGraphemeSegmenter(): Intl.Segmenter | null {
 function* iterateGraphemes(string: string): Generator<string, void, undefined> {
 	const segmenter = getGraphemeSegmenter();
 
-	if (segmenter === null) {
-		yield* string;
-		return;
-	}
-
-	for (const data of segmenter.segment(string)) yield data.segment;
+	if (segmenter === null) yield* string;
+	else for (const data of segmenter.segment(string)) yield data.segment;
 }
 
 /**
@@ -63,7 +74,7 @@ function* iterateGraphemes(string: string): Generator<string, void, undefined> {
  * @returns {string[]} The graphemes of `string`
  */
 function splitGraphemes(string: string): string[] {
-	return Array.from(iterateGraphemes(string));
+	return isSimpleText(string) ? string.split('') : Array.from(iterateGraphemes(string));
 }
 
 /**
@@ -72,31 +83,24 @@ function splitGraphemes(string: string): string[] {
  * @returns {string} The first grapheme, or `''` for an empty string
  */
 function firstGrapheme(string: string): string {
-	const result = iterateGraphemes(string).next();
+	if (isSimpleText(string.slice(0, 2))) return string.slice(0, 1);
 
-	return result.done ? '' : result.value;
+	return iterateGraphemes(string).next().value as string;
 }
 
 /**
- * Latin digraphs, whose Unicode title-case form is a dedicated letter (`ǆ` → `ǅ`) rather than their upper-case form (`Ǆ`).
+ * Lower-case Latin digraphs, whose Unicode title-case form is a dedicated letter (`ǆ` → `ǅ`) rather than their upper-case form (`Ǆ`).
+ * Only lower-case keys are needed: every caller lower-cases the word before title-casing its first letter.
  */
 const TITLE_CASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
-	['Ǆ', 'ǅ'],
-	['ǅ', 'ǅ'],
 	['ǆ', 'ǅ'],
-	['Ǉ', 'ǈ'],
-	['ǈ', 'ǈ'],
 	['ǉ', 'ǈ'],
-	['Ǌ', 'ǋ'],
-	['ǋ', 'ǋ'],
 	['ǌ', 'ǋ'],
-	['Ǳ', 'ǲ'],
-	['ǲ', 'ǲ'],
 	['ǳ', 'ǲ']
 ]);
 
 /**
- * Title-cases a single letter (one code point) for use at the start of a word. Digraphs use their dedicated title-case letter (`'ǆ'` → `'ǅ'`).
+ * Title-cases a single lower-case letter (one code point) for use at the start of a word. Digraphs use their dedicated title-case letter (`'ǆ'` → `'ǅ'`).
  * When the upper-case mapping expands to several code points (`'ß'` → `'SS'`, `'ﬁ'` → `'FI'`) only the first one stays upper-case
  * (`'Ss'`, `'Fi'`), approximating Unicode title case.
  * @param {string} letter - The letter to convert
@@ -119,8 +123,23 @@ function titleCaseLetter(letter: string): string {
  * @returns {string} The converted word (`'hELLO'` → `'Hello'`)
  */
 function upperFirstLowerRest(word: string): string {
-	return word.toLowerCase().replace(/^./su, titleCaseLetter);
+	const lower = word.toLowerCase();
+	const first = String.fromCodePoint(lower.codePointAt(0) as number);
+
+	return titleCaseLetter(first) + lower.slice(first.length);
 }
+
+/** A run of Unicode letters, combining marks and numbers. */
+const WORD_CHUNK = /[\p{L}\p{M}\p{N}]+/gu;
+
+/** Any lower-case letter. */
+const HAS_LOWER_CASE = /\p{Ll}/u;
+
+/**
+ * The (zero-width) word boundaries inside a chunk that has lower-case letters: between a lower-case letter or digit (and its marks) and an
+ * upper/title-case letter, and before the last upper-case letter of a run that is followed by a lower-case letter.
+ */
+const WORD_BOUNDARY = /(?<=[\p{Ll}\p{N}]\p{M}*)(?=[\p{Lu}\p{Lt}])|(?<=[\p{Lu}\p{Lt}]\p{M}*)(?=[\p{Lu}\p{Lt}]\p{M}*\p{Ll})/u;
 
 /**
  * Splits an identifier or free text into words for the case-conversion helpers.
@@ -136,19 +155,12 @@ function upperFirstLowerRest(word: string): string {
  * @returns {string[]} The words, in their original casing
  */
 function splitWords(string: string): string[] {
-	const chunks = string.replace(/['’]/g, '').match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 	const words: string[] = [];
 
-	for (const chunk of chunks) {
+	for (const chunk of string.replace(/['’]/g, '').match(WORD_CHUNK) ?? []) {
 		// A chunk without lower-case letters is CONSTANT_CASE or an acronym (`HTTP2`, `A0B1`): keep it whole.
-		if (!/\p{Ll}/u.test(chunk)) {
-			words.push(chunk);
-			continue;
-		}
-
-		const spaced = chunk.replace(/([\p{Ll}\p{N}]\p{M}*)(?=[\p{Lu}\p{Lt}])/gu, '$1 ').replace(/([\p{Lu}\p{Lt}]\p{M}*)(?=[\p{Lu}\p{Lt}]\p{M}*\p{Ll})/gu, '$1 ');
-
-		words.push(...spaced.split(' '));
+		if (HAS_LOWER_CASE.test(chunk)) words.push(...chunk.split(WORD_BOUNDARY));
+		else words.push(chunk);
 	}
 
 	return words;
@@ -195,18 +207,6 @@ export function uncapitalize(string: string): string {
 }
 
 /**
- * Converts an index to an integer in `[0, length]`, like `String.prototype.substring` does: `NaN` → `0`, fractions truncated, out-of-range values clamped.
- * @param {number} index - The index to normalize
- * @param {number} length - The length of the string
- * @returns {number} The normalized index
- */
-function clampIndex(index: number, length: number): number {
-	if (Number.isNaN(index)) return 0;
-
-	return Math.min(Math.max(Math.trunc(index), 0), length);
-}
-
-/**
  * Extracts a substring from a string based on start and end indices (UTF-16 code units, like `String.prototype.substring`).
  * Indices are normalized like the native method (`NaN` → `0`, fractions truncated, clamped to `[0, string.length]`), but they are never swapped:
  * when the normalized `start` is not before the normalized `end`, an empty string is returned.
@@ -219,10 +219,9 @@ function clampIndex(index: number, length: number): number {
  * substring('Hello, World!', 12, 7); // => ''
  */
 export function substring(string: string, start: number, end: number): string {
-	const from = clampIndex(start, string.length);
-	const to = clampIndex(end, string.length);
-
-	return from < to ? string.slice(from, to) : '';
+	// `slice` already maps `NaN` to `0`, truncates fractions and clamps to the length; only negative indices need clamping (to `0`, as
+	// `substring` does, instead of counting from the end). Unlike `substring`, `slice` never swaps its arguments: `from >= to` gives `''`.
+	return string.slice(Math.max(start, 0), Math.max(end, 0));
 }
 
 /**
@@ -276,6 +275,9 @@ export function truncate(string: string, length: number, suffix: string = '...')
 
 	// A string never has more graphemes than UTF-16 code units.
 	if (string.length <= length) return string;
+
+	// When the first `length + 1` code units are graphemes on their own, the cut falls right after the first `length` of them.
+	if (isSimpleText(string.slice(0, length + 1))) return string.slice(0, length) + suffix;
 
 	let count = 0;
 	let end = 0;
@@ -415,6 +417,9 @@ export function toPascalCase(string: string): string {
 	return splitWords(string).map(upperFirstLowerRest).join('');
 }
 
+/** The combining diacritical mark blocks (U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+20D0–20FF, U+FE20–FE2F). */
+const DIACRITICS = /[\u0300-\u036f]|[\u1ab0-\u1aff]|[\u1dc0-\u1dff]|[\u20d0-\u20ff]|[\ufe20-\ufe2f]/g;
+
 /**
  * Removes diacritical marks (accents, umlauts, cedillas...) from a string: it is decomposed (NFD), the combining diacritical marks are stripped
  * and the result is recomposed (NFC). Only the combining diacritical mark blocks are removed, so scripts that use other combining marks are left intact.
@@ -424,10 +429,7 @@ export function toPascalCase(string: string): string {
  * removeDiacritics('Crème Brûlée à Málaga'); // => 'Creme Brulee a Malaga'
  */
 export function removeDiacritics(string: string): string {
-	return string
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]|[\u1ab0-\u1aff]|[\u1dc0-\u1dff]|[\u20d0-\u20ff]|[\ufe20-\ufe2f]/g, '')
-		.normalize('NFC');
+	return string.normalize('NFD').replace(DIACRITICS, '').normalize('NFC');
 }
 
 /**
@@ -446,13 +448,17 @@ const SLUG_TRANSLITERATIONS: Readonly<Record<string, string>> = { ß: 'ss', æ: 
  * toSlug('  --Hello__World!!  '); // => 'hello-world'
  */
 export function toSlug(string: string): string {
-	return removeDiacritics(string.normalize('NFKD'))
+	// NFKD output is already fully decomposed, and recomposing (NFC) after stripping the diacritics never changes the slug: no character
+	// with an ASCII letter or digit (or a transliterated letter) as its base composes with a mark outside the stripped blocks.
+	return string
+		.normalize('NFKD')
+		.replace(DIACRITICS, '')
 		.toLowerCase()
 		.replace(/[ßæœøđðłþı]/g, function (letter: string): string {
 			return SLUG_TRANSLITERATIONS[letter];
 		})
 		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '');
+		.replace(/^-|-$/g, '');
 }
 
 /**
@@ -581,7 +587,7 @@ export function getWords(string: string): string[] {
  * isPalindrome('A man, a plan, a canal: Panama', { ignoreCase: true, ignoreNonAlphanumeric: true }); // => true
  */
 export function isPalindrome(string: string, options: IsPalindromeOptions = {}): boolean {
-	let candidate = options.ignoreNonAlphanumeric ? string.replace(/[^\p{L}\p{M}\p{N}]+/gu, '') : string;
+	let candidate = options.ignoreNonAlphanumeric ? string.replace(/[^\p{L}\p{M}\p{N}]/gu, '') : string;
 
 	if (options.ignoreCase) candidate = candidate.toLowerCase();
 
@@ -634,6 +640,8 @@ const HTML_UNESCAPES: Readonly<Record<string, string>> = { '&amp;': '&', '&lt;':
  * unescapeHtml('&amp;lt;'); // => '&lt;'
  */
 export function unescapeHtml(string: string): string {
+	if (!string.includes('&')) return string;
+
 	return string.replace(/&(?:amp|lt|gt|quot|apos|#39|#[xX]27);/g, function (entity: string): string {
 		return HTML_UNESCAPES[entity];
 	});
@@ -693,31 +701,18 @@ export function interpolate(template: string, values: InterpolationValues): stri
  * @returns {number} The grapheme count
  */
 function graphemeLength(string: string): number {
-	let count = 0;
-
-	for (const _grapheme of iterateGraphemes(string)) count++;
-
-	return count;
+	return isSimpleText(string) ? string.length : splitGraphemes(string).length;
 }
 
 /**
- * Computes the Levenshtein edit distance between two strings: the minimum number of single-character insertions, deletions and substitutions
- * turning `a` into `b`. Characters are Unicode code points, so an astral character (emoji, surrogate pair) counts as one.
- * The common prefix and suffix are skipped and the dynamic-programming table keeps a single row sized after the shorter string,
- * so the extra memory is O(min(n, m)) and the time O(n × m).
- * @param {string} a - The first string
- * @param {string} b - The second string
- * @returns {number} The edit distance (a non-negative integer, `0` iff the strings are equal)
- * @example
- * levenshtein('kitten', 'sitting'); // => 3
- * levenshtein('', 'abc'); // => 3
- * levenshtein('😀a', '😃a'); // => 1
+ * Computes the Levenshtein distance between two sequences of code points (see {@link levenshtein}).
+ * @param {ReadonlyArray<string>} a - The code points of the first string
+ * @param {ReadonlyArray<string>} b - The code points of the second string
+ * @returns {number} The edit distance
  */
-export function levenshtein(a: string, b: string): number {
-	if (a === b) return 0;
-
-	let shorter = Array.from(a);
-	let longer = Array.from(b);
+function editDistance(a: ReadonlyArray<string>, b: ReadonlyArray<string>): number {
+	let shorter = a;
+	let longer = b;
 
 	if (shorter.length > longer.length) [shorter, longer] = [longer, shorter];
 
@@ -734,9 +729,6 @@ export function levenshtein(a: string, b: string): number {
 	}
 
 	const rowLength = shorterEnd - start;
-
-	if (rowLength === 0) return longerEnd - start;
-
 	const row = new Uint32Array(rowLength + 1);
 
 	for (let i = 0; i <= rowLength; i++) row[i] = i;
@@ -760,6 +752,23 @@ export function levenshtein(a: string, b: string): number {
 }
 
 /**
+ * Computes the Levenshtein edit distance between two strings: the minimum number of single-character insertions, deletions and substitutions
+ * turning `a` into `b`. Characters are Unicode code points, so an astral character (emoji, surrogate pair) counts as one.
+ * The common prefix and suffix are skipped and the dynamic-programming table keeps a single row sized after the shorter string,
+ * so the extra memory is O(min(n, m)) and the time O(n × m).
+ * @param {string} a - The first string
+ * @param {string} b - The second string
+ * @returns {number} The edit distance (a non-negative integer, `0` iff the strings are equal)
+ * @example
+ * levenshtein('kitten', 'sitting'); // => 3
+ * levenshtein('', 'abc'); // => 3
+ * levenshtein('😀a', '😃a'); // => 1
+ */
+export function levenshtein(a: string, b: string): number {
+	return editDistance(Array.from(a), Array.from(b));
+}
+
+/**
  * Computes a normalized similarity score from the {@link levenshtein} distance: `1 - distance / maxLength`, where lengths are counted in code points.
  * Two empty strings are considered identical (`1`).
  * @param {string} a - The first string
@@ -772,9 +781,11 @@ export function levenshtein(a: string, b: string): number {
  * similarity('abc', 'xyz'); // => 0
  */
 export function similarity(a: string, b: string): number {
-	const maxLength = Math.max(Array.from(a).length, Array.from(b).length);
+	const left = Array.from(a);
+	const right = Array.from(b);
+	const maxLength = Math.max(left.length, right.length);
 
-	return maxLength === 0 ? 1 : 1 - levenshtein(a, b) / maxLength;
+	return maxLength === 0 ? 1 : 1 - editDistance(left, right) / maxLength;
 }
 
 /**
@@ -806,7 +817,8 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
 		let indentationEnd = start;
 		let hasValue = false;
 
-		while (indentationEnd < end && (joined[indentationEnd] === ' ' || joined[indentationEnd] === '\t') && !valueAt.has(indentationEnd)) indentationEnd++;
+		// The line separator (or the end of the text) stops the scan.
+		while ((joined[indentationEnd] === ' ' || joined[indentationEnd] === '\t') && !valueAt.has(indentationEnd)) indentationEnd++;
 
 		// A value belongs to this line when it is inserted before the next line starts (or anywhere after the start of the last line).
 		while (valueIndex < valueOffsets.length && (match === null || valueOffsets[valueIndex] < next)) {
@@ -841,10 +853,10 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
 
 	if (dropLast) remove(lines[last - 1].end, lines[last].next);
 
-	const kept = lines.slice(dropFirst ? 1 : 0, dropLast ? last : lines.length);
 	let common: string | undefined;
 
-	for (const line of kept) {
+	// The dropped first/last lines are blank, so they never affect the common indentation (and are already removed).
+	for (const line of lines) {
 		if (line.blank) continue;
 
 		if (common === undefined) {
@@ -854,14 +866,15 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
 
 		let length = 0;
 
-		while (length < common.length && length < line.indentation.length && common[length] === line.indentation[length]) length++;
+		// Past the end of the indentation, `line.indentation[length]` is `undefined` and stops the loop.
+		while (length < common.length && common[length] === line.indentation[length]) length++;
 
 		common = common.slice(0, length);
 	}
 
 	const commonLength = common === undefined ? 0 : common.length;
 
-	for (const line of kept) {
+	for (const line of lines) {
 		if (line.blank) remove(line.start, line.end);
 		else remove(line.start, line.start + commonLength);
 	}
@@ -993,9 +1006,7 @@ export function wordWrap(string: string, width: number, options: WordWrapOptions
 		let current = '';
 		let currentLength = 0;
 
-		for (const word of line.split(/\s+/)) {
-			if (word === '') continue;
-
+		for (const word of line.match(/\S+/g) ?? []) {
 			const wordLength = graphemeLength(word);
 
 			if (wordLength > width && breakLongWords) {

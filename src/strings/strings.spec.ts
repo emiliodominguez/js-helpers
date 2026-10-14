@@ -13,8 +13,8 @@ function loadWithoutSegmenter(): typeof helpers {
 		jest.isolateModules(function () {
 			isolated = jest.requireActual<typeof helpers>('./index');
 		});
-		// The segmenter is resolved lazily, so trigger it while Intl.Segmenter is still missing.
-		isolated!.reverse('warm-up');
+		// The segmenter is resolved lazily (and only for text that is not plain ASCII/Latin), so trigger it while Intl.Segmenter is still missing.
+		isolated!.reverse('warm-up \u{1F44D}');
 	} finally {
 		intl.Segmenter = original;
 	}
@@ -390,6 +390,7 @@ describe('String helpers', function () {
 			expect(helpers.toSlug('Café Society')).toEqual('cafe-society');
 			expect(helpers.toSlug('Straße Æon Øre Łódź')).toEqual('strasse-aeon-ore-lodz');
 			expect(helpers.toSlug('ﬁle №5')).toEqual('file-no5');
+			expect(helpers.toSlug('œuvre đak ðe þing ıl')).toEqual('oeuvre-dak-de-thing-il');
 		});
 
 		it('should collapse separators and trim hyphens', function () {
@@ -533,6 +534,7 @@ describe('String helpers', function () {
 
 		it('should keep inner apostrophes but not leading/trailing ones', function () {
 			expect(helpers.getWords("Don't stop, it’s 'quoted'")).toEqual(["Don't", 'stop', 'it’s', 'quoted']);
+			expect(helpers.getWords("o'clock rock'n'roll")).toEqual(["o'clock", "rock'n'roll"]);
 		});
 
 		it('should split on underscores (unlike \\w)', function () {
@@ -568,6 +570,12 @@ describe('String helpers', function () {
 			expect(helpers.isPalindrome('A man, a plan, a canal: Panama', { ignoreCase: true, ignoreNonAlphanumeric: true })).toEqual(true);
 			expect(helpers.isPalindrome('A man, a plan, a canal: Panama', { ignoreNonAlphanumeric: true })).toEqual(false);
 			expect(helpers.isPalindrome('hello, world', { ignoreCase: true, ignoreNonAlphanumeric: true })).toEqual(false);
+		});
+
+		it('should lower-case both sides with ignoreCase', function () {
+			// Upper-casing would turn 'ß' into 'SS' and make 'ßSS' a palindrome.
+			expect(helpers.isPalindrome('ßSS', { ignoreCase: true })).toEqual(false);
+			expect(helpers.isPalindrome('ẞß', { ignoreCase: true })).toEqual(true);
 		});
 
 		it('should be grapheme-aware', function () {
@@ -660,6 +668,10 @@ describe('String helpers', function () {
 			expect(helpers.interpolate('{user.name.first}', { user: { name: 'Ada' } })).toEqual('{user.name.first}');
 			expect(helpers.interpolate('{a.b}', { a: null })).toEqual('{a.b}');
 			expect(helpers.interpolate('{u}', { u: undefined })).toEqual('{u}');
+		});
+
+		it('should not read properties of primitive values', function () {
+			expect(helpers.interpolate('{name.length} {name.0}', { name: 'Ada' })).toEqual('{name.length} {name.0}');
 		});
 
 		it('should not read inherited properties', function () {
@@ -773,6 +785,9 @@ describe('String helpers', function () {
 			expect(helpers.dedent`${'x'}
 				y`).toBe('x\n\t\t\t\ty');
 			expect(helpers.dedent`  ${1}  ${2}`).toBe('1  2');
+			// An interpolation ending the text keeps the last line; one starting a line belongs to that line, not the previous one.
+			expect(helpers.dedent`\n    a\n    ${'b'}`).toBe('a\nb');
+			expect(helpers.dedent`\n  a\n${'  '}\n  b\n`).toBe('  a\n  \n  b');
 		});
 
 		it('should resolve escape sequences in the literal text before dedenting', function () {
@@ -1004,6 +1019,56 @@ describe('String helpers', function () {
 			expect(helpers.stripSuffix('abc', 'x')).toBe('abc');
 			expect(helpers.stripPrefix('abc', '')).toBe('abc');
 			expect(helpers.stripSuffix('abc', '')).toBe('abc');
+		});
+	});
+
+	describe('error messages', function () {
+		it('should name the function and the parameter', function () {
+			expect(function () {
+				helpers.repeat('a', -1);
+			}).toThrow(new RangeError('repeat: `times` must be an integer >= 0, got -1'));
+			expect(function () {
+				helpers.wordWrap('a', 0);
+			}).toThrow(new RangeError('wordWrap: `width` must be an integer >= 1 or Infinity, got 0'));
+			expect(function () {
+				helpers.mask('secret', { visibleStart: 1.5 });
+			}).toThrow(new RangeError('mask: `visibleStart` must be an integer >= 0, got 1.5'));
+			expect(function () {
+				helpers.mask('secret', { visibleEnd: -1 });
+			}).toThrow(new RangeError('mask: `visibleEnd` must be an integer >= 0, got -1'));
+			expect(function () {
+				helpers.mask('secret', { char: '**' });
+			}).toThrow(new RangeError('mask: `char` must be exactly one grapheme, got "**"'));
+			expect(function () {
+				helpers.randomString(NaN);
+			}).toThrow(new RangeError('randomString: `length` must be an integer >= 0, got NaN'));
+			expect(function () {
+				helpers.randomString(1, '');
+			}).toThrow(new RangeError('randomString: `alphabet` must not be empty'));
+			expect(function () {
+				helpers.randomString(1, 'ab', function () {
+					return 1;
+				});
+			}).toThrow(new RangeError('randomString: `random()` must return a number in [0, 1), got 1'));
+			expect(function () {
+				helpers.dedent(42 as any);
+			}).toThrow(new TypeError('dedent: `input` must be a string or a template strings array, got number'));
+		});
+	});
+
+	describe('word detection', function () {
+		it('should not split before a capitalized word that follows an uncased letter', function () {
+			// Only a lower-case letter, a digit or an upper-case run starts a new word before an upper-case letter.
+			expect(helpers.toSnakeCase('日本Go')).toBe('日本go');
+			expect(helpers.toSnakeCase('Go日本Go')).toBe('go日本go');
+			expect(helpers.toKebabCase('xʰAb')).toBe('xʰab');
+		});
+	});
+
+	describe('title-case digraphs', function () {
+		it('should use the dedicated title-case letter of every Latin digraph', function () {
+			expect(helpers.toTitleCase('ǆ Ǆ ǅ ǉ Ǉ ǈ ǌ Ǌ ǋ ǳ Ǳ ǲ')).toBe('ǅ ǅ ǅ ǈ ǈ ǈ ǋ ǋ ǋ ǲ ǲ ǲ');
+			expect(helpers.toPascalCase('ǌegoš ǳak')).toBe('ǋegošǲak');
 		});
 	});
 });

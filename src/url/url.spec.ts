@@ -47,6 +47,8 @@ describe('URL helpers', function () {
 
 		it('should replace lone surrogates with U+FFFD instead of throwing', function () {
 			expect(helpers.buildQueryString({ a: '\uD800', b: 'x\uDC00y', '\uD83D': '😀' })).toBe('a=%EF%BF%BD&b=x%EF%BF%BDy&%EF%BF%BD=%F0%9F%98%80');
+			// Valid pairs next to a lone surrogate are kept.
+			expect(helpers.buildQueryString({ c: '😀\uDC00😀' })).toBe('c=%F0%9F%98%80%EF%BF%BD%F0%9F%98%80');
 		});
 
 		it('should throw for invalid dates, unsupported values and unknown array formats', function () {
@@ -152,6 +154,18 @@ describe('URL helpers', function () {
 
 		it('should apply the options to the new parameters', function () {
 			expect(helpers.withQuery('/a?z=1', { c: [1, 2], b: 0 }, { arrayFormat: 'brackets', sort: true })).toBe('/a?z=1&b=0&c[]=1&c[]=2');
+		});
+	});
+
+	describe('joinUrl / withQuery edge cases', function () {
+		it('withQuery should replace bare keys (without =) too', function () {
+			expect(helpers.withQuery('/p?flag&x=1', { flag: 'on' })).toBe('/p?x=1&flag=on');
+		});
+
+		it('joinUrl should only treat a leading scheme (letters, digits, +, -, .) as a scheme', function () {
+			expect(helpers.joinUrl('s3://bucket/', '/key')).toBe('s3://bucket/key');
+			expect(helpers.joinUrl('files/a:b', 'c')).toBe('files/a:b/c');
+			expect(helpers.joinUrl('/a:b//', 'c')).toBe('/a:b/c');
 		});
 	});
 

@@ -54,9 +54,8 @@ export interface IsBase64Options {
 	readonly padding?: Base64Padding;
 }
 
-/** The parts of a parsed URL that {@link isUrl} reads. */
+/** The part of a parsed URL that {@link isUrl} reads. */
 interface UrlRecord {
-	readonly protocol: string;
 	readonly hostname: string;
 }
 
@@ -68,6 +67,9 @@ const EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-
 
 /** Any control character or white space, which the URL parser silently strips or percent-encodes. */
 const URL_FORBIDDEN_CHARACTER = /[\p{Cc}\s]/u;
+
+/** The schemes {@link isUrl} accepts by default. */
+const DEFAULT_URL_PROTOCOLS: ReadonlyArray<string> = ['http', 'https'];
 
 /** Schemes the URL parser treats as "special": it accepts them without `//` (`http:example.com`) and with extra slashes. */
 const SPECIAL_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'ws', 'wss', 'ftp', 'file']);
@@ -110,8 +112,8 @@ const SEMVER_PATTERN = new RegExp(
 /** A string of ASCII digits. */
 const DIGITS_PATTERN = /^[0-9]+$/;
 
-/** RFC 3339 `date-time` (seconds required); captures hour, minute, second, offset hour and offset minute. */
-const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/;
+/** RFC 3339 `date-time` (seconds required) with hours `00`–`23` and minutes/seconds `00`–`59` (offset included); captures the date. */
+const DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
 /** Card digits, optionally separated by single spaces or dashes. */
 const CARD_PATTERN = /^[0-9](?:[ -]?[0-9])*$/;
@@ -169,9 +171,8 @@ function getUrlConstructor(): UrlConstructor {
  * @returns {boolean} `true` when there is at least one label before an alphabetic or punycode TLD
  */
 function hasTld(hostname: string): boolean {
-	const host = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
-	const dot = host.lastIndexOf('.');
-	return dot > 0 && !host.startsWith('.') && !host.includes('..') && TLD_PATTERN.test(host.slice(dot + 1));
+	const labels = (hostname.endsWith('.') ? hostname.slice(0, -1) : hostname).split('.');
+	return labels.length > 1 && !labels.includes('') && TLD_PATTERN.test(labels[labels.length - 1]);
 }
 
 /**
@@ -196,11 +197,25 @@ function hasTld(hostname: string): boolean {
  * isUrl(' https://example.com'); // => false
  */
 export function isUrl(value: unknown, options: IsUrlOptions = {}): value is string {
-	const { protocols = ['http', 'https'], requireTld = false } = options;
+	const { protocols = DEFAULT_URL_PROTOCOLS, requireTld = false } = options;
 	if (!Array.isArray(protocols)) throw new TypeError(`isUrl: \`protocols\` must be an array of strings, got ${typeof protocols}`);
 	if (typeof value !== 'string' || URL_FORBIDDEN_CHARACTER.test(value)) return false;
 
 	const UrlParser = getUrlConstructor();
+	// A successful parse reads the scheme up to the first `:` and lower-cases it, so the scheme checks can run before the (much more
+	// expensive) parse. Without any `:` the parse fails, whatever these checks conclude.
+	const schemeEnd = value.indexOf(':');
+	const scheme = value.slice(0, schemeEnd).toLowerCase();
+	const allowed = protocols.some(function (protocol: unknown): boolean {
+		return typeof protocol === 'string' && protocol.toLowerCase().replace(/:$/, '') === scheme;
+	});
+	if (!allowed) return false;
+
+	if (SPECIAL_SCHEMES.has(scheme)) {
+		const rest = value.slice(schemeEnd + 1);
+		if (!rest.startsWith('//') || (scheme !== 'file' && (rest[2] === '/' || rest[2] === '\\'))) return false;
+	}
+
 	let url: UrlRecord;
 	try {
 		url = new UrlParser(value);
@@ -208,16 +223,7 @@ export function isUrl(value: unknown, options: IsUrlOptions = {}): value is stri
 		return false;
 	}
 
-	const scheme = url.protocol.slice(0, -1);
-	const allowed = protocols.some(function (protocol: unknown): boolean {
-		return typeof protocol === 'string' && protocol.toLowerCase().replace(/:$/, '') === scheme;
-	});
-	if (!allowed) return false;
-
-	if (SPECIAL_SCHEMES.has(scheme)) {
-		const rest = value.slice(url.protocol.length);
-		if (!rest.startsWith('//') || (scheme !== 'file' && (rest[2] === '/' || rest[2] === '\\'))) return false;
-	}
+	// A conforming parser never yields an empty http(s) host, but not every `globalThis.URL` implementation conforms.
 	if ((scheme === 'http' || scheme === 'https') && url.hostname === '') return false;
 
 	return !requireTld || hasTld(url.hostname);
@@ -291,7 +297,7 @@ export function isIPv4(value: unknown): value is string {
  * isIPv6('fe80::1%eth0'); // => false
  */
 export function isIPv6(value: unknown): value is string {
-	if (typeof value !== 'string' || value.length < 2 || value.length > IPV6_MAX_LENGTH) return false;
+	if (typeof value !== 'string' || value.length > IPV6_MAX_LENGTH) return false;
 
 	const halves = value.split('::');
 	if (halves.length > 2) return false;
@@ -417,7 +423,16 @@ export function parseSemver(value: unknown): SemVer | undefined {
  * @returns {number} `-1`, `0` or `1`
  */
 function compareDigits(a: string, b: string): -1 | 0 | 1 {
-	if (a.length !== b.length) return a.length < b.length ? -1 : 1;
+	return (Math.sign(a.length - b.length) || compareText(a, b)) as -1 | 0 | 1;
+}
+
+/**
+ * Compares two strings by UTF-16 code units (ASCII order for semver identifiers).
+ * @param {string} a - The first string
+ * @param {string} b - The second string
+ * @returns {number} `-1`, `0` or `1`
+ */
+function compareText(a: string, b: string): -1 | 0 | 1 {
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
@@ -432,7 +447,7 @@ function compareIdentifiers(a: string, b: string): -1 | 0 | 1 {
 	const bNumeric = DIGITS_PATTERN.test(b);
 	if (aNumeric && bNumeric) return compareDigits(a, b);
 	if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
-	return a < b ? -1 : a > b ? 1 : 0;
+	return compareText(a, b);
 }
 
 /**
@@ -485,7 +500,7 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
 		if (order !== 0) return order;
 	}
 
-	return leftIds.length === rightIds.length ? 0 : leftIds.length < rightIds.length ? -1 : 1;
+	return Math.sign(leftIds.length - rightIds.length) as -1 | 0 | 1;
 }
 
 /**
@@ -523,10 +538,7 @@ export function isIsoDateString(value: unknown): value is string {
  */
 export function isIsoDateTimeString(value: unknown): value is string {
 	const match = typeof value === 'string' ? DATE_TIME_PATTERN.exec(value) : null;
-	if (match === null) return false;
-
-	const [, hour, minute, second, offsetHour = '00', offsetMinute = '00'] = match;
-	return hour < '24' && minute < '60' && second < '60' && offsetHour < '24' && offsetMinute < '60' && isIsoDateString(match.input.slice(0, 10));
+	return match !== null && isIsoDateString(match[1]);
 }
 
 /**
