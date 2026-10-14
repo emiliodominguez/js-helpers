@@ -1,0 +1,38 @@
+name: Release
+
+# Publishes to npm when a version tag (e.g. v2.0.0) is pushed.
+# Requires an `NPM_TOKEN` repository secret (an npm automation token with publish rights to @emiliodominguez).
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: yarn
+          registry-url: https://registry.npmjs.org
+
+      - name: Check the tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version ($expected)." >&2
+            exit 1
+          fi
+
+      - run: yarn install --frozen-lockfile
+
+      # `prepublishOnly` runs the full validation (lint, typecheck, tests, build, dist smoke test, size budget).
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
