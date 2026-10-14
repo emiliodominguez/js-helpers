@@ -276,7 +276,7 @@ class SearchBox {
 
 ## Size
 
-**About 32 kB gzipped for all modules combined.** Deep imports and tree-shaking reduce that to the helpers your application actually uses. The package has no runtime dependencies, and `yarn check:size` enforces its size budget.
+**About 37 kB gzipped for all modules combined.** Deep imports and tree-shaking reduce that to the helpers your application actually uses. The package has no runtime dependencies, and `yarn check:size` enforces its size budget.
 
 <details>
 <summary>See the size of each module</summary>
@@ -285,30 +285,32 @@ Sizes below are for the minified ESM build.
 
 | Module       | Minified | Gzipped |
 | ------------ | -------: | ------: |
-| `arrays`     |   7.2 kB |  2.7 kB |
-| `async`      |   4.9 kB |  2.0 kB |
-| `cache`      |   2.0 kB |  0.9 kB |
-| `color`      |   3.4 kB |  1.6 kB |
-| `date`       |  10.2 kB |  3.6 kB |
-| `decorators` |   4.6 kB |  1.5 kB |
-| `emitter`    |   1.9 kB |  0.9 kB |
-| `format`     |   3.7 kB |  1.4 kB |
-| `functions`  |   5.3 kB |  2.2 kB |
-| `guards`     |   4.5 kB |  1.5 kB |
+| `arrays`     |   8.9 kB |  3.4 kB |
+| `async`      |   6.4 kB |  2.5 kB |
+| `cache`      |   2.3 kB |  1.1 kB |
+| `color`      |   5.3 kB |  2.4 kB |
+| `date`       |  10.5 kB |  3.7 kB |
+| `decorators` |   4.5 kB |  1.5 kB |
+| `easing`     |   4.3 kB |  2.0 kB |
+| `emitter`    |   2.0 kB |  1.0 kB |
+| `format`     |   3.9 kB |  1.5 kB |
+| `functions`  |   5.5 kB |  2.2 kB |
+| `guards`     |   4.3 kB |  1.5 kB |
 | `iterables`  |   5.3 kB |  1.7 kB |
-| `math`       |   7.8 kB |  3.0 kB |
-| `objects`    |  11.1 kB |  3.8 kB |
-| `random`     |   4.7 kB |  2.1 kB |
+| `math`       |   7.9 kB |  3.1 kB |
+| `objects`    |  10.8 kB |  3.7 kB |
+| `random`     |   4.8 kB |  2.2 kB |
+| `search`     |   2.5 kB |  1.3 kB |
 | `store`      |   1.4 kB |  0.7 kB |
-| `strings`    |   8.4 kB |  3.5 kB |
-| `url`        |   3.0 kB |  1.4 kB |
-| `validate`   |   5.6 kB |  2.3 kB |
+| `strings`    |   8.2 kB |  3.4 kB |
+| `url`        |   2.9 kB |  1.4 kB |
+| `validate`   |   5.5 kB |  2.3 kB |
 
 </details>
 
 ## Testing philosophy
 
-Example-based tests cover known edge cases. Property tests check algebraic laws and invariants over generated inputs. The JSDoc examples are executed too, with their documented results asserted by `yarn test:docs`.
+Example-based tests cover known edge cases. Property tests check algebraic laws and invariants over generated inputs. The JSDoc examples are executed too, with their documented results asserted by `yarn test:docs`. [Stryker](https://stryker-mutator.io) mutation testing checks that the tests catch injected bugs, not just that the code runs: every module scores 94–100%, and each remaining surviving mutant has been reviewed as equivalent (it cannot change observable behaviour).
 
 The local validation suite runs tests in UTC, New York, Lord Howe and Kolkata. CI is configured for Node.js 20, 22, 24 and 26, with additional time-zone jobs on Node.js 22.
 
@@ -333,6 +335,8 @@ yarn test:coverage   # with coverage thresholds
 yarn test:tz         # the suite under UTC, New York, Lord Howe and Kolkata
 yarn test:docs       # execute every JSDoc @example
 yarn validate        # everything: lint, format, types, tests in 4 time zones, doctests, build, dist smoke test, size, exports
+yarn test:mutation   # Stryker mutation testing (add --mutate "src/<module>/index.ts" for one module)
+yarn build && yarn bench   # micro-benchmarks against the built package
 ```
 
 </details>

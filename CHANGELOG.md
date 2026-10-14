@@ -108,14 +108,28 @@ Full review and rewrite: every module is strictly typed, documented with complet
     - Callbacks and `random` generators are validated everywhere, even for empty input.
     - The shared assertion helpers are deduplicated, which saves about 430 B gzipped.
 
+- **Hardening and performance pass:**
+    - Mutation testing (Stryker) raised every module to a 94–100% mutation score.
+    - Benchmarks (`yarn bench`) guided these speed-ups, with behaviour unchanged:
+        - `round` about 130×; `reverse` and `truncate` about 100× on plain text; seeded `float()` about 30×;
+        - the LRU cache stays fast on frequently read keys (about 25×), and `isDate`/`isMap`/… are about 500× faster on non-matching objects;
+        - multi-argument `memoize` about 6×, `getRelativeTime` about 12×, `formatDate` about 4×;
+        - object writers (`merge`, `clone`, `deepClone`, …) 2–4×;
+        - case converters 2–5×, `buildQueryString` 2–5×, `sum` and `median` about 3×.
+    - Fixes from this pass:
+        - `median`/`quantile` returned `0` or `-0` depending on input order;
+        - `retry` now validates its `random` generator;
+        - `formatOrdinal` and `pluralRule` errors named the wrong parameter.
+
 ### Changed (breaking)
 
 See [Migrating from 1.x](./README.md#migrating-from-1x).
 
 - The package is renamed to `@emiliodominguez/js-helpers`, because `js-helpers` is taken on npm.
 - **Behaviour:**
-    - non-number arguments to numeric parameters now throw `TypeError` instead of `RangeError`, and a few value errors moved from `TypeError` to `RangeError` (e.g. `sortBy` with an unknown `order`, `debounce` with both edges disabled);
-        - `modulo` is now a floored modulo;
-        - `countSubString` is case-sensitive;
-        - `hasProperty` only checks own properties;
-        - `round` rounds halves away from zero.
+    - the `isDate`/`isRegExp`/`isMap`/`isSet`/`isWeakMap`/`isWeakSet` guards reject a genuine instance whose prototype was swapped to an unrelated object from the same realm (cross-realm instances still pass);
+        - non-number arguments to numeric parameters now throw `TypeError` instead of `RangeError`, and a few value errors moved from `TypeError` to `RangeError` (e.g. `sortBy` with an unknown `order`, `debounce` with both edges disabled);
+            - `modulo` is now a floored modulo;
+            - `countSubString` is case-sensitive;
+            - `hasProperty` only checks own properties;
+            - `round` rounds halves away from zero.
