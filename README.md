@@ -255,23 +255,23 @@ Sizes below are for the minified ESM build.
 
 | Module       | Minified | Gzipped |
 | ------------ | -------: | ------: |
-| `arrays`     |   7.1 kB |  2.6 kB |
-| `async`      |   5.7 kB |  2.2 kB |
-| `cache`      |   2.2 kB |  1.0 kB |
-| `color`      |   3.5 kB |  1.6 kB |
-| `date`       |  10.1 kB |  3.5 kB |
-| `decorators` |   4.7 kB |  1.5 kB |
-| `emitter`    |   2.1 kB |  1.0 kB |
-| `format`     |   3.5 kB |  1.3 kB |
-| `functions`  |   5.4 kB |  2.1 kB |
-| `guards`     |   4.3 kB |  1.5 kB |
-| `iterables`  |   5.5 kB |  1.8 kB |
-| `math`       |   8.3 kB |  2.9 kB |
-| `objects`    |  10.8 kB |  3.7 kB |
-| `random`     |   5.1 kB |  2.2 kB |
-| `store`      |   1.5 kB |  0.7 kB |
-| `strings`    |   9.0 kB |  3.6 kB |
-| `url`        |   2.8 kB |  1.3 kB |
+| `arrays`     |   7.2 kB |  2.7 kB |
+| `async`      |   4.9 kB |  2.0 kB |
+| `cache`      |   2.0 kB |  0.9 kB |
+| `color`      |   3.4 kB |  1.6 kB |
+| `date`       |  10.2 kB |  3.6 kB |
+| `decorators` |   4.6 kB |  1.5 kB |
+| `emitter`    |   1.9 kB |  0.9 kB |
+| `format`     |   3.7 kB |  1.4 kB |
+| `functions`  |   5.3 kB |  2.2 kB |
+| `guards`     |   4.5 kB |  1.5 kB |
+| `iterables`  |   5.3 kB |  1.7 kB |
+| `math`       |   7.8 kB |  3.0 kB |
+| `objects`    |  11.1 kB |  3.8 kB |
+| `random`     |   4.7 kB |  2.1 kB |
+| `store`      |   1.4 kB |  0.7 kB |
+| `strings`    |   8.4 kB |  3.5 kB |
+| `url`        |   3.0 kB |  1.4 kB |
 | `validate`   |   5.6 kB |  2.3 kB |
 
 </details>
