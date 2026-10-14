@@ -93,6 +93,20 @@ interface Entry<K, V> {
 }
 
 /**
+ * Key of each cache's (non-enumerable) function returning its size, called by the shared `size` getter.
+ */
+const SIZE = Symbol();
+
+/**
+ * The `size` getter of every cache. Sharing one getter keeps the caches' shape shared: with a getter per cache, V8 turns every cache
+ * but the first into a (much slower) dictionary-mode object.
+ * @returns {number} The number of entries of the cache it is read on
+ */
+function getSize(this: { [SIZE](): number }): number {
+	return this[SIZE]();
+}
+
+/**
  * Throws unless `ttl` is a number `> 0` (`Infinity` included).
  * @param {string} caller - Name of the function, used in the error message
  * @param {number} ttl - The TTL to validate
@@ -294,7 +308,7 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		return [entry.key, entry.value];
 	}
 
-	// `size` is defined below: a getter in an object literal would put the object in (slower) dictionary mode.
+	// `size` is defined below, with the getter shared by every cache (see `getSize`).
 	const cache = {
 		get(key: K): V | undefined {
 			const entry = store.get(key);
@@ -414,12 +428,13 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		}
 	} as LRUCache<K, V>;
 
-	Object.defineProperty(cache, 'size', {
-		get: function (): number {
-			return store.size;
+	Object.defineProperties(cache, {
+		[SIZE]: {
+			value: function (): number {
+				return store.size;
+			}
 		},
-		enumerable: true,
-		configurable: true
+		size: { get: getSize, enumerable: true, configurable: true }
 	});
 
 	return cache;

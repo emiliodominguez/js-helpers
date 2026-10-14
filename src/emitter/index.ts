@@ -152,19 +152,17 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		else listeners.list.push(registration);
 
 		return function (): void {
-			remove(event, function (candidate) {
-				return candidate === registration;
-			});
+			remove(event, registration);
 		};
 	}
 
 	/**
-	 * Deactivates and removes the registrations of `event` matching `predicate` (in place, or into a copy while an `emit` iterates the list).
+	 * Deactivates and removes the registrations of `event` matching `target` (in place, or into a copy while an `emit` iterates the list).
 	 * @param {PropertyKey} event - The event name
-	 * @param {(registration: Registration) => boolean} predicate - Selects the registrations to remove
+	 * @param {Registration | AnyFunction} [target] - A registration, or a handler (all its registrations), or nothing (every registration)
 	 * @returns {boolean} Whether anything was removed
 	 */
-	function remove(event: PropertyKey, predicate: (registration: Registration) => boolean): boolean {
+	function remove(event: PropertyKey, target?: Registration | AnyFunction): boolean {
 		const listeners = registry.get(event);
 
 		if (listeners === undefined) return false;
@@ -177,12 +175,13 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		for (let i = 0; i < length; i++) {
 			const registration = list[i];
 
-			if (predicate(registration)) registration.active = false;
+			if (target === undefined || registration === target || registration.handler === target) registration.active = false;
 			else kept[count++] = registration;
 		}
 
 		if (count === 0) registry.delete(event);
-		kept.length = count;
+		// Faster than assigning `length` (a generic store).
+		while (kept.length > count) kept.pop();
 		listeners.list = kept;
 
 		return count !== length;
@@ -207,12 +206,12 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		payload: unknown,
 		errors: unknown[] | undefined
 	): unknown[] | undefined {
-		for (const registration of snapshot) {
+		for (let i = 0; i < snapshot.length; i++) {
+			const registration = snapshot[i];
+
 			if (!registration.active) continue;
 			if (registration.once) {
-				remove(wildcard ? WILDCARD : event, function (candidate) {
-					return candidate === registration;
-				});
+				remove(wildcard ? WILDCARD : event, registration);
 			}
 
 			try {
@@ -255,9 +254,7 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		off(event: PropertyKey, handler: AnyFunction): boolean {
 			assertFunction('off', 'handler', handler);
 
-			return remove(event, function (registration) {
-				return registration.handler === handler;
-			});
+			return remove(event, handler);
 		},
 
 		emit(event: PropertyKey, ...args: unknown[]): void {
@@ -288,9 +285,7 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 			const events = event === undefined ? [...registry.keys()] : [event];
 
 			for (const name of events) {
-				remove(name, function () {
-					return true;
-				});
+				remove(name);
 			}
 		},
 

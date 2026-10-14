@@ -617,7 +617,7 @@ export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptio
  */
 function objectKeys(caller: string, obj: unknown): PropertyKey[] {
 	if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-		throw new TypeError(`${caller}: expected a non-array object, got ${Array.isArray(obj) ? 'an array' : obj === null ? 'null' : typeof obj}`);
+		throw new TypeError(`${caller}: expected a non-array object, got ${Array.isArray(obj) ? 'an array' : describe(obj)}`);
 	}
 
 	const keys: PropertyKey[] = Object.keys(obj);
@@ -630,23 +630,18 @@ function objectKeys(caller: string, obj: unknown): PropertyKey[] {
 }
 
 /**
- * Builds a plain object from parallel key/value lists, defining properties so that keys like `__proto__` stay ordinary own properties.
+ * Builds a plain object from parallel key/value lists. `Object.fromEntries` defines the properties, so keys like `__proto__` (or ones
+ * with a setter on a polluted `Object.prototype`) stay ordinary own properties.
  * @param {PropertyKey[]} keys - The keys
  * @param {unknown[]} values - The values, in key order
  * @returns {Record<PropertyKey, unknown>} The new object
  */
 function zipObject(keys: PropertyKey[], values: unknown[]): Record<PropertyKey, unknown> {
-	const result: Record<PropertyKey, unknown> = {};
-
-	for (let i = 0; i < keys.length; i++) {
-		const key = keys[i];
-
-		// A plain assignment creates the same property, unless `Object.prototype` has a setter for the key (`__proto__`, or a polluted one).
-		if (key in Object.prototype) Object.defineProperty(result, key, { value: values[i], enumerable: true, writable: true, configurable: true });
-		else result[key] = values[i];
-	}
-
-	return result;
+	return Object.fromEntries(
+		keys.map(function (key, i): [PropertyKey, unknown] {
+			return [key, values[i]];
+		})
+	);
 }
 
 /**

@@ -832,6 +832,27 @@ describe('Functions helpers', function () {
 			expect(fn.mock.calls).toEqual([[1]]);
 		});
 
+		it('should count maxWait from a flush', function () {
+			jest.useFakeTimers({ now: 1000 });
+
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100, { maxWait: 250 });
+
+			debounced('a');
+			jest.advanceTimersByTime(1);
+			debounced.flush();
+			expect(fn.mock.calls).toEqual([['a']]);
+
+			// The burst goes on (calls every 20 ms from 1099): the flush at 1001 started the maxWait period, which ends at 1251.
+			jest.advanceTimersByTime(98);
+			for (let t = 1099; t < 1400; t += 20) {
+				debounced(t);
+				jest.advanceTimersByTime(20);
+			}
+
+			expect(fn.mock.calls.slice(0, 2)).toEqual([['a'], [1239]]);
+		});
+
 		it('should honour maxWait during continuous calls', function () {
 			jest.useFakeTimers();
 
@@ -1498,5 +1519,106 @@ describe('Functions helpers (round 2)', function () {
 				helpers.times(2 ** 32, helpers.identity);
 			}).toThrow(new RangeError('times: `n` must be an integer between 0 and 4294967295, got 4294967296'));
 		});
+	});
+});
+
+describe('Functions helpers (round 8 fast paths)', function () {
+	function collect(this: unknown, ...args: unknown[]): [unknown, unknown[], number] {
+		return [this, args, arguments.length];
+	}
+
+	it('partial forwards `this` and exactly the combined arguments, whatever their number', function () {
+		const self = { id: 1 };
+		for (let pre = 0; pre <= 3; pre++) {
+			for (let rest = 0; rest <= 3; rest++) {
+				const preArgs = Array.from({ length: pre }, function (_, i) {
+					return `p${i}`;
+				});
+				const restArgs = Array.from({ length: rest }, function (_, i) {
+					return `r${i}`;
+				});
+				const applied = helpers.partial(collect as (...args: unknown[]) => [unknown, unknown[], number], ...preArgs);
+				expect(applied.apply(self, restArgs)).toEqual([self, [...preArgs, ...restArgs], pre + rest]);
+			}
+		}
+	});
+
+	it('flip forwards `this` and the reversed arguments, whatever their number', function () {
+		const self = { id: 2 };
+		const flipped = helpers.flip(collect as (...args: unknown[]) => [unknown, unknown[], number]) as (...args: unknown[]) => [unknown, unknown[], number];
+		for (let count = 0; count <= 5; count++) {
+			const args = Array.from({ length: count }, function (_, i) {
+				return i;
+			});
+			expect(flipped.apply(self, args)).toEqual([self, args.slice().reverse(), count]);
+		}
+	});
+
+	it('memoize passes `this` and exactly the received arguments to fn and the resolver', function () {
+		const self = { id: 3 };
+		const seen: Array<[unknown, number]> = [];
+		const fn = jest.fn(collect);
+		const memoized = helpers.memoize(fn as (...args: unknown[]) => [unknown, unknown[], number], {
+			resolver: function (this: unknown, ...args: unknown[]): unknown {
+				seen.push([this, args.length]);
+				return args.join('|');
+			}
+		});
+		expect(memoized.call(self)).toEqual([self, [], 0]);
+		expect(memoized.call(self, 'a')).toEqual([self, ['a'], 1]);
+		expect(memoized.call(self, 'a', 'b', 'c')).toEqual([self, ['a', 'b', 'c'], 3]);
+		expect(memoized.call(self, 'a')).toEqual([self, ['a'], 1]);
+		expect(fn).toHaveBeenCalledTimes(3);
+		expect(seen).toEqual([
+			[self, 0],
+			[self, 1],
+			[self, 3],
+			[self, 1]
+		]);
+	});
+
+	it('memoize with the default key: one argument keys by value, zero or several by the serialised list', function () {
+		const fn = jest.fn(collect);
+		const memoized = helpers.memoize(fn as (...args: unknown[]) => [unknown, unknown[], number]);
+		memoized(1);
+		memoized(1);
+		memoized('[1]');
+		memoized(-0);
+		memoized(0);
+		memoized();
+		memoized();
+		memoized(1, 2);
+		memoized(1, 2);
+		expect(fn).toHaveBeenCalledTimes(6);
+		expect([...memoized.cache.keys()]).toEqual([1, '["[1]"]', '["-0"]', 0, '[]', '[1,2]']);
+		expect(fn.mock.calls).toEqual([[1], ['[1]'], [-0], [0], [], [1, 2]]);
+	});
+
+	it('after counts down from n, invoking from the n-th call on with `this` and the arguments', function () {
+		const self = { id: 4 };
+		const after3 = helpers.after(3, collect as (...args: unknown[]) => [unknown, unknown[], number]);
+		expect(after3.call(self, 1)).toBeUndefined();
+		expect(after3.call(self, 2)).toBeUndefined();
+		expect(after3.call(self, 3, 4)).toEqual([self, [3, 4], 2]);
+		expect(after3.call(self)).toEqual([self, [], 0]);
+		expect(helpers.after(0, collect as (...args: unknown[]) => [unknown, unknown[], number])('x')).toEqual([undefined, ['x'], 1]);
+		expect(helpers.after(1, collect as (...args: unknown[]) => [unknown, unknown[], number])('y')).toEqual([undefined, ['y'], 1]);
+	});
+
+	it('pipe and compose keep their own copy of the functions and report the original index of an invalid one', function () {
+		function inc(n: number): number {
+			return n + 1;
+		}
+		function double(n: number): number {
+			return n * 2;
+		}
+		expect(helpers.pipe(inc, double)(1)).toBe(4);
+		expect(helpers.compose(inc, double)(1)).toBe(3);
+		expect(function () {
+			helpers.compose(inc, 1 as unknown as typeof inc, double);
+		}).toThrow(new TypeError('compose: `fns[1]` must be a function, got number'));
+		expect(function () {
+			helpers.pipe(inc, double, 'x' as unknown as typeof inc);
+		}).toThrow(new TypeError('pipe: `fns[2]` must be a function, got string'));
 	});
 });

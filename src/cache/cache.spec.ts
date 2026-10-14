@@ -147,6 +147,31 @@ describe('createLRUCache', function () {
 		});
 	});
 
+	describe('size', function () {
+		it('is an own enumerable getter that reports the size of the cache it is read on', function () {
+			const first = createLRUCache<string, number>({ max: 5 });
+			const second = createLRUCache<string, number>({ max: 5 });
+			first.set('a', 1).set('b', 2);
+			second.set('c', 3);
+
+			expect(first.size).toBe(2);
+			expect(second.size).toBe(1);
+			expect(Object.keys(first)).toContain('size');
+			const descriptor = Object.getOwnPropertyDescriptor(first, 'size');
+			expect(descriptor).toMatchObject({ enumerable: true, configurable: true, set: undefined });
+			expect(typeof descriptor?.get).toBe('function');
+			expect({ ...second }.size).toBe(1);
+		});
+
+		it('works through a proxy and for objects inheriting from a cache', function () {
+			const cache = createLRUCache<string, number>({ max: 5 });
+			cache.set('a', 1);
+
+			expect(new Proxy(cache, {}).size).toBe(1);
+			expect((Object.create(cache) as LRUCache<string, number>).size).toBe(1);
+		});
+	});
+
 	describe('LRU order', function () {
 		it('evicts the least-recently-used entry when full', function () {
 			const { events, onEvict } = recorder<string, number>();

@@ -106,20 +106,15 @@ function createNotifier(): Notifier {
 		subscribe(listener: () => void): Unsubscribe {
 			const subscription: Subscription = { listener, active: true };
 
-			if (notifying) subscriptions = [...subscriptions, subscription];
-			else subscriptions.push(subscription);
+			if (notifying) subscriptions = subscriptions.slice();
+			subscriptions.push(subscription);
 
 			return function (): void {
 				if (!subscription.active) return;
 
 				subscription.active = false;
-				if (notifying) {
-					subscriptions = subscriptions.filter(function (candidate) {
-						return candidate !== subscription;
-					});
-				} else {
-					subscriptions.splice(subscriptions.indexOf(subscription), 1);
-				}
+				if (notifying) subscriptions = subscriptions.slice();
+				subscriptions.splice(subscriptions.indexOf(subscription), 1);
 			};
 		},
 

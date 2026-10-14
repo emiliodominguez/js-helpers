@@ -31,74 +31,15 @@ function isForeign(value: unknown): boolean {
 	return typeof value === 'object' && value !== null && !(value instanceof Object);
 }
 
+// Brand checks, called with the candidate as `this`: each throws for an object without the matching internal slot. The `source` getter
+// returns '(?:)' for `RegExp.prototype` itself instead of throwing, but `isRegExp` never calls it on it (an object of this realm that does
+// not inherit from itself). `has` checks the receiver before the key, so `undefined` avoids allocating a key object.
 const dateGetTime = Date.prototype.getTime;
 const regExpSourceGetter = (Object.getOwnPropertyDescriptor(RegExp.prototype, 'source') as PropertyDescriptor).get as (this: RegExp) => string;
 const mapSizeGetter = (Object.getOwnPropertyDescriptor(Map.prototype, 'size') as PropertyDescriptor).get as (this: Map<unknown, unknown>) => number;
 const setSizeGetter = (Object.getOwnPropertyDescriptor(Set.prototype, 'size') as PropertyDescriptor).get as (this: Set<unknown>) => number;
 const weakMapHas = WeakMap.prototype.has as (this: WeakMap<object, unknown>, key: unknown) => boolean;
 const weakSetHas = WeakSet.prototype.has as (this: WeakSet<object>, key: unknown) => boolean;
-
-/**
- * Brand check for `Date`.
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-dates)
- */
-function checkDate(target: object): true {
-	dateGetTime.call(target as Date);
-	return true;
-}
-
-/**
- * Brand check for `RegExp`.
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-regexps)
- */
-function checkRegExp(target: object): true {
-	// The `source` getter returns '(?:)' for `RegExp.prototype` itself instead of throwing, but `isRegExp` never gets here for it (it is
-	// an object of this realm that does not inherit from itself).
-	regExpSourceGetter.call(target as RegExp);
-	return true;
-}
-
-/**
- * Brand check for `Map`.
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-maps)
- */
-function checkMap(target: object): true {
-	mapSizeGetter.call(target as Map<unknown, unknown>);
-	return true;
-}
-
-/**
- * Brand check for `Set`.
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-sets)
- */
-function checkSet(target: object): true {
-	setSizeGetter.call(target as Set<unknown>);
-	return true;
-}
-
-/**
- * Brand check for `WeakMap` (`has` checks the receiver before the key, so `undefined` avoids allocating a key object).
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-weakmaps)
- */
-function checkWeakMap(target: object): true {
-	weakMapHas.call(target as WeakMap<object, unknown>, undefined);
-	return true;
-}
-
-/**
- * Brand check for `WeakSet` (`has` checks the receiver before the key, so `undefined` avoids allocating a key object).
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-weaksets)
- */
-function checkWeakSet(target: object): true {
-	weakSetHas.call(target as WeakSet<object>, undefined);
-	return true;
-}
 
 /**
  * Checks whether a value is a non-null object (`typeof value === 'object'`).
@@ -256,7 +197,7 @@ export function isPromise(value: unknown): value is PromiseLike<unknown> {
  */
 export function isRegExp(value: unknown): value is RegExp {
 	try {
-		return (value instanceof RegExp || isForeign(value)) && checkRegExp(value as object);
+		return (value instanceof RegExp || isForeign(value)) && (regExpSourceGetter.call(value as RegExp), true);
 	} catch {
 		return false;
 	}
@@ -295,7 +236,7 @@ export function isError(value: unknown): value is Error {
  */
 export function isDate(value: unknown): value is Date {
 	try {
-		return (value instanceof Date || isForeign(value)) && checkDate(value as object);
+		return (value instanceof Date || isForeign(value)) && (dateGetTime.call(value as Date), true);
 	} catch {
 		return false;
 	}
@@ -313,7 +254,7 @@ export function isDate(value: unknown): value is Date {
  */
 export function isMap(value: unknown): value is Map<unknown, unknown> {
 	try {
-		return (value instanceof Map || isForeign(value)) && checkMap(value as object);
+		return (value instanceof Map || isForeign(value)) && (mapSizeGetter.call(value as Map<unknown, unknown>), true);
 	} catch {
 		return false;
 	}
@@ -331,7 +272,7 @@ export function isMap(value: unknown): value is Map<unknown, unknown> {
  */
 export function isSet(value: unknown): value is Set<unknown> {
 	try {
-		return (value instanceof Set || isForeign(value)) && checkSet(value as object);
+		return (value instanceof Set || isForeign(value)) && (setSizeGetter.call(value as Set<unknown>), true);
 	} catch {
 		return false;
 	}
@@ -349,7 +290,7 @@ export function isSet(value: unknown): value is Set<unknown> {
  */
 export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
 	try {
-		return (value instanceof WeakMap || isForeign(value)) && checkWeakMap(value as object);
+		return (value instanceof WeakMap || isForeign(value)) && (weakMapHas.call(value as WeakMap<object, unknown>, undefined), true);
 	} catch {
 		return false;
 	}
@@ -367,7 +308,7 @@ export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
  */
 export function isWeakSet(value: unknown): value is WeakSet<object> {
 	try {
-		return (value instanceof WeakSet || isForeign(value)) && checkWeakSet(value as object);
+		return (value instanceof WeakSet || isForeign(value)) && (weakSetHas.call(value as WeakSet<object>, undefined), true);
 	} catch {
 		return false;
 	}
@@ -518,17 +459,8 @@ const typedArrayTagGetter = (Object.getOwnPropertyDescriptor(Object.getPrototype
 	this: unknown
 ) => string | undefined;
 
+// Brand check for `ArrayBuffer` (`SharedArrayBuffer`s fail it too).
 const arrayBufferByteLengthGetter = (Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength') as PropertyDescriptor).get as (this: ArrayBuffer) => number;
-
-/**
- * Brand check for `ArrayBuffer` (`SharedArrayBuffer`s fail it too).
- * @param {object} target - The candidate
- * @returns {true} `true` (throws for non-buffers)
- */
-function checkArrayBuffer(target: object): true {
-	arrayBufferByteLengthGetter.call(target as ArrayBuffer);
-	return true;
-}
 
 /**
  * Builds a short, never-throwing description of an arbitrary value for error messages.
@@ -762,7 +694,7 @@ export function isTypedArray(value: unknown): value is TypedArray {
 export function isArrayBuffer(value: unknown): value is ArrayBuffer {
 	// No `instanceof` fast path: some hosts (e.g. Jest's node environment) expose another realm's `ArrayBuffer` as the global one.
 	try {
-		return typeof value === 'object' && value !== null && checkArrayBuffer(value);
+		return typeof value === 'object' && value !== null && (arrayBufferByteLengthGetter.call(value as ArrayBuffer), true);
 	} catch {
 		return false;
 	}

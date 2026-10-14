@@ -1,16 +1,5 @@
 import { retry, withTimeout, type RetryOptions } from '../async/index.js';
-import {
-	debounce,
-	memoize as memoizeFunction,
-	noop,
-	once as onceFunction,
-	throttle,
-	type DebounceOptions,
-	type Debounced,
-	type Memoized,
-	type Throttled,
-	type ThrottleOptions
-} from '../functions/index.js';
+import { debounce, memoize as memoizeFunction, noop, once as onceFunction, throttle, type DebounceOptions, type ThrottleOptions } from '../functions/index.js';
 import { assertDelay } from '../utils/assert.js';
 import type { AnyFunction, RandomGenerator } from '../utils/index.js';
 
@@ -121,6 +110,27 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
  */
 function ownerOf(thisArg: unknown): object {
 	return isObjectLike(thisArg) ? thisArg : NO_INSTANCE;
+}
+
+/**
+ * Creates a method that gives each instance (see {@link ownerOf}) its own wrapper of the original method, created on its first call.
+ * @param {() => UnknownMethod} wrap - Creates the wrapper for a new instance
+ * @returns {UnknownMethod} The method dispatching to the instance's wrapper
+ */
+function perInstance(wrap: () => UnknownMethod): UnknownMethod {
+	const wrappers = new WeakMap<object, UnknownMethod>();
+
+	return function perInstanceMethod(this: unknown, ...args: unknown[]): unknown {
+		const owner = ownerOf(this);
+		let wrapped = wrappers.get(owner);
+
+		if (wrapped === undefined) {
+			wrapped = wrap();
+			wrappers.set(owner, wrapped);
+		}
+
+		return wrapped.apply(this, args);
+	};
 }
 
 /**
@@ -363,19 +373,9 @@ export function log(targetOrValue: unknown, keyOrContext: unknown, descriptor?: 
  * @returns {UnknownMethod} The memoized method
  */
 function wrapMemoize(method: UnknownMethod): UnknownMethod {
-	const perInstance = new WeakMap<object, Memoized<UnknownMethod>>();
-
-	return function memoizedMethod(this: unknown, ...args: unknown[]): unknown {
-		const owner = ownerOf(this);
-		let memoized = perInstance.get(owner);
-
-		if (memoized === undefined) {
-			memoized = memoizeFunction(method);
-			perInstance.set(owner, memoized);
-		}
-
-		return memoized.apply(this, args);
-	};
+	return perInstance(function (): UnknownMethod {
+		return memoizeFunction(method);
+	});
 }
 
 /**
@@ -545,19 +545,9 @@ export function debounced(wait: number, options?: DebounceOptions): UniversalMet
 	debounce(noop, wait, options);
 
 	return createMethodDecorator('debounced', function (method: UnknownMethod): UnknownMethod {
-		const perInstance = new WeakMap<object, Debounced<UnknownMethod>>();
-
-		return function debouncedMethod(this: unknown, ...args: unknown[]): unknown {
-			const owner = ownerOf(this);
-			let wrapped = perInstance.get(owner);
-
-			if (wrapped === undefined) {
-				wrapped = debounce(method, wait, options);
-				perInstance.set(owner, wrapped);
-			}
-
-			return wrapped.apply(this, args);
-		};
+		return perInstance(function (): UnknownMethod {
+			return debounce(method, wait, options);
+		});
 	});
 }
 
@@ -591,19 +581,9 @@ export function throttled(wait: number, options?: ThrottleOptions): UniversalMet
 	throttle(noop, wait, options);
 
 	return createMethodDecorator('throttled', function (method: UnknownMethod): UnknownMethod {
-		const perInstance = new WeakMap<object, Throttled<UnknownMethod>>();
-
-		return function throttledMethod(this: unknown, ...args: unknown[]): unknown {
-			const owner = ownerOf(this);
-			let wrapped = perInstance.get(owner);
-
-			if (wrapped === undefined) {
-				wrapped = throttle(method, wait, options);
-				perInstance.set(owner, wrapped);
-			}
-
-			return wrapped.apply(this, args);
-		};
+		return perInstance(function (): UnknownMethod {
+			return throttle(method, wait, options);
+		});
 	});
 }
 
@@ -651,19 +631,9 @@ export function deprecated(message?: string): UniversalMethodDecorator {
  * @returns {UnknownMethod} The restricted method
  */
 function wrapOnce(method: UnknownMethod): UnknownMethod {
-	const perInstance = new WeakMap<object, UnknownMethod>();
-
-	return function onceMethod(this: unknown, ...args: unknown[]): unknown {
-		const owner = ownerOf(this);
-		let wrapped = perInstance.get(owner);
-
-		if (wrapped === undefined) {
-			wrapped = onceFunction(method);
-			perInstance.set(owner, wrapped);
-		}
-
-		return wrapped.apply(this, args);
-	};
+	return perInstance(function (): UnknownMethod {
+		return onceFunction(method);
+	});
 }
 
 /**

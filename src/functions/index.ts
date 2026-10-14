@@ -48,9 +48,8 @@ function assertWait(caller: string, name: string, value: number): void {
  * @throws {TypeError} when an element is not a function
  */
 function assertFunctions(caller: string, fns: ReadonlyArray<unknown>): void {
-	fns.forEach(function (fn, index) {
-		assertFunction(caller, `fns[${index}]`, fn);
-	});
+	// The parameter name is only formatted for an invalid element.
+	for (let i = 0; i < fns.length; i++) if (typeof fns[i] !== 'function') assertFunction(caller, `fns[${i}]`, fns[i]);
 }
 
 /**
@@ -60,11 +59,23 @@ function assertFunctions(caller: string, fns: ReadonlyArray<unknown>): void {
  * @returns {unknown[]} A new array holding the elements of `head`, then those of `tail`
  */
 function append(head: ReadonlyArray<unknown>, tail: ReadonlyArray<unknown>): unknown[] {
-	const all = head.slice();
+	const all = new Array<unknown>(head.length + tail.length);
 
-	for (let i = 0; i < tail.length; i++) all.push(tail[i]);
+	for (let i = 0; i < all.length; i++) all[i] = i < head.length ? head[i] : tail[i - head.length];
 
 	return all;
+}
+
+/**
+ * Calls `fn` with `thisArg` and the elements of `args`. One or two arguments are passed with `call`, which V8 optimises much better
+ * than `apply` (it can inline `fn` and drop the argument array).
+ * @param {UnknownFunction} fn - The function to call
+ * @param {unknown} thisArg - The `this` value
+ * @param {unknown[]} args - The arguments (an array without holes)
+ * @returns {unknown} What `fn` returns
+ */
+function forward(fn: UnknownFunction, thisArg: unknown, args: unknown[]): unknown {
+	return args.length === 1 ? fn.call(thisArg, args[0]) : args.length === 2 ? fn.call(thisArg, args[0], args[1]) : fn.apply(thisArg, args);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -110,7 +121,7 @@ export function partial<A extends unknown[], B extends unknown[], R>(fn: (...arg
 	assertFunction('partial', 'fn', fn);
 
 	return function partiallyApplied(this: unknown, ...rest: B): R {
-		return (fn as unknown as (this: unknown, ...all: unknown[]) => R).apply(this, append(args, rest));
+		return forward(fn as unknown as UnknownFunction, this, append(args, rest)) as R;
 	};
 }
 
@@ -183,10 +194,8 @@ export function curry<A extends unknown[], R>(fn: (...args: A) => R, arity: numb
 	 */
 	function step(collected: unknown[]): UnknownFunction {
 		return function curried(this: unknown, ...args: unknown[]): unknown {
-			// Every argument at once: nothing to collect.
-			if (collected.length === 0 && args.length >= arity) return call.apply(this, args);
-
-			const all = append(collected, args);
+			// `args` is a fresh rest array: with nothing collected yet, it can be used as is.
+			const all = collected.length === 0 ? args : append(collected, args);
 
 			return all.length >= arity ? call.apply(this, all) : step(all);
 		};
@@ -243,7 +252,7 @@ export function compose<R = unknown>(...fns: AnyFunction[]): (...args: unknown[]
 export function compose(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
 	assertFunctions('compose', fns);
 	// `fns` is a fresh rest array, so it can be reversed in place.
-	return pipe(...fns.reverse());
+	return chain(fns.reverse() as unknown as UnknownFunction[]);
 }
 
 /**
@@ -290,15 +299,23 @@ export function pipe<R = unknown>(...fns: AnyFunction[]): (...args: unknown[]) =
 export function pipe(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
 	assertFunctions('pipe', fns);
 
-	const chain = fns.slice() as unknown as UnknownFunction[];
+	// `fns` is a fresh rest array: no one else can change it.
+	return chain(fns as unknown as UnknownFunction[]);
+}
 
+/**
+ * Creates the function that calls each of `fns` in order with the previous result (see {@link pipe}).
+ * @param {UnknownFunction[]} fns - The validated functions, owned by the returned function
+ * @returns {(...args: unknown[]) => unknown} The chained function
+ */
+function chain(fns: UnknownFunction[]): (...args: unknown[]) => unknown {
 	return function piped(this: unknown, ...args: unknown[]): unknown {
-		if (chain.length === 0) return args[0];
+		if (fns.length === 0) return args[0];
 
-		let result = chain[0].apply(this, args);
+		let result = fns[0].apply(this, args);
 
-		for (let i = 1; i < chain.length; i++) {
-			result = chain[i].call(this, result);
+		for (let i = 1; i < fns.length; i++) {
+			result = fns[i].call(this, result);
 		}
 
 		return result;
@@ -371,20 +388,23 @@ export function defaultMemoizeKey(...args: unknown[]): unknown {
 }
 
 /**
+ * Whether a lone argument can be its own cache key: any primitive except `-0` (which `Map` would merge with `0`) and strings starting
+ * with '[' (which could clash with a serialised argument list).
+ * @param {unknown} value - The argument
+ * @returns {boolean} `true` when `value` is used as the key as is
+ */
+function isDirectKey(value: unknown): boolean {
+	return (value === null || (typeof value !== 'object' && typeof value !== 'function')) && !(typeof value === 'string' && value[0] === '[') && !Object.is(value, -0);
+}
+
+/**
  * Computes the {@link defaultMemoizeKey} of an argument list.
  * @param {unknown[]} args - The call arguments
  * @returns {unknown} The cache key
  * @throws {TypeError} when the arguments contain a circular structure
  */
 function memoizeKey(args: unknown[]): unknown {
-	if (args.length === 1) {
-		const value = args[0];
-		const isPrimitive = value === null || (typeof value !== 'object' && typeof value !== 'function');
-
-		// Strings starting with '[' could clash with a serialised argument list, so they go through the serialiser too;
-		// -0 would be merged with 0 by `Map` (SameValueZero), so it is serialised as well.
-		if (isPrimitive && !(typeof value === 'string' && value.startsWith('[')) && !Object.is(value, -0)) return value;
-	}
+	if (args.length === 1 && isDirectKey(args[0])) return args[0];
 
 	// Fast path: a list of strings and finite numbers is serialised by hand, exactly as `JSON.stringify` with the replacer below would
 	// (`String` formats finite numbers like JSON does). Any other argument falls back to the general serialiser.
@@ -417,7 +437,7 @@ function memoizeKey(args: unknown[]): unknown {
 function encodeKeyValue(value: unknown): unknown {
 	switch (typeof value) {
 		case 'bigint':
-			return `${value.toString()}n`;
+			return `${value}n`;
 		case 'number':
 			if (Object.is(value, -0)) return '-0';
 			return Number.isFinite(value) ? value : String(value);
@@ -464,24 +484,43 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, u
 	 * @param {...unknown} args - The call arguments
 	 * @returns {unknown} The cached or freshly computed result
 	 */
-	function memoized(this: unknown, ...args: unknown[]): unknown {
-		const key = defaultKey ? memoizeKey(args) : resolver.apply(this, args);
+	function memoized(this: unknown): unknown {
+		// A single argument (the common case) is handled without building an argument list (copying `arguments` by hand is also several
+		// times faster than a rest parameter here).
+		const single = arguments.length === 1;
+		// eslint-disable-next-line prefer-rest-params -- see above
+		const first: unknown = arguments[0];
+		let args: unknown[] = [];
+		if (!single) {
+			args = new Array<unknown>(arguments.length);
+			// eslint-disable-next-line prefer-rest-params -- see above
+			for (let i = 0; i < args.length; i++) args[i] = arguments[i];
+		}
+		const key = defaultKey
+			? single && isDirectKey(first)
+				? first
+				: memoizeKey(single ? [first] : args)
+			: single
+				? resolver.call(this, first)
+				: resolver.apply(this, args);
 
 		// Read once, then fall back to `has` only for a cached `undefined`: an expiring cache (e.g. an LRU with a TTL) could
 		// otherwise drop the entry between a `has` and a `get` and make the wrapper return `undefined`.
 		const cached = cache.get(key);
 		if (cached !== undefined || cache.has(key)) return cached;
 
-		const result = call.apply(this, args) as ReturnType<F>;
+		const result = (single ? call.call(this, first) : call.apply(this, args)) as ReturnType<F>;
 		cache.set(key, result);
 
 		return result;
 	}
 
-	Object.defineProperty(memoized, 'cache', { value: cache, enumerable: true });
-	Object.defineProperty(memoized, 'clear', {
-		value: function clear(): void {
-			cache.clear();
+	Object.defineProperties(memoized, {
+		cache: { value: cache, enumerable: true },
+		clear: {
+			value: function clear(): void {
+				cache.clear();
+			}
 		}
 	});
 
@@ -839,10 +878,11 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 		},
 		flush: {
 			value: function flush(): unknown {
-				// Without a timer nothing is pending, and `trailingEdge` just returns the latest result.
+				// Without a timer nothing is pending, and `trailingEdge` just returns the latest result. The invocation time is only read with
+				// `maxWait`, so the clock is not read otherwise.
 				clearTimeout(timer);
 
-				return trailingEdge(Date.now());
+				return trailingEdge(maxing ? Date.now() : 0);
 			}
 		},
 		pending: {
@@ -879,28 +919,29 @@ export function once<F extends AnyFunction>(fn: F): F {
 	assertFunction('once', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
-	let status: 'idle' | 'running' | 'done' | 'failed' = 'idle';
-	// The result, or the error once `status` is 'failed'.
+	// 0: not called yet, 1: running, 2: done, 3: failed.
+	let status = 0;
+	// The result, or the error once `status` is 3 (failed).
 	let outcome: unknown;
 
 	return function onceWrapper(this: unknown, ...args: unknown[]): unknown {
-		if (status === 'done') return outcome;
+		if (status === 2) return outcome;
 
-		if (status === 'idle') {
-			status = 'running';
+		if (status === 0) {
+			status = 1;
 
 			try {
 				outcome = call.apply(this, args);
-				status = 'done';
+				status = 2;
 			} catch (error) {
 				outcome = error;
-				status = 'failed';
+				status = 3;
 			}
 		}
 
-		if (status === 'failed') throw outcome;
+		if (status === 3) throw outcome;
 
-		// 'done', or a re-entrant call while 'running' (whose `outcome` is still `undefined`).
+		// Done, or a re-entrant call while running (whose `outcome` is still `undefined`).
 		return outcome;
 	} as unknown as F;
 }
@@ -954,12 +995,10 @@ export function after<F extends AnyFunction>(n: number, fn: F): (this: ThisParam
 	assertFunction('after', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
-	let calls = 0;
 
 	return function afterWrapper(this: unknown, ...args: unknown[]): unknown {
-		calls += 1;
-
-		return calls >= n ? call.apply(this, args) : undefined;
+		// `n` counts down the calls left before the first invocation (it is an integer).
+		return --n < 1 ? call.apply(this, args) : undefined;
 	} as unknown as (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined;
 }
 
@@ -1099,7 +1138,7 @@ export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: R
 	const call = fn as unknown as UnknownFunction;
 
 	return function flipped(this: unknown, ...args: unknown[]): unknown {
-		return call.apply(this, args.reverse());
+		return forward(call, this, args.reverse());
 	} as unknown as (...args: Reverse<A>) => R;
 }
 
