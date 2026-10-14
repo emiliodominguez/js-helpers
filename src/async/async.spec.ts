@@ -1,5 +1,7 @@
 import {
 	AbortError,
+	abortable,
+	anySignal,
 	attemptAsync,
 	createDeferred,
 	createLimiter,
@@ -11,7 +13,9 @@ import {
 	retry,
 	sequence,
 	sleep,
+	throwIfAborted,
 	TimeoutError,
+	timeoutSignal,
 	withTimeout
 } from '.';
 import type { AbortSignalLike } from '../utils/index.js';
@@ -26,6 +30,52 @@ async function stateOf(promise: Promise<unknown>): Promise<'pending' | 'fulfille
 		return winner === marker ? 'pending' : 'fulfilled';
 	} catch {
 		return 'rejected';
+	}
+}
+
+/**
+ * A fake abort signal that tracks its listeners, so tests can check that none leak. Dispatch follows EventTarget semantics:
+ * listeners removed during dispatch are not called, and `once` listeners are removed before being called.
+ */
+class CountingSignal implements AbortSignalLike {
+	aborted = false;
+	reason: unknown = undefined;
+	readonly listeners = new Map<() => void, { once: boolean }>();
+
+	get listenerCount(): number {
+		return this.listeners.size;
+	}
+
+	addEventListener(_type: 'abort', listener: () => void, options?: { once?: boolean }): void {
+		if (!this.listeners.has(listener)) this.listeners.set(listener, { once: options?.once ?? false });
+	}
+
+	removeEventListener(_type: 'abort', listener: () => void): void {
+		this.listeners.delete(listener);
+	}
+
+	abort(reason?: unknown): void {
+		if (this.aborted) return;
+		this.aborted = true;
+		this.reason = reason;
+		for (const [listener, { once }] of Array.from(this.listeners)) {
+			if (!this.listeners.has(listener)) continue;
+			if (once) this.listeners.delete(listener);
+			listener();
+		}
+	}
+}
+
+/**
+ * Runs `fn` with `globalThis.AbortController` removed.
+ */
+function withoutAbortController(fn: () => void): void {
+	const original = globalThis.AbortController;
+	delete (globalThis as any).AbortController;
+	try {
+		fn();
+	} finally {
+		globalThis.AbortController = original;
 	}
 }
 
@@ -958,6 +1008,248 @@ describe('Async helpers (round 2)', function () {
 			expect(function () {
 				createLimiter(null as any);
 			}).toThrow(TypeError);
+		});
+	});
+	describe('timeoutSignal', function () {
+		it('should abort with a TimeoutError after the delay', function () {
+			jest.useFakeTimers();
+			const signal = timeoutSignal(100);
+			expect(signal).toBeInstanceOf(AbortSignal);
+			jest.advanceTimersByTime(99);
+			expect(signal.aborted).toBe(false);
+			jest.advanceTimersByTime(1);
+			expect(signal.aborted).toBe(true);
+			expect(signal.reason).toBeInstanceOf(TimeoutError);
+			expect(signal.reason).toEqual(new TimeoutError('timeoutSignal: timed out after 100 ms'));
+		});
+
+		it('should dispatch an abort event', function () {
+			jest.useFakeTimers();
+			const signal = timeoutSignal(0);
+			const listener = jest.fn();
+			signal.addEventListener('abort', listener);
+			jest.advanceTimersByTime(0);
+			expect(listener).toHaveBeenCalledTimes(1);
+		});
+
+		it('should return a platform AbortSignal (typed as such)', function () {
+			const signal: AbortSignal = timeoutSignal(Infinity);
+			expect(function () {
+				signal.throwIfAborted();
+			}).not.toThrow();
+		});
+
+		it('should never abort (and start no timer) for Infinity', function () {
+			jest.useFakeTimers();
+			const signal = timeoutSignal(Infinity);
+			expect(jest.getTimerCount()).toBe(0);
+			jest.advanceTimersByTime(2 ** 31);
+			expect(signal.aborted).toBe(false);
+		});
+
+		it('should validate the delay', function () {
+			expect(function () {
+				timeoutSignal('10' as any);
+			}).toThrow(new TypeError('timeoutSignal: `ms` must be Infinity or a number between 0 and 2147483647, got string'));
+			for (const ms of [-1, NaN, 2 ** 31, -Infinity]) {
+				expect(function () {
+					timeoutSignal(ms);
+				}).toThrow(RangeError);
+			}
+		});
+
+		it('should throw a clear Error without AbortController', function () {
+			withoutAbortController(function () {
+				expect(function () {
+					timeoutSignal(10);
+				}).toThrow(new Error('timeoutSignal: `AbortController` is not available in this environment'));
+			});
+		});
+	});
+
+	describe('anySignal', function () {
+		it('should abort with the reason of the first input that aborts and remove every listener', function () {
+			const a = new CountingSignal();
+			const b = new CountingSignal();
+			const c = new CountingSignal();
+			const signal = anySignal([a, b, c]);
+			expect(signal.aborted).toBe(false);
+			expect([a.listenerCount, b.listenerCount, c.listenerCount]).toEqual([1, 1, 1]);
+			b.abort('b');
+			expect(signal.aborted).toBe(true);
+			expect(signal.reason).toBe('b');
+			expect([a.listenerCount, b.listenerCount, c.listenerCount]).toEqual([0, 0, 0]);
+			a.abort('a');
+			expect(signal.reason).toBe('b');
+		});
+
+		it('should dispatch an abort event on the result', function () {
+			const controller = new AbortController();
+			const signal = anySignal([controller.signal]);
+			const listener = jest.fn();
+			signal.addEventListener('abort', listener);
+			controller.abort();
+			expect(listener).toHaveBeenCalledTimes(1);
+			expect((signal.reason as Error).name).toBe('AbortError');
+		});
+
+		it('should return an already-aborted signal without attaching listeners when an input is aborted', function () {
+			const live = new CountingSignal();
+			const first = new CountingSignal();
+			const second = new CountingSignal();
+			second.abort('second');
+			first.abort('first');
+			const signal = anySignal([live, second, first]);
+			expect(signal.aborted).toBe(true);
+			expect(signal.reason).toBe('second');
+			expect(live.listenerCount).toBe(0);
+		});
+
+		it('should use an AbortError when the input has no reason', function () {
+			const input = new CountingSignal();
+			const signal = anySignal([input]);
+			input.abort();
+			expect(signal.reason).toBeInstanceOf(AbortError);
+			const already = new CountingSignal();
+			already.abort();
+			expect(anySignal([already]).reason).toBeInstanceOf(AbortError);
+		});
+
+		it('should ignore null and undefined, and never abort without inputs', function () {
+			expect(anySignal([]).aborted).toBe(false);
+			expect(anySignal([null, undefined]).aborted).toBe(false);
+			const input = new CountingSignal();
+			const signal = anySignal([undefined, input, null]);
+			input.abort(42);
+			expect(signal.reason).toBe(42);
+		});
+
+		it('should accept any iterable, including generators, and duplicated inputs', function () {
+			const input = new CountingSignal();
+			function* signals(): Generator<AbortSignalLike> {
+				yield input;
+				yield input;
+			}
+			const signal = anySignal(signals());
+			expect(input.listenerCount).toBe(2);
+			input.abort('x');
+			expect(signal.reason).toBe('x');
+			expect(input.listenerCount).toBe(0);
+		});
+
+		it('should combine with timeoutSignal', function () {
+			jest.useFakeTimers();
+			const controller = new AbortController();
+			const signal = anySignal([controller.signal, timeoutSignal(50)]);
+			jest.advanceTimersByTime(50);
+			expect(signal.reason).toBeInstanceOf(TimeoutError);
+		});
+
+		it('should validate its input', function () {
+			for (const value of [null, undefined, 42, {}]) {
+				expect(function () {
+					anySignal(value as any);
+				}).toThrow(new TypeError(`anySignal: \`signals\` must be an iterable, got ${value === null ? 'null' : typeof value}`));
+			}
+			expect(function () {
+				anySignal([undefined, {}] as any);
+			}).toThrow(new TypeError('anySignal: `signals[1]` must be an AbortSignal, null or undefined, got object'));
+			expect(function () {
+				anySignal('ab' as any);
+			}).toThrow(new TypeError('anySignal: `signals[0]` must be an AbortSignal, null or undefined, got string'));
+			expect(function () {
+				anySignal([{ addEventListener() {} }] as any);
+			}).toThrow(TypeError);
+		});
+
+		it('should throw a clear Error without AbortController', function () {
+			withoutAbortController(function () {
+				expect(function () {
+					anySignal([]);
+				}).toThrow(new Error('anySignal: `AbortController` is not available in this environment'));
+			});
+		});
+	});
+
+	describe('abortable', function () {
+		it('should resolve like the promise and remove its listener', async function () {
+			const signal = new CountingSignal();
+			const promise = abortable(Promise.resolve('value'), signal);
+			expect(signal.listenerCount).toBe(1);
+			await expect(promise).resolves.toBe('value');
+			expect(signal.listenerCount).toBe(0);
+		});
+
+		it('should reject like the promise and remove its listener', async function () {
+			const signal = new CountingSignal();
+			const error = new Error('boom');
+			await expect(abortable(Promise.reject(error), signal)).rejects.toBe(error);
+			expect(signal.listenerCount).toBe(0);
+		});
+
+		it('should accept plain values', async function () {
+			await expect(abortable(7, new CountingSignal())).resolves.toBe(7);
+		});
+
+		it('should reject with the abort reason when the signal aborts first', async function () {
+			const signal = new CountingSignal();
+			const work = createDeferred<number>();
+			const promise = abortable(work.promise, signal);
+			signal.abort('cancelled');
+			expect(signal.listenerCount).toBe(0);
+			await expect(promise).rejects.toBe('cancelled');
+			// The late outcome of the underlying work is ignored (and its rejection handled).
+			work.reject(new Error('late'));
+			await Promise.resolve();
+		});
+
+		it('should reject immediately for an already-aborted signal, even if the promise is resolved', async function () {
+			const signal = new CountingSignal();
+			signal.abort();
+			const promise = abortable(Promise.resolve(1), signal);
+			await expect(promise).rejects.toBeInstanceOf(AbortError);
+			expect(signal.listenerCount).toBe(0);
+			const controller = new AbortController();
+			controller.abort(new TimeoutError());
+			await expect(abortable(new Promise(function () {}), controller.signal)).rejects.toBeInstanceOf(TimeoutError);
+		});
+
+		it('should just settle like the promise without a signal', async function () {
+			await expect(abortable(Promise.resolve(1), undefined)).resolves.toBe(1);
+			await expect(abortable(Promise.reject(new Error('x')), null)).rejects.toThrow('x');
+		});
+
+		it('should reject with a TypeError for an invalid signal', async function () {
+			await expect(abortable(Promise.resolve(1), {} as any)).rejects.toThrow(new TypeError('abortable: `signal` must be an AbortSignal, null or undefined, got object'));
+			await expect(abortable(Promise.resolve(1), 'signal' as any)).rejects.toThrow(TypeError);
+		});
+	});
+
+	describe('throwIfAborted', function () {
+		it('should do nothing for live, null or undefined signals', function () {
+			expect(throwIfAborted(new CountingSignal())).toBeUndefined();
+			expect(throwIfAborted(new AbortController().signal)).toBeUndefined();
+			expect(throwIfAborted(null)).toBeUndefined();
+			expect(throwIfAborted(undefined)).toBeUndefined();
+		});
+
+		it('should throw the abort reason, or an AbortError', function () {
+			const signal = new CountingSignal();
+			signal.abort('why');
+			expect(function () {
+				throwIfAborted(signal);
+			}).toThrow('why');
+			const bare = new CountingSignal();
+			bare.abort();
+			expect(function () {
+				throwIfAborted(bare);
+			}).toThrow(AbortError);
+		});
+
+		it('should throw a TypeError for an invalid signal', function () {
+			expect(function () {
+				throwIfAborted({ aborted: true } as any);
+			}).toThrow(new TypeError('throwIfAborted: `signal` must be an AbortSignal, null or undefined, got object'));
 		});
 	});
 });

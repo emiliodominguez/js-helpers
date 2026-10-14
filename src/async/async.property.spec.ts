@@ -1,11 +1,41 @@
 import fc from 'fast-check';
-import { attemptAsync, createLimiter, debounceAsync, mapWithConcurrency, promiseAllObject, retry, sequence } from '.';
+import { abortable, anySignal, attemptAsync, createDeferred, createLimiter, debounceAsync, mapWithConcurrency, promiseAllObject, retry, sequence } from '.';
+import type { AbortSignalLike } from '../utils/index.js';
 
 /**
  * Yields to the microtask queue `ticks` times (no timers involved).
  */
 async function yieldTicks(ticks: number): Promise<void> {
 	for (let i = 0; i < ticks; i++) await Promise.resolve();
+}
+
+/**
+ * A fake abort signal that counts its listeners (EventTarget semantics: `once` listeners are removed before being called,
+ * and listeners removed during dispatch are skipped).
+ */
+class CountingSignal implements AbortSignalLike {
+	aborted = false;
+	reason: unknown = undefined;
+	readonly listeners = new Map<() => void, boolean>();
+
+	addEventListener(_type: 'abort', listener: () => void, options?: { once?: boolean }): void {
+		if (!this.listeners.has(listener)) this.listeners.set(listener, options?.once ?? false);
+	}
+
+	removeEventListener(_type: 'abort', listener: () => void): void {
+		this.listeners.delete(listener);
+	}
+
+	abort(reason: unknown): void {
+		if (this.aborted) return;
+		this.aborted = true;
+		this.reason = reason;
+		for (const [listener, once] of Array.from(this.listeners)) {
+			if (!this.listeners.has(listener)) continue;
+			if (once) this.listeners.delete(listener);
+			listener();
+		}
+	}
 }
 
 describe('Async helpers (properties)', function () {
@@ -241,6 +271,69 @@ describe('Async helpers (properties)', function () {
 						})
 					);
 					expect(maxRunning).toBeLessThanOrEqual(1);
+				})
+			);
+		});
+	});
+	describe('anySignal', function () {
+		it('aborts iff some input aborts, with the first reason, and leaves no listener behind', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: 0, max: 6 }), fc.array(fc.nat(), { maxLength: 6 }), fc.array(fc.nat(), { maxLength: 8 }), function (count, preAborted, aborts) {
+					const inputs = Array.from({ length: count }, function () {
+						return new CountingSignal();
+					});
+					for (const n of preAborted) if (count > 0) inputs[n % count].abort(`pre-${n % count}`);
+
+					const firstPre = inputs.find(function (input) {
+						return input.aborted;
+					});
+					const signal = anySignal(inputs);
+					let expectedReason: unknown = firstPre?.reason;
+
+					for (const n of aborts) {
+						if (count === 0) break;
+						const input = inputs[n % count];
+						if (expectedReason === undefined && !input.aborted) expectedReason = `late-${n % count}`;
+						input.abort(`late-${n % count}`);
+					}
+
+					expect(signal.aborted).toBe(expectedReason !== undefined);
+					if (expectedReason !== undefined) expect(signal.reason).toBe(expectedReason);
+					for (const input of inputs) expect(input.listeners.size).toBe(signal.aborted ? 0 : 1);
+				})
+			);
+		});
+	});
+
+	describe('abortable', function () {
+		it('settles like whichever happens first (settlement or abort) and always removes its listener', async function () {
+			await fc.assert(
+				fc.asyncProperty(fc.boolean(), fc.boolean(), fc.integer({ min: 0, max: 3 }), async function (abortFirst, fulfil, ticks) {
+					const signal = new CountingSignal();
+					const work = createDeferred<string>();
+					const result = abortable(work.promise, signal);
+					const outcome = result.then(
+						function (value) {
+							return { value };
+						},
+						function (reason: unknown) {
+							return { reason };
+						}
+					);
+
+					await yieldTicks(ticks);
+					if (abortFirst) signal.abort('aborted');
+					if (fulfil) work.resolve('value');
+					else work.reject('error');
+					if (!abortFirst) {
+						await yieldTicks(3);
+						signal.abort('aborted');
+					}
+
+					const settled = await outcome;
+					if (abortFirst) expect(settled).toEqual({ reason: 'aborted' });
+					else expect(settled).toEqual(fulfil ? { value: 'value' } : { reason: 'error' });
+					expect(signal.listeners.size).toBe(0);
 				})
 			);
 		});

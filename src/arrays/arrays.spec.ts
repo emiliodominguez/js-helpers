@@ -19,6 +19,39 @@ function sequence(...values: number[]): () => number {
 	};
 }
 
+/**
+ * Reference O(n·m) dynamic-programming LCS length.
+ */
+function lcsLength<T>(a: readonly T[], b: readonly T[]): number {
+	let previous = new Array<number>(b.length + 1).fill(0);
+	for (const x of a) {
+		const current = [0];
+		b.forEach(function (y, j) {
+			current.push(Object.is(x, y) || x === y ? previous[j] + 1 : Math.max(previous[j + 1], current[j]));
+		});
+		previous = current;
+	}
+	return previous[b.length];
+}
+
+/**
+ * Checks that an edit script rebuilds both sequences and has the minimal number of edits.
+ */
+function expectValidMinimalScript<T>(a: readonly T[], b: readonly T[], script: Array<helpers.DiffOperation<T>>): void {
+	const rebuiltA: T[] = [];
+	const rebuiltB: T[] = [];
+	for (const operation of script) {
+		if (operation.type !== 'insert') rebuiltA.push(a[operation.indexA]);
+		if (operation.type !== 'delete') rebuiltB.push(b[operation.indexB]);
+	}
+	expect(rebuiltA).toEqual(a);
+	expect(rebuiltB).toEqual(b);
+	const edits = script.filter(function (operation) {
+		return operation.type !== 'equal';
+	}).length;
+	expect(edits).toBe(a.length + b.length - 2 * lcsLength(a, b));
+}
+
 describe('Arrays helpers', function () {
 	describe('contains', function () {
 		it('should return true if the value is in the array', function () {
@@ -1222,6 +1255,187 @@ describe('Arrays helpers', function () {
 			expect(function () {
 				helpers.range(0, 5, 0);
 			}).toThrow(new RangeError('range: `step` must be a finite number other than 0, got 0'));
+		});
+	});
+	describe('diffSequences', function () {
+		it('should produce an ordered edit script', function () {
+			expect(helpers.diffSequences([1, 2, 3], [1, 3, 4])).toEqual([
+				{ type: 'equal', value: 1, indexA: 0, indexB: 0 },
+				{ type: 'delete', value: 2, indexA: 1 },
+				{ type: 'equal', value: 3, indexA: 2, indexB: 1 },
+				{ type: 'insert', value: 4, indexB: 2 }
+			]);
+		});
+
+		it('should handle empty sequences', function () {
+			expect(helpers.diffSequences([], [])).toEqual([]);
+			expect(helpers.diffSequences([], ['a', 'b'])).toEqual([
+				{ type: 'insert', value: 'a', indexB: 0 },
+				{ type: 'insert', value: 'b', indexB: 1 }
+			]);
+			expect(helpers.diffSequences(['a', 'b'], [])).toEqual([
+				{ type: 'delete', value: 'a', indexA: 0 },
+				{ type: 'delete', value: 'b', indexA: 1 }
+			]);
+		});
+
+		it('should keep identical sequences entirely', function () {
+			expect(helpers.diffSequences('abc', 'abc')).toEqual([
+				{ type: 'equal', value: 'a', indexA: 0, indexB: 0 },
+				{ type: 'equal', value: 'b', indexA: 1, indexB: 1 },
+				{ type: 'equal', value: 'c', indexA: 2, indexB: 2 }
+			]);
+		});
+
+		it('should list deletions before insertions within a change block', function () {
+			const types = helpers.diffSequences([0, 1, 2, 9, 3, 4], [0, 5, 6, 9, 7]).map(function (operation) {
+				return operation.type;
+			});
+			expect(types).toEqual(['equal', 'delete', 'delete', 'insert', 'insert', 'equal', 'delete', 'delete', 'insert']);
+		});
+
+		it('should be minimal on classic examples', function () {
+			const a = Array.from('ABCABBA');
+			const b = Array.from('CBABAC');
+			const script = helpers.diffSequences(a, b);
+			expectValidMinimalScript(a, b, script);
+			expect(
+				script.filter(function (operation) {
+					return operation.type !== 'equal';
+				})
+			).toHaveLength(5);
+			expectValidMinimalScript(Array.from('kitten'), Array.from('sitting'), helpers.diffSequences('kitten', 'sitting'));
+		});
+
+		it('should be minimal for every pair of short binary sequences', function () {
+			const sequences: number[][] = [[]];
+			for (let length = 1; length <= 5; length++) {
+				for (let bits = 0; bits < 2 ** length; bits++) {
+					sequences.push(
+						Array.from({ length }, function (_, i) {
+							return (bits >> i) & 1;
+						})
+					);
+				}
+			}
+			for (const a of sequences) {
+				for (const b of sequences) expectValidMinimalScript(a, b, helpers.diffSequences(a, b));
+			}
+		});
+
+		it('should split strings and other iterables into elements', function () {
+			expect(helpers.diffSequences('😀a', '😀b')).toEqual([
+				{ type: 'equal', value: '😀', indexA: 0, indexB: 0 },
+				{ type: 'delete', value: 'a', indexA: 1 },
+				{ type: 'insert', value: 'b', indexB: 1 }
+			]);
+			expect(helpers.diffSequences(new Set([1, 2]), once(2, 3))).toEqual([
+				{ type: 'delete', value: 1, indexA: 0 },
+				{ type: 'equal', value: 2, indexA: 1, indexB: 0 },
+				{ type: 'insert', value: 3, indexB: 1 }
+			]);
+		});
+
+		it('should compare with SameValueZero by default and report the element of a', function () {
+			const script = helpers.diffSequences([NaN, -0], [NaN, 0]);
+			expect(script).toEqual([
+				{ type: 'equal', value: NaN, indexA: 0, indexB: 0 },
+				{ type: 'equal', value: -0, indexA: 1, indexB: 1 }
+			]);
+			expect(Object.is(script[1].value, -0)).toBe(true);
+			expect(
+				helpers.diffSequences([{}], [{}]).map(function (operation) {
+					return operation.type;
+				})
+			).toEqual(['delete', 'insert']);
+		});
+
+		it('should call a custom equality as equals(itemOfA, itemOfB)', function () {
+			const a = [
+				{ id: 1, from: 'a' },
+				{ id: 2, from: 'a' }
+			];
+			const b = [
+				{ id: 2, from: 'b' },
+				{ id: 3, from: 'b' }
+			];
+			const equals = jest.fn(function (x: { id: number; from: string }, y: { id: number; from: string }) {
+				expect(x.from).toBe('a');
+				expect(y.from).toBe('b');
+				return x.id === y.id;
+			});
+			expect(helpers.diffSequences(a, b, equals)).toEqual([
+				{ type: 'delete', value: a[0], indexA: 0 },
+				{ type: 'equal', value: a[1], indexA: 1, indexB: 0 },
+				{ type: 'insert', value: b[1], indexB: 1 }
+			]);
+			expect(equals).toHaveBeenCalled();
+		});
+
+		it('should not mutate its inputs', function () {
+			const a = Object.freeze([1, 2, 3]);
+			const b = Object.freeze([3, 2, 1]);
+			expectValidMinimalScript(a, b, helpers.diffSequences(a, b));
+			expect(a).toEqual([1, 2, 3]);
+		});
+
+		it('should handle long, nearly identical sequences quickly', function () {
+			const a = Array.from({ length: 100_000 }, function (_, i) {
+				return i % 997;
+			});
+			const b = a.slice();
+			b.splice(500, 3, -1);
+			b.splice(90_000, 0, -2, -3);
+			const script = helpers.diffSequences(a, b);
+			expect(
+				script.filter(function (operation) {
+					return operation.type !== 'equal';
+				})
+			).toHaveLength(6);
+		});
+
+		it('should validate its arguments', function () {
+			expect(function () {
+				helpers.diffSequences(null as any, []);
+			}).toThrow(new TypeError('diffSequences: `a` must be an iterable, got null'));
+			expect(function () {
+				helpers.diffSequences([], 42 as any);
+			}).toThrow(new TypeError('diffSequences: `b` must be an iterable, got number'));
+			expect(function () {
+				helpers.diffSequences([], {} as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.diffSequences([], [], 'eq' as any);
+			}).toThrow(new TypeError('diffSequences: `equals` must be a function, got string'));
+		});
+	});
+
+	describe('longestCommonSubsequence', function () {
+		it('should return a longest common subsequence', function () {
+			expect(helpers.longestCommonSubsequence([1, 2, 3, 4, 5], [2, 4, 6, 5])).toEqual([2, 4, 5]);
+			expect(helpers.longestCommonSubsequence('ABCBDAB', 'BDCABA')).toHaveLength(4);
+			expect(helpers.longestCommonSubsequence('abc', 'abc')).toEqual(['a', 'b', 'c']);
+		});
+
+		it('should return an empty array when nothing is shared', function () {
+			expect(helpers.longestCommonSubsequence([], [1])).toEqual([]);
+			expect(helpers.longestCommonSubsequence([1, 2], [3, 4])).toEqual([]);
+		});
+
+		it('should take the elements from a when a custom equality is used', function () {
+			const result = helpers.longestCommonSubsequence(['A', 'b', 'C'], ['a', 'c'], function (x, y) {
+				return x.toLowerCase() === y.toLowerCase();
+			});
+			expect(result).toEqual(['A', 'C']);
+		});
+
+		it('should validate its arguments under its own name', function () {
+			expect(function () {
+				helpers.longestCommonSubsequence(undefined as any, []);
+			}).toThrow(new TypeError('longestCommonSubsequence: `a` must be an iterable, got undefined'));
+			expect(function () {
+				helpers.longestCommonSubsequence([], [], null as any);
+			}).toThrow(new TypeError('longestCommonSubsequence: `equals` must be a function, got null'));
 		});
 	});
 });

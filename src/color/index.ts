@@ -1,4 +1,4 @@
-import { clamp, lerp, modulo } from '../math/index.js';
+import { clamp, lerp, modulo, round } from '../math/index.js';
 import { assertNumber, describe } from '../utils/assert.js';
 
 /**
@@ -35,7 +35,8 @@ export interface Hsl {
 
 /**
  * Any colour accepted by the higher-level helpers of this module: an {@link Rgb} / {@link Rgba} object,
- * or a hex string understood by {@link parseHex} (`'#rgb'`, `'#rgba'`, `'#rrggbb'`, `'#rrggbbaa'`, with or without `#`).
+ * or a CSS colour string understood by {@link parseColor}: hex (`'#rgb'`, `'#rgba'`, `'#rrggbb'`, `'#rrggbbaa'`, with or without `#`),
+ * `rgb()` / `rgba()`, `hsl()` / `hsla()` or `'transparent'`.
  */
 export type ColorInput = Rgb | Rgba | string;
 
@@ -90,6 +91,25 @@ export interface MeetsContrastOptions {
 }
 
 const HEX_PATTERN = /^#?([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** A CSS colour function call: its name and its (trimmed) argument list. */
+const CSS_FUNCTION_PATTERN = /^(rgba?|hsla?)\(\s*([^()]*?)\s*\)$/i;
+
+/** One argument of a CSS colour function: a CSS `<number>`, optionally followed by `%` or an angle unit. */
+const CSS_COMPONENT_PATTERN = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn)?$/i;
+
+/** How many of each CSS angle unit make a full turn (`''` is a unitless hue, which means degrees). */
+const UNITS_PER_TURN: Readonly<Record<string, number>> = { '': 360, deg: 360, grad: 400, rad: 2 * Math.PI, turn: 1 };
+
+/**
+ * A parsed argument of a CSS colour function.
+ */
+interface CssComponent {
+	/** The numeric value (`0` for `none`). */
+	value: number;
+	/** The lowercase unit: `''` (plain number or `none`), `'%'` or an angle unit. */
+	unit: string;
+}
 
 /** Minimum contrast ratios from WCAG 2.x success criteria 1.4.3 (AA) and 1.4.6 (AAA). */
 const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; large: number }>> = {
@@ -181,20 +201,153 @@ export function parseHex(hex: string): Rgba {
 }
 
 /**
- * Normalizes any {@link ColorInput} to a fresh {@link Rgba} object: hex strings are parsed with {@link parseHex};
- * for objects, `r`, `g`, `b` are clamped to `[0, 255]` and rounded to integers, and `a` (default `1` when missing or `undefined`) is clamped to `[0, 1]`.
- * @param {ColorInput} input - A hex string or an `Rgb` / `Rgba` object
+ * Parses one argument of a CSS colour function.
+ * @param {string} token - The argument text, without surrounding whitespace
+ * @param {boolean} legacy - Whether the comma-separated syntax is used (where `none` is not allowed)
+ * @returns {CssComponent | undefined} The value and unit, or `undefined` when the token is not valid
+ * @example
+ * parseComponent('50%', false); // => { value: 50, unit: '%' }
+ */
+function parseComponent(token: string, legacy: boolean): CssComponent | undefined {
+	if (!legacy && token.toLowerCase() === 'none') return { value: 0, unit: '' };
+	const match = CSS_COMPONENT_PATTERN.exec(token);
+	if (match === null) return undefined;
+	const value = Number(match[1]);
+	return Number.isFinite(value) ? { value, unit: (match[2] ?? '').toLowerCase() } : undefined;
+}
+
+/**
+ * Whether every component has one of the allowed units.
+ * @param {CssComponent[]} components - The parsed components
+ * @param {string[]} units - The allowed units
+ * @returns {boolean} `true` when all units are allowed
+ * @example
+ * hasUnits([{ value: 1, unit: '%' }], ['', '%']); // => true
+ */
+function hasUnits(components: CssComponent[], units: string[]): boolean {
+	return components.every(function (component) {
+		return units.includes(component.unit);
+	});
+}
+
+/**
+ * Parses the arguments of an `rgb()`, `rgba()`, `hsl()` or `hsla()` call (CSS Color 4 grammar, legacy and modern syntaxes).
+ * @param {string} name - The lowercase function name
+ * @param {string} args - The text between the parentheses, trimmed
+ * @returns {Rgba | undefined} The colour, or `undefined` when the arguments are not valid
+ * @example
+ * parseCssFunction('rgb', '255 0 0 / 50%'); // => { r: 255, g: 0, b: 0, a: 0.5 }
+ */
+function parseCssFunction(name: string, args: string): Rgba | undefined {
+	const legacy = args.includes(',');
+	// Legacy: `r, g, b[, a]`. Modern: `r g b[ / a]` (exactly three space-separated components before the optional slash).
+	const parts = args.split(legacy ? /\s*,\s*/ : /\s*\/\s*/);
+	const tokens = legacy ? parts : parts[0].split(/\s+/);
+	if (tokens.length !== 3 && !(legacy && tokens.length === 4)) return undefined;
+	if (!legacy && parts.length > 1) tokens.push(...parts.slice(1));
+	if (tokens.length > 4) return undefined;
+
+	const components: CssComponent[] = [];
+	for (const token of tokens) {
+		const component = parseComponent(token, legacy);
+		if (component === undefined) return undefined;
+		components.push(component);
+	}
+
+	const [first, second, third, alpha = { value: 1, unit: '' }] = components;
+	if (!hasUnits([alpha], ['', '%'])) return undefined;
+	const a = clamp(alpha.unit === '%' ? alpha.value / 100 : alpha.value, 0, 1) + 0;
+	const channels = [first, second, third];
+
+	if (name.startsWith('rgb')) {
+		// Legacy syntax: all three channels are numbers, or all three are percentages.
+		if (!hasUnits(channels, ['', '%']) || (legacy && !hasUnits(channels, [first.unit]))) return undefined;
+		const [r, g, b] = channels.map(function (channel) {
+			return toByte(channel.unit === '%' ? (channel.value * 255) / 100 : channel.value);
+		});
+		return { r, g, b, a };
+	}
+
+	// Legacy syntax requires percentages for saturation and lightness; the modern one also accepts plain numbers.
+	if (first.unit === '%' || !hasUnits([second, third], legacy ? ['%'] : ['', '%'])) return undefined;
+	// Reduce the hue in its own unit first, so huge values cannot overflow when converted to degrees.
+	const perTurn = UNITS_PER_TURN[first.unit];
+	const { r, g, b } = hslToRgb({ h: (modulo(first.value, perTurn) * 360) / perTurn, s: second.value, l: third.value });
+	return { r, g, b, a };
+}
+
+/**
+ * Parses a CSS colour string for `caller`.
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {string} name - Name of the validated parameter
+ * @param {string} input - The string to parse
+ * @returns {Rgba} The colour
+ * @throws {TypeError} when `input` is not a supported CSS colour
+ * @example
+ * parseCssColor('toRgba', 'input', 'transparent'); // => { r: 0, g: 0, b: 0, a: 0 }
+ */
+function parseCssColor(caller: string, name: string, input: string): Rgba {
+	const text = input.trim();
+	if (HEX_PATTERN.test(text)) return parseHex(text);
+	if (text.toLowerCase() === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
+	const match = CSS_FUNCTION_PATTERN.exec(text);
+	const color = match === null ? undefined : parseCssFunction(match[1].toLowerCase(), match[2]);
+	if (color === undefined) {
+		throw new TypeError(`${caller}: \`${name}\` must be a CSS colour (hex, rgb(), hsl() or 'transparent'), got ${JSON.stringify(input)}`);
+	}
+	return color;
+}
+
+/**
+ * Parses a CSS colour string (CSS Color 4) into an {@link Rgba} colour. Supported forms:
+ * - hex: everything {@link parseHex} accepts (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, with or without `#`), with the same result;
+ * - `rgb()` / `rgba()` (aliases): legacy comma syntax `rgb(r, g, b[, a])` (channels all numbers or all percentages) and modern
+ *   space syntax `rgb(r g b[ / a])` (numbers and percentages may be mixed, `none` means `0`);
+ * - `hsl()` / `hsla()` (aliases): legacy `hsl(h, s%, l%[, a])` and modern `hsl(h s l[ / a])` (saturation and lightness as
+ *   percentages or plain numbers, `none` means `0`); the hue is a number (degrees) or an angle in `deg`, `grad`, `rad` or `turn`;
+ * - `transparent` (transparent black).
+ *
+ * Function names, units and keywords are case-insensitive, and whitespace around the string and the arguments is ignored.
+ * The alpha is a number or a percentage. Out-of-range values are clamped as in CSS: channels to `[0, 255]`, saturation and
+ * lightness to `[0%, 100%]`, alpha to `[0, 1]`; the hue wraps around. Channels are then rounded to integers (alpha is not rounded).
+ * Numbers too large for a double (e.g. `1e999`) are rejected.
+ * Named colours (`red`, `rebeccapurple`, ...), `currentcolor`, `calc()` and the other colour functions (`hwb()`, `lab()`,
+ * `color()`, ...) are deliberately not supported, to keep the bundle small.
+ * @param {string} input - The CSS colour string
+ * @returns {Rgba} A new colour object with integer channels
+ * @throws {TypeError} when `input` is not a string, or not one of the supported colour syntaxes
+ * @example
+ * parseColor('#ff8000'); // => { r: 255, g: 128, b: 0, a: 1 }
+ * parseColor('rgba(255, 0, 0, 0.5)'); // => { r: 255, g: 0, b: 0, a: 0.5 }
+ * parseColor('rgb(100% 50% 0% / 25%)'); // => { r: 255, g: 128, b: 0, a: 0.25 }
+ * parseColor('hsl(120deg 100% 25%)'); // => { r: 0, g: 128, b: 0, a: 1 }
+ * parseColor('hsla(0.5turn, 100%, 50%, .8)'); // => { r: 0, g: 255, b: 255, a: 0.8 }
+ * parseColor('transparent'); // => { r: 0, g: 0, b: 0, a: 0 }
+ * parseColor('rgb(300 -20 0)'); // => { r: 255, g: 0, b: 0, a: 1 }
+ * parseColor('red'); // throws TypeError
+ */
+export function parseColor(input: string): Rgba {
+	if (typeof input !== 'string') throw new TypeError(`parseColor: \`input\` must be a string, got ${describe(input)}`);
+	return parseCssColor('parseColor', 'input', input);
+}
+
+/**
+ * Normalizes any {@link ColorInput} to a fresh {@link Rgba} object: strings are parsed with {@link parseColor} (so every hex
+ * string gives the same result as {@link parseHex}); for objects, `r`, `g`, `b` are clamped to `[0, 255]` and rounded to integers,
+ * and `a` (default `1` when missing or `undefined`) is clamped to `[0, 1]`.
+ * @param {ColorInput} input - A CSS colour string (see {@link parseColor}) or an `Rgb` / `Rgba` object
  * @returns {Rgba} A new normalized colour
- * @throws {TypeError} when `input` is neither a string nor an object, is an invalid hex string, or has a non-numeric channel
+ * @throws {TypeError} when `input` is neither a string nor an object, is an unsupported colour string, or has a non-numeric channel
  * @throws {RangeError} when a channel is `NaN`
  * @example
  * toRgba('#fff'); // => { r: 255, g: 255, b: 255, a: 1 }
  * toRgba({ r: 300, g: 12.4, b: -5 }); // => { r: 255, g: 12, b: 0, a: 1 }
  * toRgba({ r: 0, g: 0, b: 0, a: 0.5 }); // => { r: 0, g: 0, b: 0, a: 0.5 }
+ * toRgba('hsl(0 100% 50% / 0.5)'); // => { r: 255, g: 0, b: 0, a: 0.5 }
  */
 export function toRgba(input: ColorInput): Rgba {
-	if (typeof input === 'string') return parseHex(input);
-	if (typeof input !== 'object' || input === null) throw new TypeError(`toRgba: \`input\` must be a hex string or an { r, g, b } object, got ${describe(input)}`);
+	if (typeof input === 'string') return parseCssColor('toRgba', 'input', input);
+	if (typeof input !== 'object' || input === null) throw new TypeError(`toRgba: \`input\` must be a colour string or an { r, g, b } object, got ${describe(input)}`);
 	const rawAlpha = (input as Partial<Rgba>).a;
 	const alpha = rawAlpha === undefined ? 1 : readChannel('toRgba', 'input.a', rawAlpha);
 	return {
@@ -223,6 +376,57 @@ export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
 	const { r, g, b, a } = toRgba(color);
 	const includeAlpha = options.alpha ?? a < 1;
 	return `#${hexByte(r)}${hexByte(g)}${hexByte(b)}${includeAlpha ? hexByte(Math.round(a * 255)) : ''}`;
+}
+
+/**
+ * Formats an alpha value as the ` / a` suffix of a modern CSS colour function, rounded to 3 decimals (enough to keep every
+ * 8-bit alpha byte distinct). Returns `''` for (rounded) opaque colours.
+ * @param {number} alpha - Alpha in `[0, 1]`
+ * @returns {string} `' / a'` or `''`
+ * @example
+ * cssAlpha(0.5); // => ' / 0.5'
+ */
+function cssAlpha(alpha: number): string {
+	const rounded = round(alpha, 3);
+	return rounded < 1 ? ` / ${rounded}` : '';
+}
+
+/**
+ * Formats a colour as a CSS `rgb()` string in the modern space-separated syntax: `'rgb(r g b)'`, or `'rgb(r g b / a)'` for
+ * translucent colours. Channels are clamped and rounded (see {@link toRgba}); alpha is rounded to 3 decimals and omitted when it
+ * rounds to `1`. The result is understood by {@link parseColor} and by all current browsers.
+ * @param {ColorInput} color - The colour
+ * @returns {string} The CSS colour string
+ * @throws {TypeError} when `color` is not a valid colour (see {@link toRgba})
+ * @throws {RangeError} when a channel is `NaN`
+ * @example
+ * toCssRgb('#ff8000'); // => 'rgb(255 128 0)'
+ * toCssRgb({ r: 0, g: 0, b: 0, a: 0.5 }); // => 'rgb(0 0 0 / 0.5)'
+ * toCssRgb('#00000080'); // => 'rgb(0 0 0 / 0.502)'
+ */
+export function toCssRgb(color: ColorInput): string {
+	const { r, g, b, a } = toRgba(color);
+	return `rgb(${r} ${g} ${b}${cssAlpha(a)})`;
+}
+
+/**
+ * Formats a colour as a CSS `hsl()` string in the modern space-separated syntax: `'hsl(h s% l%)'`, or `'hsl(h s% l% / a)'` for
+ * translucent colours. Hue (degrees, at most `359.8` for 8-bit channels), saturation and lightness are rounded to 1 decimal, which is enough for every
+ * 8-bit colour to convert back to exactly the same channels (`parseColor(toCssHsl(c))` round-trips); alpha is rounded to 3 decimals
+ * and omitted when it rounds to `1`.
+ * @param {ColorInput} color - The colour (channels are clamped and rounded first, see {@link toRgba})
+ * @returns {string} The CSS colour string
+ * @throws {TypeError} when `color` is not a valid colour (see {@link toRgba})
+ * @throws {RangeError} when a channel is `NaN`
+ * @example
+ * toCssHsl('#ff0000'); // => 'hsl(0 100% 50%)'
+ * toCssHsl('#808080'); // => 'hsl(0 0% 50.2%)'
+ * toCssHsl({ r: 51, g: 102, b: 153, a: 0.25 }); // => 'hsl(210 50% 40% / 0.25)'
+ */
+export function toCssHsl(color: ColorInput): string {
+	const rgba = toRgba(color);
+	const { h, s, l } = rgbToHsl(rgba);
+	return `hsl(${round(h, 1)} ${round(s, 1)}% ${round(l, 1)}%${cssAlpha(rgba.a)})`;
 }
 
 /**

@@ -53,6 +53,33 @@ function sortedNumbers(values: number[]): number[] {
 	});
 }
 
+/**
+ * Reference O(n·m) dynamic-programming LCS length (SameValueZero equality, like the default of diffSequences).
+ */
+function lcsLength(a: readonly number[], b: readonly number[]): number {
+	let previous = new Array<number>(b.length + 1).fill(0);
+	for (const x of a) {
+		const current = [0];
+		b.forEach(function (y, j) {
+			current.push(x === y ? previous[j] + 1 : Math.max(previous[j + 1], current[j]));
+		});
+		previous = current;
+	}
+	return previous[b.length];
+}
+
+/**
+ * Whether `sub` is a subsequence of `sequence`.
+ */
+function isSubsequence(sub: readonly number[], sequence: readonly number[]): boolean {
+	let i = 0;
+	for (const value of sequence) if (i < sub.length && sub[i] === value) i++;
+	return i === sub.length;
+}
+
+/** Small-alphabet sequences, so that the inputs share many elements. */
+const diffInput = fc.array(fc.integer({ min: 0, max: 4 }), { maxLength: 40 });
+
 describe('arrays (property-based)', function () {
 	it('contains agrees with a SameValueZero reference', function () {
 		fc.assert(
@@ -599,6 +626,82 @@ describe('arrays (property-based)', function () {
 					const kept = helpers.intersectionBy(a, b, modulo).map(modulo);
 					const dropped = helpers.differenceBy(a, b, modulo).map(modulo);
 					expect(sortedNumbers([...kept, ...dropped])).toEqual(sortedNumbers(helpers.removeDuplicates(a.map(modulo))));
+				})
+			);
+		});
+	});
+	describe('diffSequences / longestCommonSubsequence', function () {
+		it('the script should rebuild a (equal + delete) and b (equal + insert), with consistent indices', function () {
+			fc.assert(
+				fc.property(diffInput, diffInput, function (a, b) {
+					const script = helpers.diffSequences(a, b);
+					const fromA: number[] = [];
+					const fromB: number[] = [];
+					for (const operation of script) {
+						if (operation.type !== 'insert') {
+							expect(operation.indexA).toBe(fromA.length);
+							fromA.push(operation.value);
+						}
+						if (operation.type !== 'delete') {
+							expect(operation.indexB).toBe(fromB.length);
+							fromB.push(operation.type === 'equal' ? b[operation.indexB] : operation.value);
+						}
+						if (operation.type === 'equal') expect(operation.value).toBe(b[operation.indexB]);
+					}
+					expect(fromA).toEqual(a);
+					expect(fromB).toEqual(b);
+				})
+			);
+		});
+
+		it('the script should be minimal: |a| + |b| - 2·|LCS| edits (reference O(n·m) DP)', function () {
+			fc.assert(
+				fc.property(diffInput, diffInput, function (a, b) {
+					const edits = helpers.diffSequences(a, b).filter(function (operation) {
+						return operation.type !== 'equal';
+					}).length;
+					expect(edits).toBe(a.length + b.length - 2 * lcsLength(a, b));
+				})
+			);
+		});
+
+		it('deletions should come before insertions within each change block', function () {
+			fc.assert(
+				fc.property(diffInput, diffInput, function (a, b) {
+					const types = helpers
+						.diffSequences(a, b)
+						.map(function (operation) {
+							return operation.type[0];
+						})
+						.join('');
+					expect(types).not.toMatch(/id/);
+				})
+			);
+		});
+
+		it('the LCS should be a common subsequence of maximal length', function () {
+			fc.assert(
+				fc.property(diffInput, diffInput, function (a, b) {
+					const common = helpers.longestCommonSubsequence(a, b);
+					expect(isSubsequence(common, a)).toBe(true);
+					expect(isSubsequence(common, b)).toBe(true);
+					expect(common).toHaveLength(lcsLength(a, b));
+					expect(helpers.longestCommonSubsequence(b, a)).toHaveLength(common.length);
+				})
+			);
+		});
+
+		it('a sequence diffed against itself, or against an edited copy of itself, should behave predictably', function () {
+			fc.assert(
+				fc.property(diffInput, fc.integer({ min: 0, max: 40 }), fc.array(fc.integer({ min: 5, max: 9 }), { maxLength: 5 }), function (a, at, inserted) {
+					expect(helpers.longestCommonSubsequence(a, a)).toEqual(a);
+					const index = Math.min(at, a.length);
+					const b = [...a.slice(0, index), ...inserted, ...a.slice(index)];
+					expect(
+						helpers.diffSequences(a, b).filter(function (operation) {
+							return operation.type === 'insert';
+						})
+					).toHaveLength(inserted.length);
 				})
 			);
 		});

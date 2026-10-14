@@ -1,5 +1,5 @@
 import { sum } from '../math/index.js';
-import { assertFunction, assertInteger, assertNumber, draw } from '../utils/assert.js';
+import { assertFunction, assertInteger, assertNumber, describe, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -1151,4 +1151,230 @@ export function intersectionBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: 
 		if (remaining.delete(keyFn(item))) result.push(item);
 	}
 	return result;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// diffSequences / longestCommonSubsequence
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * One step of the edit script returned by {@link diffSequences}:
+ * - `'equal'`: `value` is `a[indexA]`, kept (it matches `b[indexB]`);
+ * - `'delete'`: `value` is `a[indexA]`, removed;
+ * - `'insert'`: `value` is `b[indexB]`, added.
+ * @template T - The element type
+ */
+export type DiffOperation<T> =
+	{ type: 'equal'; value: T; indexA: number; indexB: number } | { type: 'delete'; value: T; indexA: number } | { type: 'insert'; value: T; indexB: number };
+
+/**
+ * SameValueZero equality (like `===`, but `NaN` equals `NaN`), the default of {@link diffSequences}.
+ * @param {unknown} x - First value
+ * @param {unknown} y - Second value
+ * @returns {boolean} Whether the values are SameValueZero-equal
+ */
+function sameValueZero(x: unknown, y: unknown): boolean {
+	return x === y || (Number.isNaN(x) && Number.isNaN(y));
+}
+
+/**
+ * Returns `value` itself when it is an array, or its elements in a new array when it is another iterable.
+ * @template T - The element type
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {string} name - Name of the validated parameter
+ * @param {Iterable<T>} value - The iterable
+ * @returns {ReadonlyArray<T>} The elements
+ * @throws {TypeError} when `value` is not iterable
+ */
+function toList<T>(caller: string, name: string, value: Iterable<T>): ReadonlyArray<T> {
+	if (Array.isArray(value)) return value;
+	if (value === null || value === undefined || typeof (value as Partial<Iterable<T>>)[Symbol.iterator] !== 'function') {
+		throw new TypeError(`${caller}: \`${name}\` must be an iterable, got ${describe(value)}`);
+	}
+	return Array.from(value);
+}
+
+/**
+ * Computes a minimal edit script with Myers' linear-space algorithm (see {@link diffSequences}).
+ * @template T - The element type
+ * @param {string} caller - Name of the public function, used in error messages
+ * @param {Iterable<T>} a - The original sequence
+ * @param {Iterable<T>} b - The target sequence
+ * @param {(x: T, y: T) => boolean} equals - Element equality, called as `equals(itemOfA, itemOfB)`
+ * @returns {Array<DiffOperation<T>>} The edit script
+ * @throws {TypeError} when `a` or `b` is not iterable, or `equals` is not a function
+ */
+function myersDiff<T>(caller: string, a: Iterable<T>, b: Iterable<T>, equals: (x: T, y: T) => boolean): Array<DiffOperation<T>> {
+	const left = toList(caller, 'a', a);
+	const right = toList(caller, 'b', b);
+	assertFunction(caller, 'equals', equals);
+
+	const script: Array<DiffOperation<T>> = [];
+	const deletions: number[] = [];
+	const insertions: number[] = [];
+	// Furthest-reaching x per diagonal for the forward and backward searches, shared by every sub-problem (each one only reads
+	// entries it wrote itself, plus the seed at diagonal 1). Diagonals range over [-(max + 1), max + 1] with max = ceil((N + M) / 2).
+	const offset = Math.ceil((left.length + right.length) / 2) + 1;
+	const forward = new Array<number>(2 * offset + 1).fill(0);
+	const backward = new Array<number>(2 * offset + 1).fill(0);
+
+	/**
+	 * Appends the pending deletions, then the pending insertions (so each change block reads "delete, then insert").
+	 * @returns {void}
+	 */
+	function flush(): void {
+		for (const indexA of deletions) script.push({ type: 'delete', value: left[indexA], indexA });
+		for (const indexB of insertions) script.push({ type: 'insert', value: right[indexB], indexB });
+		deletions.length = 0;
+		insertions.length = 0;
+	}
+
+	/**
+	 * Appends a kept element.
+	 * @param {number} indexA - Its index in `a`
+	 * @param {number} indexB - The index of the matching element in `b`
+	 * @returns {void}
+	 */
+	function keep(indexA: number, indexB: number): void {
+		flush();
+		script.push({ type: 'equal', value: left[indexA], indexA, indexB });
+	}
+
+	/**
+	 * Finds the middle snake of `a[aLo, aHi)` versus `b[bLo, bHi)`: a diagonal run on an optimal edit path, found by searching
+	 * forwards from the start and backwards from the end until the two searches meet (Myers 1986, section 4b).
+	 * @param {number} aLo - Start of the range of `a` (inclusive)
+	 * @param {number} aHi - End of the range of `a` (exclusive)
+	 * @param {number} bLo - Start of the range of `b` (inclusive)
+	 * @param {number} bHi - End of the range of `b` (exclusive)
+	 * @returns {[number, number, number, number]} The snake's start `(x, y)` and end `(u, v)`, as absolute indices
+	 */
+	function middleSnake(aLo: number, aHi: number, bLo: number, bHi: number): [number, number, number, number] {
+		const n = aHi - aLo;
+		const m = bHi - bLo;
+		const delta = n - m;
+		const odd = delta % 2 !== 0;
+		forward[offset + 1] = 0;
+		backward[offset + 1] = 0;
+
+		for (let d = 0; ; d++) {
+			for (let k = -d; k <= d; k += 2) {
+				let x = k === -d || (k !== d && forward[offset + k - 1] < forward[offset + k + 1]) ? forward[offset + k + 1] : forward[offset + k - 1] + 1;
+				let y = x - k;
+				const startX = x;
+				const startY = y;
+				while (x < n && y < m && equals(left[aLo + x], right[bLo + y])) {
+					x++;
+					y++;
+				}
+				forward[offset + k] = x;
+				// The backward diagonal through the same points is delta - k; it was explored up to d - 1 edits.
+				if (odd && Math.abs(delta - k) <= d - 1 && x + backward[offset + delta - k] >= n) return [aLo + startX, bLo + startY, aLo + x, bLo + y];
+			}
+
+			for (let k = -d; k <= d; k += 2) {
+				let x = k === -d || (k !== d && backward[offset + k - 1] < backward[offset + k + 1]) ? backward[offset + k + 1] : backward[offset + k - 1] + 1;
+				let y = x - k;
+				const startX = x;
+				const startY = y;
+				while (x < n && y < m && equals(left[aHi - 1 - x], right[bHi - 1 - y])) {
+					x++;
+					y++;
+				}
+				backward[offset + k] = x;
+				if (!odd && Math.abs(delta - k) <= d && x + forward[offset + delta - k] >= n) return [aHi - x, bHi - y, aHi - startX, bHi - startY];
+			}
+		}
+	}
+
+	/**
+	 * Diffs `a[aLo, aHi)` against `b[bLo, bHi)`, appending to the script in order.
+	 * @param {number} aLo - Start of the range of `a` (inclusive)
+	 * @param {number} aHi - End of the range of `a` (exclusive)
+	 * @param {number} bLo - Start of the range of `b` (inclusive)
+	 * @param {number} bHi - End of the range of `b` (exclusive)
+	 * @returns {void}
+	 */
+	function compare(aLo: number, aHi: number, bLo: number, bHi: number): void {
+		// Matching a common prefix or suffix is always optimal, and it is where most real-world diffs spend their time.
+		while (aLo < aHi && bLo < bHi && equals(left[aLo], right[bLo])) keep(aLo++, bLo++);
+		let aEnd = aHi;
+		let bEnd = bHi;
+		while (aEnd > aLo && bEnd > bLo && equals(left[aEnd - 1], right[bEnd - 1])) {
+			aEnd--;
+			bEnd--;
+		}
+
+		if (aLo === aEnd) {
+			for (let j = bLo; j < bEnd; j++) insertions.push(j);
+		} else if (bLo === bEnd) {
+			for (let i = aLo; i < aEnd; i++) deletions.push(i);
+		} else {
+			// Both ranges are non-empty and differ at both ends, so at least 2 edits are needed and each half needs strictly fewer.
+			const [x, y, u, v] = middleSnake(aLo, aEnd, bLo, bEnd);
+			compare(aLo, x, bLo, y);
+			for (let i = x, j = y; i < u; i++, j++) keep(i, j);
+			compare(u, aEnd, v, bEnd);
+		}
+
+		for (let i = aEnd, j = bEnd; i < aHi; i++, j++) keep(i, j);
+	}
+
+	compare(0, left.length, 0, right.length);
+	flush();
+	return script;
+}
+
+/**
+ * Computes a minimal edit script turning sequence `a` into sequence `b`: a list of `'equal'`, `'delete'` and `'insert'` operations
+ * (see {@link DiffOperation}) with the smallest possible number of deletions plus insertions. Reading the script in order,
+ * the `'equal'` and `'delete'` values spell out `a`, and the `'equal'` and `'insert'` values spell out `b`. Within each run of
+ * changes, deletions come before insertions. When several minimal scripts exist, which one is returned is unspecified but
+ * deterministic.
+ *
+ * Uses Myers' O((N + M)·D) algorithm, in its linear-space divide-and-conquer form, after stripping the common prefix and suffix:
+ * time is O((N + M)·D) where D is the size of the edit script (so near-identical inputs are fast, and completely different ones
+ * cost O((N + M)²)), memory is O(N + M), and recursion depth is O(log D). Non-array iterables are copied first (strings are split
+ * into code points).
+ * @template T - The element type
+ * @param {Iterable<T>} a - The original sequence
+ * @param {Iterable<T>} b - The target sequence
+ * @param {(x: T, y: T) => boolean} [equals=SameValueZero] - Element equality, always called as `equals(itemOfA, itemOfB)`;
+ * defaults to SameValueZero (`===`, except that `NaN` equals `NaN`). `'equal'` operations carry the element of `a`.
+ * @returns {Array<DiffOperation<T>>} The edit script, in order
+ * @throws {TypeError} when `a` or `b` is not iterable, or `equals` is not a function
+ * @example
+ * diffSequences([1, 2, 3], [1, 3, 4]); // => [{ type: 'equal', value: 1, indexA: 0, indexB: 0 }, { type: 'delete', value: 2, indexA: 1 }, { type: 'equal', value: 3, indexA: 2, indexB: 1 }, { type: 'insert', value: 4, indexB: 2 }]
+ * diffSequences('cat', 'cut').map(function (op) { return op.type; }); // => ['equal', 'delete', 'insert', 'equal']
+ * @example
+ * const before = ['Alice', 'bob'];
+ * const after = ['alice', 'Bob', 'Carol'];
+ * diffSequences(before, after, function (x, y) { return x.toLowerCase() === y.toLowerCase(); }).map(function (op) { return op.type; }); // => ['equal', 'equal', 'insert']
+ */
+export function diffSequences<T>(a: Iterable<T>, b: Iterable<T>, equals: (x: T, y: T) => boolean = sameValueZero): Array<DiffOperation<T>> {
+	return myersDiff('diffSequences', a, b, equals);
+}
+
+/**
+ * Computes a longest common subsequence of `a` and `b`: the longest list of elements that appear in both, in the same relative
+ * order (not necessarily contiguously). It is the `'equal'` part of {@link diffSequences}, with the same complexity
+ * (O((N + M)·D) time, O(N + M) memory). When several longest subsequences exist, which one is returned is unspecified but deterministic.
+ * @template T - The element type
+ * @param {Iterable<T>} a - The first sequence
+ * @param {Iterable<T>} b - The second sequence
+ * @param {(x: T, y: T) => boolean} [equals=SameValueZero] - Element equality, always called as `equals(itemOfA, itemOfB)`;
+ * defaults to SameValueZero. The returned elements are taken from `a`.
+ * @returns {T[]} The common subsequence, as a new array of elements of `a`
+ * @throws {TypeError} when `a` or `b` is not iterable, or `equals` is not a function
+ * @example
+ * longestCommonSubsequence([1, 2, 3, 4, 5], [2, 4, 6, 5]); // => [2, 4, 5]
+ * longestCommonSubsequence('ABCBDAB', 'BDCABA').length; // => 4
+ * longestCommonSubsequence([NaN, 0], [-0, NaN]).length; // => 1
+ */
+export function longestCommonSubsequence<T>(a: Iterable<T>, b: Iterable<T>, equals: (x: T, y: T) => boolean = sameValueZero): T[] {
+	const common: T[] = [];
+	for (const operation of myersDiff('longestCommonSubsequence', a, b, equals)) {
+		if (operation.type === 'equal') common.push(operation.value);
+	}
+	return common;
 }

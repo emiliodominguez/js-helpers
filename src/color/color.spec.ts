@@ -317,6 +317,198 @@ describe('Color helpers', function () {
 		});
 	});
 
+	describe('parseColor', function () {
+		it('should parse hex colours exactly like parseHex', function () {
+			for (const value of ['#abc', 'abc8', '#FF8000', '00000080']) {
+				expect(helpers.parseColor(value)).toEqual(helpers.parseHex(value));
+			}
+		});
+
+		it('should ignore surrounding whitespace and letter case', function () {
+			expect(helpers.parseColor('  #FFF\n')).toEqual({ r: 255, g: 255, b: 255, a: 1 });
+			expect(helpers.parseColor(' TRANSPARENT ')).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+			expect(helpers.parseColor('RGBA( 1 , 2 , 3 , 50% )')).toEqual({ r: 1, g: 2, b: 3, a: 0.5 });
+			expect(helpers.parseColor('HSL(0.5TURN 100% 50%)')).toEqual({ r: 0, g: 255, b: 255, a: 1 });
+		});
+
+		it('should parse the legacy comma syntax of rgb() and rgba()', function () {
+			expect(helpers.parseColor('rgb(255, 128, 0)')).toEqual({ r: 255, g: 128, b: 0, a: 1 });
+			expect(helpers.parseColor('rgba(255,128,0,0.25)')).toEqual({ r: 255, g: 128, b: 0, a: 0.25 });
+			expect(helpers.parseColor('rgb(1, 2, 3, 40%)')).toEqual({ r: 1, g: 2, b: 3, a: 0.4 });
+			expect(helpers.parseColor('rgba(1, 2, 3)')).toEqual({ r: 1, g: 2, b: 3, a: 1 });
+			expect(helpers.parseColor('rgb(100%, 50%, 0%)')).toEqual({ r: 255, g: 128, b: 0, a: 1 });
+		});
+
+		it('should parse the modern space syntax of rgb() with an optional alpha', function () {
+			expect(helpers.parseColor('rgb(255 128 0)')).toEqual({ r: 255, g: 128, b: 0, a: 1 });
+			expect(helpers.parseColor('rgb(255 128 0 / 0.5)')).toEqual({ r: 255, g: 128, b: 0, a: 0.5 });
+			expect(helpers.parseColor('rgba(1 2 3/50%)')).toEqual({ r: 1, g: 2, b: 3, a: 0.5 });
+			expect(helpers.parseColor('rgb(100% 128 0%)')).toEqual({ r: 255, g: 128, b: 0, a: 1 });
+			expect(helpers.parseColor('rgb(none 2 3 / none)')).toEqual({ r: 0, g: 2, b: 3, a: 0 });
+		});
+
+		it('should accept every CSS number form', function () {
+			expect(helpers.parseColor('rgb(+1 .5e1 3E1)')).toEqual({ r: 1, g: 5, b: 30, a: 1 });
+			expect(helpers.parseColor('rgb(1.4 1.5 254.5 / .5)')).toEqual({ r: 1, g: 2, b: 255, a: 0.5 });
+		});
+
+		it('should clamp out-of-range values like CSS', function () {
+			expect(helpers.parseColor('rgb(300 -20 0 / 2)')).toEqual({ r: 255, g: 0, b: 0, a: 1 });
+			expect(helpers.parseColor('rgb(150%, -5%, 0%, -1)')).toEqual({ r: 255, g: 0, b: 0, a: 0 });
+			expect(helpers.parseColor('rgb(1e300 0 0 / 1e300%)')).toEqual({ r: 255, g: 0, b: 0, a: 1 });
+			expect(helpers.parseColor('hsl(0 200% -10%)')).toEqual({ r: 0, g: 0, b: 0, a: 1 });
+			expect(Object.is(helpers.parseColor('rgb(0 0 0 / -0)').a, 0)).toBe(true);
+		});
+
+		it('should parse hsl() and hsla() in both syntaxes', function () {
+			expect(helpers.parseColor('hsl(120, 100%, 25%)')).toEqual({ r: 0, g: 128, b: 0, a: 1 });
+			expect(helpers.parseColor('hsla(120, 100%, 25%, 0.5)')).toEqual({ r: 0, g: 128, b: 0, a: 0.5 });
+			expect(helpers.parseColor('hsl(120 100% 25%)')).toEqual({ r: 0, g: 128, b: 0, a: 1 });
+			expect(helpers.parseColor('hsl(120 100 25 / 25%)')).toEqual({ r: 0, g: 128, b: 0, a: 0.25 });
+			expect(helpers.parseColor('hsl(none none none)')).toEqual({ r: 0, g: 0, b: 0, a: 1 });
+		});
+
+		it('should support every hue unit and wrap the hue', function () {
+			const blue = { r: 0, g: 0, b: 255, a: 1 };
+			for (const hue of ['240', '240deg', '266.6667grad', '4.18879rad', '0.6667turn', '-120deg', '600', '-0.3333turn', '1e300turn']) {
+				const color = helpers.parseColor(`hsl(${hue} 100% 50%)`);
+				if (hue === '1e300turn') expect(color).toEqual({ r: 255, g: 0, b: 0, a: 1 });
+				else expect(color).toEqual(blue);
+			}
+			expect(helpers.parseColor('hsl(100grad, 100%, 50%)')).toEqual(helpers.parseColor('hsl(90 100% 50%)'));
+		});
+
+		it('should parse transparent', function () {
+			expect(helpers.parseColor('transparent')).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+		});
+
+		it('should return a fresh object each time', function () {
+			expect(helpers.parseColor('transparent')).not.toBe(helpers.parseColor('transparent'));
+		});
+
+		it('should throw a TypeError for unsupported or malformed strings', function () {
+			const invalid = [
+				'',
+				'red',
+				'currentcolor',
+				'#ff',
+				'hwb(0 0% 0%)',
+				'rgb()',
+				'rgb(1 2)',
+				'rgb(1, 2)',
+				'rgb(1 2 3 4)',
+				'rgb(1, 2, 3, 4, 5)',
+				'rgb(1 2 3 / 0.5 0.1)',
+				'rgb(1 2 3 / 1 / 2)',
+				'rgb(1 2 3 /)',
+				'rgb(1, 2, 3,)',
+				'rgb(1, 2, 3 / 0.5)',
+				'rgb(1 2, 3, 4)',
+				'rgb(1, 2%, 3)',
+				'rgb(none, 2, 3)',
+				'rgb(1deg 2 3)',
+				'rgb(1 2 3 / 1deg)',
+				'rgb(1. 2 3)',
+				'rgb(1e999 0 0)',
+				'rgb(1 2 3) x',
+				'rgb((1 2 3))',
+				'rgb 1 2 3',
+				'hsl(120, 100, 25)',
+				'hsl(10% 100% 50%)',
+				'hsl(10 100deg 50%)',
+				'hsl(none, 100%, 50%)',
+				'hsla(1 2% 3% 4)'
+			];
+			for (const value of invalid) {
+				expect(function () {
+					helpers.parseColor(value);
+				}).toThrow(TypeError);
+			}
+		});
+
+		it('should throw a TypeError for non-strings', function () {
+			for (const value of [null, undefined, 42, { r: 0, g: 0, b: 0 }]) {
+				expect(function () {
+					helpers.parseColor(value as any);
+				}).toThrow(new TypeError(`parseColor: \`input\` must be a string, got ${value === null ? 'null' : typeof value}`));
+			}
+		});
+	});
+
+	describe('toRgba with CSS strings', function () {
+		it('should accept every syntax of parseColor', function () {
+			expect(helpers.toRgba('rgb(255 0 0 / 50%)')).toEqual({ r: 255, g: 0, b: 0, a: 0.5 });
+			expect(helpers.toRgba('hsl(240, 100%, 50%)')).toEqual({ r: 0, g: 0, b: 255, a: 1 });
+			expect(helpers.toHex('transparent')).toBe('#00000000');
+			expect(helpers.contrastRatio('rgb(0 0 0)', 'hsl(0 0% 100%)')).toBe(21);
+		});
+
+		it('should report errors under its own name', function () {
+			expect(function () {
+				helpers.toRgba('nope');
+			}).toThrow(new TypeError('toRgba: `input` must be a CSS colour (hex, rgb(), hsl() or \'transparent\'), got "nope"'));
+			expect(function () {
+				helpers.toRgba(42 as any);
+			}).toThrow(new TypeError('toRgba: `input` must be a colour string or an { r, g, b } object, got number'));
+		});
+	});
+
+	describe('toCssRgb', function () {
+		it('should format opaque colours without alpha', function () {
+			expect(helpers.toCssRgb('#ff8000')).toBe('rgb(255 128 0)');
+			expect(helpers.toCssRgb({ r: 0, g: 0, b: 0 })).toBe('rgb(0 0 0)');
+			expect(helpers.toCssRgb({ r: 300, g: 1.4, b: -2, a: 2 })).toBe('rgb(255 1 0)');
+		});
+
+		it('should append the alpha, rounded to 3 decimals, for translucent colours', function () {
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.5 })).toBe('rgb(1 2 3 / 0.5)');
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0 })).toBe('rgb(1 2 3 / 0)');
+			expect(helpers.toCssRgb('#00000080')).toBe('rgb(0 0 0 / 0.502)');
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.12345 })).toBe('rgb(1 2 3 / 0.123)');
+		});
+
+		it('should omit an alpha that rounds to 1', function () {
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.9996 })).toBe('rgb(1 2 3)');
+		});
+
+		it('should throw for invalid colours', function () {
+			expect(function () {
+				helpers.toCssRgb('nope');
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.toCssRgb({ r: NaN, g: 0, b: 0 });
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('toCssHsl', function () {
+		it('should format colours in the modern hsl() syntax', function () {
+			expect(helpers.toCssHsl('#ff0000')).toBe('hsl(0 100% 50%)');
+			expect(helpers.toCssHsl('#00ff00')).toBe('hsl(120 100% 50%)');
+			expect(helpers.toCssHsl('#000')).toBe('hsl(0 0% 0%)');
+			expect(helpers.toCssHsl('#fff')).toBe('hsl(0 0% 100%)');
+		});
+
+		it('should round hue, saturation and lightness to 1 decimal', function () {
+			expect(helpers.toCssHsl('#808080')).toBe('hsl(0 0% 50.2%)');
+			expect(helpers.toCssHsl('#123456')).toBe('hsl(210 65.4% 20.4%)');
+		});
+
+		it('should keep the largest possible hue below 360', function () {
+			expect(helpers.toCssHsl({ r: 255, g: 0, b: 1 })).toBe('hsl(359.8 100% 50%)');
+		});
+
+		it('should append the alpha for translucent colours', function () {
+			expect(helpers.toCssHsl({ r: 51, g: 102, b: 153, a: 0.25 })).toBe('hsl(210 50% 40% / 0.25)');
+		});
+
+		it('should throw for invalid colours', function () {
+			expect(function () {
+				helpers.toCssHsl('nope');
+			}).toThrow(TypeError);
+		});
+	});
+
 	describe('argument validation', function () {
 		it('uses the library-wide message format', function () {
 			expect(function () {

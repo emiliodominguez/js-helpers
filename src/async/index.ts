@@ -1,5 +1,5 @@
 import { debounce, type Result } from '../functions/index.js';
-import { assertDelay, assertFunction, assertInteger, assertNumber, MAX_TIMEOUT } from '../utils/assert.js';
+import { assertDelay, assertFunction, assertInteger, assertNumber, describe, MAX_TIMEOUT } from '../utils/assert.js';
 import type { AbortSignalLike, RandomGenerator } from '../utils/index.js';
 
 export type { Result } from '../functions/index.js';
@@ -777,4 +777,218 @@ export async function sequence<T>(tasks: Iterable<() => PromiseLike<T> | T>): Pr
 	}
 
 	return results;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// AbortSignal combinators: timeoutSignal / anySignal / abortable / throwIfAborted
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The platform's `AbortSignal` type when the consumer's TypeScript environment declares one (DOM or Node typings), and
+ * {@link AbortSignalLike} otherwise. {@link timeoutSignal} and {@link anySignal} return real `AbortSignal`s created by the platform's
+ * `AbortController`, so their results can be passed straight to `fetch`, `addEventListener` and other platform APIs.
+ */
+export type PlatformAbortSignal = typeof globalThis extends { AbortSignal: { prototype: infer S } } ? S : AbortSignalLike;
+
+/**
+ * The parts of the platform `AbortController` used by this module.
+ */
+interface AbortControllerLike {
+	readonly signal: AbortSignalLike;
+	abort(reason?: unknown): void;
+}
+
+/**
+ * Creates a platform `AbortController`, found through `globalThis` (available in browsers, Node 15+, Deno and Bun).
+ * @param {string} caller - Name of the public function, used in the error message
+ * @returns {AbortControllerLike} A new controller
+ * @throws {Error} when the environment has no `AbortController`
+ */
+function createAbortController(caller: string): AbortControllerLike {
+	const Controller = (globalThis as { AbortController?: new () => AbortControllerLike }).AbortController;
+	if (typeof Controller !== 'function') throw new Error(`${caller}: \`AbortController\` is not available in this environment`);
+	return new Controller();
+}
+
+/**
+ * Throws a `TypeError` unless `value` is `null`, `undefined` or looks like an abort signal (an object with `addEventListener` and
+ * `removeEventListener` methods).
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {string} name - Name of the validated parameter
+ * @param {unknown} value - The value to validate
+ * @returns {void}
+ * @throws {TypeError} when `value` is not a signal, `null` or `undefined`
+ */
+function assertOptionalSignal(caller: string, name: string, value: unknown): asserts value is AbortSignalLike | null | undefined {
+	if (value === null || value === undefined) return;
+	const signal = value as Partial<AbortSignalLike>;
+	if (typeof value !== 'object' || typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function') {
+		throw new TypeError(`${caller}: \`${name}\` must be an AbortSignal, null or undefined, got ${describe(value)}`);
+	}
+}
+
+/**
+ * Creates an `AbortSignal` that aborts with a {@link TimeoutError} after `ms` milliseconds — like the platform's `AbortSignal.timeout`,
+ * but with this library's `TimeoutError` as the reason (so `error instanceof TimeoutError` works across the async helpers).
+ *
+ * The timer cannot be cancelled and is not `unref`'d (browsers have no such concept): in Node it keeps the process alive until it
+ * fires, so prefer short timeouts or an `AbortController` you abort yourself for long-lived work. `Infinity` gives a signal that never
+ * aborts (and starts no timer), which is handy for optional timeouts.
+ * @param {number} ms - Delay in milliseconds (`0` to `2^31 - 1`, or `Infinity`)
+ * @returns {PlatformAbortSignal} A new signal that aborts after `ms` milliseconds
+ * @throws {TypeError} when `ms` is not a number
+ * @throws {RangeError} when `ms` is negative, `NaN` or larger than `2^31 - 1` (and not `Infinity`)
+ * @throws {Error} when the environment has no `AbortController`
+ * @example
+ * const signal = timeoutSignal(10);
+ * signal.aborted; // => false
+ * await sleep(30);
+ * signal.aborted; // => true
+ * signal.reason instanceof TimeoutError; // => true
+ * signal.reason.message; // => 'timeoutSignal: timed out after 10 ms'
+ * @example
+ * // doctest: skip
+ * const response = await fetch(url, { signal: timeoutSignal(5000) });
+ */
+export function timeoutSignal(ms: number): PlatformAbortSignal {
+	assertDelay('timeoutSignal', 'ms', ms, true);
+	const controller = createAbortController('timeoutSignal');
+	if (ms !== Infinity) {
+		setTimeout(function () {
+			controller.abort(new TimeoutError(`timeoutSignal: timed out after ${ms} ms`));
+		}, ms);
+	}
+	return controller.signal as PlatformAbortSignal;
+}
+
+/**
+ * Combines abort signals: returns a new `AbortSignal` that aborts as soon as any of the inputs aborts, with that input's `reason`
+ * (or an {@link AbortError} when it has none) — like the platform's `AbortSignal.any`, but accepting any {@link AbortSignalLike}.
+ * `null` and `undefined` entries are ignored, so optional signals can be passed directly; with no signals the result never aborts.
+ *
+ * If an input is already aborted, the result is returned already aborted (with the reason of the first such input) and no listener
+ * is attached. Otherwise one `abort` listener is added to each input, and all of them are removed as soon as the result aborts.
+ * Note that if no input ever aborts, those listeners stay attached for as long as the inputs live (unlike the native implementation,
+ * which holds them weakly), so avoid creating unbounded numbers of combined signals from one long-lived signal.
+ * @param {Iterable<AbortSignalLike | null | undefined>} signals - The signals to combine (consumed eagerly)
+ * @returns {PlatformAbortSignal} A new signal
+ * @throws {TypeError} when `signals` is not iterable, or one of its entries is not a signal, `null` or `undefined`
+ * @throws {Error} when the environment has no `AbortController`
+ * @example
+ * const user = new AbortController();
+ * const shutdown = new AbortController();
+ * const signal = anySignal([user.signal, shutdown.signal, undefined]);
+ * signal.aborted; // => false
+ * shutdown.abort('shutting down');
+ * signal.aborted; // => true
+ * signal.reason; // => 'shutting down'
+ * @example
+ * // doctest: skip
+ * await fetch(url, { signal: anySignal([options.signal, timeoutSignal(5000)]) });
+ */
+export function anySignal(signals: Iterable<AbortSignalLike | null | undefined>): PlatformAbortSignal {
+	if (signals === null || signals === undefined || typeof (signals as Partial<Iterable<unknown>>)[Symbol.iterator] !== 'function') {
+		throw new TypeError(`anySignal: \`signals\` must be an iterable, got ${describe(signals)}`);
+	}
+
+	const inputs: AbortSignalLike[] = [];
+	let index = 0;
+	for (const signal of signals) {
+		assertOptionalSignal('anySignal', `signals[${index}]`, signal);
+		if (signal !== null && signal !== undefined) inputs.push(signal);
+		index++;
+	}
+
+	const controller = createAbortController('anySignal');
+	const aborted = inputs.find(function (input) {
+		return input.aborted;
+	});
+
+	if (aborted !== undefined) {
+		controller.abort(abortReason(aborted));
+	} else {
+		const listeners = inputs.map(function (input) {
+			return function onAbort(): void {
+				inputs.forEach(function (other, i) {
+					other.removeEventListener('abort', listeners[i]);
+				});
+				controller.abort(abortReason(input));
+			};
+		});
+		inputs.forEach(function (input, i) {
+			input.addEventListener('abort', listeners[i], { once: true });
+		});
+	}
+
+	return controller.signal as PlatformAbortSignal;
+}
+
+/**
+ * Settles like `promise`, unless `signal` aborts first, in which case it rejects with the signal's `reason` (or an
+ * {@link AbortError} when it has none). An already-aborted signal rejects immediately. The abort listener is removed as soon as
+ * `promise` settles. `signal` may be `null` or `undefined`, in which case this simply settles like `promise`.
+ *
+ * This only stops *waiting*: the underlying operation is not cancelled and keeps running (pass the signal to the operation itself,
+ * e.g. to `fetch`, when it supports cancellation). A later rejection of `promise` is handled, so it does not surface as an
+ * unhandled rejection.
+ * @template T - The resolved value type
+ * @param {PromiseLike<T> | T} promise - The promise (or value) to wait for
+ * @param {AbortSignalLike | null | undefined} signal - The signal that stops the wait
+ * @returns {Promise<T>} A promise settling like `promise`, or rejecting when `signal` aborts first
+ * @throws {TypeError} (as a rejection) when `signal` is not a signal, `null` or `undefined`
+ * @throws {unknown} (as a rejection) the abort reason of `signal`, or the rejection of `promise`
+ * @example
+ * const controller = new AbortController();
+ * await abortable(Promise.resolve(42), controller.signal); // => 42
+ * const pending = abortable(new Promise(function () {}), controller.signal);
+ * controller.abort(new AbortError('stopped waiting'));
+ * await pending; // throws AbortError
+ * await abortable(Promise.resolve(42), controller.signal); // throws AbortError
+ * await abortable(Promise.resolve(42), undefined); // => 42
+ */
+export function abortable<T>(promise: PromiseLike<T> | T, signal: AbortSignalLike | null | undefined): Promise<T> {
+	return new Promise<T>(function (resolve, reject) {
+		assertOptionalSignal('abortable', 'signal', signal);
+
+		/**
+		 * Abort listener: rejects with the abort reason.
+		 * @returns {void}
+		 */
+		function onAbort(): void {
+			reject(abortReason(signal as AbortSignalLike));
+		}
+
+		Promise.resolve(promise).then(
+			function (value) {
+				signal?.removeEventListener('abort', onAbort);
+				resolve(value);
+			},
+			function (error: unknown) {
+				signal?.removeEventListener('abort', onAbort);
+				reject(error);
+			}
+		);
+
+		if (signal?.aborted) onAbort();
+		else signal?.addEventListener('abort', onAbort, { once: true });
+	});
+}
+
+/**
+ * Throws the signal's `reason` (or an {@link AbortError} when it has none) if `signal` is aborted; does nothing otherwise. Works with
+ * any {@link AbortSignalLike} (unlike the platform's `signal.throwIfAborted()`), and accepts `null` / `undefined` for optional signals.
+ * @param {AbortSignalLike | null | undefined} signal - The signal to check
+ * @returns {void}
+ * @throws {unknown} the abort reason of `signal`, when it is aborted
+ * @throws {TypeError} when `signal` is not a signal, `null` or `undefined`
+ * @example
+ * const controller = new AbortController();
+ * throwIfAborted(controller.signal); // => undefined
+ * throwIfAborted(undefined); // => undefined
+ * controller.abort(new TimeoutError());
+ * throwIfAborted(controller.signal); // throws TimeoutError
+ */
+export function throwIfAborted(signal: AbortSignalLike | null | undefined): void {
+	assertOptionalSignal('throwIfAborted', 'signal', signal);
+	if (signal?.aborted) throw abortReason(signal);
 }

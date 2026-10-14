@@ -14,6 +14,27 @@ const rgba = fc.record({
 const weight = fc.double({ min: 0, max: 1, noNaN: true });
 const amount = fc.double({ min: 0, max: 100, noNaN: true });
 const channelName = fc.constantFrom<'r' | 'g' | 'b'>('r', 'g', 'b');
+/** Colours with 8-bit channels and an alpha in 0.01 steps. */
+const cssRgba = fc.record({
+	r: byte,
+	g: byte,
+	b: byte,
+	a: fc.integer({ min: 0, max: 100 }).map(function (value) {
+		return value / 100;
+	})
+});
+/** Optional CSS whitespace. */
+const space = fc.constantFrom('', ' ', '  ', '\t', '\n');
+
+/**
+ * Checks that a value is a normalized Rgba colour: integer channels in [0, 255] and an alpha in [0, 1].
+ */
+function expectNormalized(color: helpers.Rgba): void {
+	for (const channel of [color.r, color.g, color.b]) {
+		expect(Number.isInteger(channel) && channel >= 0 && channel <= 255).toBe(true);
+	}
+	expect(color.a >= 0 && color.a <= 1).toBe(true);
+}
 
 describe('Color helpers (property-based)', function () {
 	describe('parseHex / toHex', function () {
@@ -221,6 +242,106 @@ describe('Color helpers (property-based)', function () {
 					if (helpers.meetsContrast(foreground, background, { level: 'AAA' })) expect(helpers.meetsContrast(foreground, background)).toBe(true);
 					if (helpers.meetsContrast(foreground, background)) expect(helpers.meetsContrast(foreground, background, { largeText: true })).toBe(true);
 					expect(helpers.meetsContrast(foreground, background)).toBe(helpers.contrastRatio(foreground, background) >= 4.5);
+				})
+			);
+		});
+	});
+	describe('parseColor / toCssRgb / toCssHsl', function () {
+		it('parseColor(toCssRgb(c)) should round-trip 8-bit channels and alpha in 0.01 steps', function () {
+			fc.assert(
+				fc.property(cssRgba, function (color) {
+					expect(helpers.parseColor(helpers.toCssRgb(color))).toEqual(color);
+				})
+			);
+		});
+
+		it('parseColor(toCssHsl(c)) should round-trip 8-bit channels and alpha in 0.01 steps', function () {
+			fc.assert(
+				fc.property(cssRgba, function (color) {
+					expect(helpers.parseColor(helpers.toCssHsl(color))).toEqual(color);
+				})
+			);
+		});
+
+		it('parseColor should agree with parseHex on every hex string', function () {
+			fc.assert(
+				fc.property(fc.stringMatching(/^#?([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/), function (hex) {
+					expect(helpers.parseColor(hex)).toEqual(helpers.parseHex(hex));
+					expect(helpers.toRgba(hex)).toEqual(helpers.parseHex(hex));
+				})
+			);
+		});
+
+		it('parseColor should accept everything parseHex accepts, with the same result', function () {
+			fc.assert(
+				fc.property(fc.string({ unit: fc.constantFrom('#', 'a', 'F', '0', '9', 'g', ' '), maxLength: 10 }), function (text) {
+					let expected: helpers.Rgba | undefined;
+					try {
+						expected = helpers.parseHex(text);
+					} catch {
+						return;
+					}
+					expect(helpers.parseColor(text)).toEqual(expected);
+				})
+			);
+		});
+
+		it('the legacy and modern rgb() syntaxes should agree', function () {
+			fc.assert(
+				fc.property(cssRgba, space, function ({ r, g, b, a }, ws) {
+					const modern = helpers.parseColor(`rgb(${ws}${r} ${g} ${b}${ws}/${ws}${a * 100}%${ws})`);
+					expect(helpers.parseColor(`rgba(${r},${ws}${g}${ws},${b}, ${a})`)).toEqual(modern);
+					expect(modern).toEqual({ r, g, b, a });
+				})
+			);
+		});
+
+		it('percentage channels should scale to 255 and be rounded', function () {
+			fc.assert(
+				fc.property(fc.double({ min: -50, max: 150, noNaN: true }), function (percent) {
+					const text = String(percent);
+					// String(percent) is a valid CSS number except for a few exotic forms; skip anything else.
+					fc.pre(/^-?\d+(\.\d+)?(e[+-]\d+)?$/.test(text));
+					const { r } = helpers.parseColor(`rgb(${text}% 0 0)`);
+					expect(r).toBe(helpers.toRgba({ r: (percent * 255) / 100, g: 0, b: 0 }).r);
+				})
+			);
+		});
+
+		it('hsl() should match hslToRgb, in both syntaxes and every hue unit', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: -720, max: 720 }), fc.integer({ min: 0, max: 100 }), fc.integer({ min: 0, max: 100 }), function (h, s, l) {
+					const expected = { ...helpers.hslToRgb({ h, s, l }), a: 1 };
+					expect(helpers.parseColor(`hsl(${h}, ${s}%, ${l}%)`)).toEqual(expected);
+					expect(helpers.parseColor(`hsl(${h}deg ${s} ${l}%)`)).toEqual(expected);
+					expect(helpers.parseColor(`hsla(${h + 360} ${s}% ${l} / 1)`)).toEqual(expected);
+					// Hues that are exact in turns (multiples of 9 degrees = 0.025 turn) must give the same colour.
+					if (h % 9 === 0) expect(helpers.parseColor(`hsl(${h / 360}turn ${s}% ${l}%)`)).toEqual(expected);
+				})
+			);
+		});
+
+		it('parseColor should ignore surrounding whitespace and letter case', function () {
+			fc.assert(
+				fc.property(cssRgba, space, space, fc.boolean(), function (color, before, after, upper) {
+					const css = helpers.toCssHsl(color);
+					expect(helpers.parseColor(`${before}${upper ? css.toUpperCase() : css}${after}`)).toEqual(helpers.parseColor(css));
+				})
+			);
+		});
+
+		it('parseColor should either throw a TypeError or return a normalized colour', function () {
+			const token = fc.constantFrom('rgb(', 'rgba(', 'hsl(', 'hsla(', ')', ',', '/', ' ', '%', 'deg', 'turn', 'none', '-', '.', 'e', '1', '50', '255', '#', 'f');
+			fc.assert(
+				fc.property(fc.array(token, { maxLength: 14 }), function (tokens) {
+					let color: helpers.Rgba;
+					try {
+						color = helpers.parseColor(tokens.join(''));
+					} catch (error) {
+						expect(error).toBeInstanceOf(TypeError);
+						return;
+					}
+					expectNormalized(color);
 				})
 			);
 		});
