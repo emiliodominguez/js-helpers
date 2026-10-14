@@ -512,6 +512,20 @@ describe('Date helpers', function () {
 			expect(helpers.startOfDay(-8.64e15 + 86_400_000 * 2).getTime()).toBeGreaterThanOrEqual(-8.64e15);
 		});
 
+		it('does not throw when the local day ends exactly at the Date range limit (regression)', function () {
+			// Only where the last representable instant is a local midnight (UTC) does the day before end inside the range;
+			// that day's end used to be computed through the following day, which is out of range, and threw.
+			const limit = new Date(8.64e15);
+			const endsAtLimit = limit.getHours() + limit.getMinutes() + limit.getSeconds() + limit.getMilliseconds() === 0;
+			let result: number | string;
+			try {
+				result = helpers.endOfDay(8.64e15 - 1).getTime();
+			} catch (error) {
+				result = (error as Error).message;
+			}
+			expect(result).toBe(endsAtLimit ? 8.64e15 - 1 : 'Resulting date is out of range');
+		});
+
 		it('returns new instances and does not mutate the input', function () {
 			const input = new Date(2024, 4, 15, 13);
 			const before = input.getTime();

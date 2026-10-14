@@ -490,6 +490,57 @@ describe('random', function () {
 			expect(retry.getRandomValues).toHaveBeenCalledTimes(2);
 		});
 
+		it('should serve consecutive calls from one buffered batch, handing out every character once', function () {
+			let next = 0;
+			const counting = {
+				getRandomValues: jest.fn(function (array: Uint8Array) {
+					for (let i = 0; i < array.length; i++) array[i] = next++ & 255;
+					return array;
+				})
+			};
+			const ids = withCrypto(counting, function () {
+				return [helpers.randomId(5), helpers.randomId(5), helpers.randomId(5), helpers.randomId(70), helpers.randomId(1)];
+			});
+			// The first batch is exactly the requested size; the next one is 16 times larger and serves the next three calls.
+			expect(ids).toEqual(['ABCDE', 'FGHIJ', 'KLMNO', helpers.URL_ALPHABET.slice(15) + helpers.URL_ALPHABET.slice(0, 21), 'V']);
+			expect(
+				counting.getRandomValues.mock.calls.map(function (call: any[]) {
+					return call[0].length;
+				})
+			).toEqual([5, 80, 1280]);
+		});
+
+		it('should only use the characters of non-ASCII alphabets (regression: code points were truncated to bytes)', function () {
+			// U+0100.. would wrap to control characters and U+0080.. are not single UTF-8 bytes: neither may be decoded as ASCII.
+			for (const alphabet of ['ĀāĂ', 'àéîõü\u0080', 'aĀ']) {
+				const id = helpers.randomId(200, alphabet);
+				expect(Array.from(id)).toHaveLength(200);
+				for (const char of id) expect(alphabet).toContain(char);
+			}
+		});
+
+		it('should build ids without TextDecoder too', function () {
+			let next = 0;
+			const counting = {
+				getRandomValues: function (array: Uint8Array): Uint8Array {
+					for (let i = 0; i < array.length; i++) array[i] = next++ & 255;
+					return array;
+				}
+			};
+			const original = Object.getOwnPropertyDescriptor(globalThis, 'TextDecoder') as PropertyDescriptor;
+			Object.defineProperty(globalThis, 'TextDecoder', { value: undefined, configurable: true, writable: true });
+			try {
+				expect(
+					withCrypto(counting, function () {
+						return helpers.randomId(10);
+					})
+				).toBe('ABCDEFGHIJ');
+			} finally {
+				Object.defineProperty(globalThis, 'TextDecoder', original);
+			}
+			expect(helpers.randomId(30)).toMatch(/^[A-Za-z0-9_-]{30}$/);
+		});
+
 		it('should use the alphabet of each call when alternating alphabets, and keep validating them', function () {
 			for (let i = 0; i < 20; i++) {
 				expect(helpers.randomId(30, 'ab')).toMatch(/^[ab]{30}$/);

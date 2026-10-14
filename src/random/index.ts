@@ -265,9 +265,19 @@ function getCrypto(caller: string): CryptoLike {
  */
 export function randomBytes(length: number): Uint8Array {
 	assertNumber('randomBytes', 'length', length, Number.isSafeInteger(length) && length >= 0, 'a safe integer >= 0');
-	const crypto = getCrypto('randomBytes');
-	const bytes = new Uint8Array(length);
-	for (let offset = 0; offset < length; offset += MAX_RANDOM_VALUES_BYTES) {
+	return fillRandom(getCrypto('randomBytes'), new Uint8Array(length));
+}
+
+/**
+ * Fills an array with cryptographically secure random bytes, in chunks of at most 65,536 bytes (the WebCrypto per-call limit).
+ * @param {CryptoLike} crypto - The source of random bytes
+ * @param {Uint8Array} bytes - The array to fill (mutated)
+ * @returns {Uint8Array} `bytes`
+ * @example
+ * fillRandom(globalThis.crypto, new Uint8Array(4)); // e.g. Uint8Array(4) [ 12, 250, 3, 97 ]
+ */
+function fillRandom(crypto: CryptoLike, bytes: Uint8Array): Uint8Array {
+	for (let offset = 0; offset < bytes.length; offset += MAX_RANDOM_VALUES_BYTES) {
 		crypto.getRandomValues(bytes.subarray(offset, offset + MAX_RANDOM_VALUES_BYTES));
 	}
 	return bytes;
@@ -306,6 +316,10 @@ export function randomUUID(): string {
  * Characters are drawn with `crypto.getRandomValues` and a bit mask plus rejection sampling, so every character of
  * `alphabet` is exactly equally likely whatever its length. The alphabet is split into Unicode code points, so it may
  * contain astral characters (emoji); `size` counts code points, not UTF-16 units.
+ *
+ * Like nanoid, characters are generated in batches and buffered: repeated calls with the same alphabet are served from
+ * the buffer (each character is handed out once), which grows up to 32,768 characters. The buffer is discarded whenever
+ * the alphabet or the `globalThis.crypto` object changes.
  * @param {number} [size=21] - Number of characters to generate (a non-negative safe integer)
  * @param {string} [alphabet=URL_ALPHABET] - Between 2 and 256 distinct characters to draw from
  * @returns {string} A random string of `size` characters from `alphabet`
@@ -320,25 +334,99 @@ export function randomUUID(): string {
 export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): string {
 	assertNumber('randomId', 'size', size, Number.isSafeInteger(size) && size >= 0, 'a safe integer >= 0');
 	const characters = alphabetCharacters(alphabet);
-	const length = characters.length;
 	const crypto = getCrypto('randomId');
+	// Astral characters take two UTF-16 units, so a buffer could not be sliced by position: generate them directly.
+	if (characters.length !== alphabet.length) return generateId(size, characters, crypto);
 
+	if (alphabet !== poolAlphabet || crypto !== poolSource) {
+		poolAlphabet = alphabet;
+		poolSource = crypto;
+		pool = '';
+		poolNext = 0;
+	}
+	if (poolOffset + size > pool.length) {
+		// Grow the batch geometrically while the same alphabet keeps being used (alternating alphabets stay cheap).
+		const target = Math.max(poolNext, size);
+		poolNext = Math.min(target * 16, MAX_POOL_SIZE);
+		pool = generateId(target, characters, crypto);
+		poolOffset = 0;
+	}
+	poolOffset += size;
+	return pool.slice(poolOffset - size, poolOffset);
+}
+
+/** Largest batch of characters {@link randomId} generates ahead of time. */
+const MAX_POOL_SIZE = 32768;
+
+/** Characters generated ahead of time by {@link randomId}, for `poolAlphabet` from `poolSource`; `pool[poolOffset]` is the next unused one. */
+let pool = '';
+let poolOffset = 0;
+/** Size of the next batch. */
+let poolNext = 0;
+let poolAlphabet: string | undefined;
+let poolSource: CryptoLike | undefined;
+
+/** Structural subset of the WHATWG `TextDecoder` (not in the ES2022 type library). */
+interface TextDecoderLike {
+	decode(input: Uint8Array): string;
+}
+
+/** The `TextDecoder` constructor {@link utf8Decoder} was created from, and that decoder. */
+let decoderClass: unknown;
+let utf8Decoder: TextDecoderLike | undefined;
+
+/**
+ * Generates `count` random characters of an alphabet with a bit mask and rejection sampling (see {@link randomId}).
+ * ASCII alphabets are decoded natively in one step through `TextDecoder` when available, which is much faster than
+ * concatenating characters one by one.
+ * @param {number} count - Number of characters to generate
+ * @param {string[]} characters - The (validated) characters of the alphabet
+ * @param {CryptoLike} crypto - The source of random bytes
+ * @returns {string} `count` random characters
+ * @example
+ * generateId(3, ['a', 'b'], globalThis.crypto); // e.g. 'aba'
+ */
+function generateId(count: number, characters: string[], crypto: CryptoLike): string {
+	const length = characters.length;
 	// Smallest all-ones bit mask covering every index; values above `length - 1` are rejected to stay unbiased.
 	const mask = (2 << (31 - Math.clz32((length - 1) | 1))) - 1;
-	// Over-request bytes so a single batch usually suffices (the expected acceptance rate is `length / (mask + 1)` > 1/2).
-	const bytes = new Uint8Array(Math.min(Math.ceil((1.6 * mask * size) / length), MAX_RANDOM_VALUES_BYTES));
-	let id = '';
-	let count = 0;
-	while (count < size) {
-		crypto.getRandomValues(bytes);
-		for (let i = 0; i < bytes.length && count < size; i++) {
-			const index = bytes[i] & mask;
-			if (index < length) {
-				id += characters[index];
-				count++;
+	const indexes = new Uint8Array(count);
+	if (mask === length - 1) {
+		// Every masked byte is a valid index: no rejection needed.
+		fillRandom(crypto, indexes);
+		for (let i = 0; i < count; i++) indexes[i] &= mask;
+	} else {
+		// Over-request bytes so a single batch usually suffices (the expected acceptance rate is `length / (mask + 1)` > 1/2).
+		const bytes = new Uint8Array(Math.min(Math.ceil((1.6 * mask * count) / length), MAX_RANDOM_VALUES_BYTES));
+		let accepted = 0;
+		while (accepted < count) {
+			crypto.getRandomValues(bytes);
+			for (let i = 0; i < bytes.length && accepted < count; i++) {
+				const index = bytes[i] & mask;
+				if (index < length) indexes[accepted++] = index;
 			}
 		}
 	}
+
+	const Decoder = (globalThis as { TextDecoder?: new () => TextDecoderLike }).TextDecoder;
+	const codes = new Uint8Array(length);
+	let ascii = typeof Decoder === 'function';
+	for (let i = 0; ascii && i < length; i++) {
+		// Check the code before storing it: the byte array would wrap code points above 255 into the ASCII range.
+		const code = characters[i].charCodeAt(0);
+		codes[i] = code;
+		ascii = characters[i].length === 1 && code < 128;
+	}
+	if (ascii) {
+		if (Decoder !== decoderClass) {
+			decoderClass = Decoder;
+			utf8Decoder = new (Decoder as new () => TextDecoderLike)();
+		}
+		for (let i = 0; i < count; i++) indexes[i] = codes[indexes[i]];
+		return (utf8Decoder as TextDecoderLike).decode(indexes);
+	}
+	let id = '';
+	for (let i = 0; i < count; i++) id += characters[indexes[i]];
 	return id;
 }
 

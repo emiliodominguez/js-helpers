@@ -413,21 +413,20 @@ function truncate(value: number): number {
 }
 
 /**
- * Returns the last millisecond of the local day of `date` (normally 23:59:59.999), computed as the start of the
+ * Moves `date` to the last millisecond of its local day (normally 23:59:59.999), computed as the start of the
  * next local day minus 1 ms so that it is correct even when the clock is set back around midnight.
- * @param {Date} date - A valid date (not mutated)
- * @returns {Date} A new date at the end of the local day
+ * @param {Date} date - A valid date, which is mutated (callers pass a fresh copy)
+ * @returns {Date} `date`, now at the end of its local day
  * @throws {RangeError} when the end of the day is outside the representable range
  * @example
  * lastInstantOfDay(new Date(2024, 0, 1, 12)); // => new Date(2024, 0, 1, 23, 59, 59, 999)
  */
 function lastInstantOfDay(date: Date): Date {
-	const nextDay = new Date(date.getTime());
+	// Hour 24 is the next local midnight: a single wall-clock conversion instead of `setDate(+1)` then `setHours(0)`.
+	date.setHours(24, 0, 0, 0);
+	date.setTime(date.getTime() - 1);
 
-	nextDay.setDate(nextDay.getDate() + 1);
-	nextDay.setHours(0, 0, 0, 0);
-
-	return ensureInRange(new Date(nextDay.getTime() - 1));
+	return ensureInRange(date);
 }
 
 /**

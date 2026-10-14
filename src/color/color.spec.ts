@@ -20,7 +20,24 @@ describe('Color helpers', function () {
 		});
 
 		it('should throw a TypeError for invalid strings', function () {
-			for (const value of ['', '#', '#ff', '#fffff', '#fffffff', '#fffffffff', '#ggg', ' #fff', '#fff ', '##fff', 'rgb(0,0,0)', '#ff 00 00']) {
+			for (const value of [
+				'',
+				'#',
+				'#ff',
+				'#fffff',
+				'#fffffff',
+				'#fffffffff',
+				'#ggg',
+				' #fff',
+				'#fff ',
+				'##fff',
+				'rgb(0,0,0)',
+				'#ff 00 00',
+				'#@@@',
+				'#```',
+				'#:::',
+				'#/00'
+			]) {
 				expect(function () {
 					helpers.parseHex(value);
 				}).toThrow(TypeError);
@@ -427,6 +444,8 @@ describe('Color helpers', function () {
 				'hsl(120, 100, 25)',
 				'hsl(10% 100% 50%)',
 				'hsl(10 100deg 50%)',
+				'hsl(10, 100%, 50)',
+				'hsl(10 100% 50deg)',
 				'hsl(none, 100%, 50%)',
 				'hsla(1 2% 3% 4)'
 			];

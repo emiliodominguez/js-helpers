@@ -1,16 +1,25 @@
+import * as dateFns from 'date-fns';
 import {
 	addBusinessDays,
 	addDays,
 	addMonths,
+	addYears,
+	diffInBusinessDays,
 	diffInDays,
 	diffInMonths,
 	eachDayOfInterval,
+	endOfDay,
+	endOfMonth,
 	formatDate,
 	formatDuration,
 	getISOWeek,
 	getRelativeTime,
+	isSameDay,
+	isValidDate,
 	parseDuration,
 	parseISODate,
+	startOfDay,
+	startOfMonth,
 	startOfWeek,
 	toISODateString
 } from '@emiliodominguez/js-helpers/date';
@@ -28,119 +37,240 @@ const durations = dates.map(function (date) {
 const durationStrings = durations.map(function (ms, index) {
 	return `${index}d ${ms % 24}h ${ms % 60}m ${(ms % 600) / 10}s`;
 });
+const mixedValues = dates.map(function (date, index) {
+	return index % 3 === 0 ? new Date(NaN) : index % 3 === 1 ? date : date.getTime();
+});
 
 /**
- * Runs `fn` on every sample date and returns a checksum so the work cannot be optimized away.
- * @param {(date: Date, index: number) => number} fn - The work to do for one date
- * @returns {number} The checksum
+ * Returns a benchmark body that runs `fn(date, index, other)` on every sample date (`other` is the mirrored sample)
+ * and returns a checksum so the work cannot be optimized away. Each body is compiled separately (`new Function`) so
+ * its call site stays monomorphic: closures of one function literal share type feedback, which would penalise every case.
+ * @param {(date: Date, index: number, other: Date) => number} fn - The work to do for one date
+ * @returns {() => number} The benchmark body
  */
 function each(fn) {
-	let total = 0;
-	for (let i = 0; i < dates.length; i++) total += fn(dates[i], i);
-	return total;
+	return new Function(
+		'fn',
+		'dates',
+		'return function () { let total = 0; for (let i = 0; i < dates.length; i++) total += fn(dates[i], i, dates[dates.length - 1 - i]); return total; };'
+	)(fn, dates);
+}
+
+/**
+ * Builds a bench case running `ours` and the date-fns equivalent on every sample date.
+ * @param {string} name - The case name
+ * @param {(date: Date, index: number, other: Date) => number} ours - Our implementation
+ * @param {(date: Date, index: number, other: Date) => number} [theirs] - The date-fns implementation
+ * @returns {object} The bench case
+ */
+function dateCase(name, ours, theirs) {
+	return theirs === undefined ? { name, fn: each(ours) } : { name, fn: each(ours), competitors: { 'date-fns': each(theirs) } };
 }
 
 export default [
-	{
-		name: "formatDate (100 × 'YYYY-MM-DD HH:mm:ss.SSS')",
-		fn: function () {
-			return each(function (date) {
-				return formatDate(date, 'YYYY-MM-DD HH:mm:ss.SSS').length;
-			});
+	dateCase(
+		"formatDate (100 × 'YYYY-MM-DD HH:mm:ss.SSS')",
+		function (date) {
+			return formatDate(date, 'YYYY-MM-DD HH:mm:ss.SSS').length;
+		},
+		function (date) {
+			return dateFns.format(date, 'yyyy-MM-dd HH:mm:ss.SSS').length;
 		}
-	},
-	{
-		name: "formatDate (100 × 'D/M/YY h:mm A [at]')",
-		fn: function () {
-			return each(function (date) {
-				return formatDate(date, 'D/M/YY h:mm A [at]').length;
-			});
+	),
+	dateCase(
+		"formatDate (100 × 'D/M/YY h:mm A [at]')",
+		function (date) {
+			return formatDate(date, 'D/M/YY h:mm A [at]').length;
+		},
+		function (date) {
+			return dateFns.format(date, "d/M/yy h:mm a 'at'").length;
 		}
-	},
-	{
-		name: 'toISODateString (100)',
-		fn: function () {
-			return each(function (date) {
-				return toISODateString(date).length;
-			});
+	),
+	dateCase(
+		'toISODateString (100)',
+		function (date) {
+			return toISODateString(date).length;
+		},
+		function (date) {
+			return dateFns.format(date, 'yyyy-MM-dd').length;
 		}
-	},
+	),
 	{
-		name: 'parseISODate (100)',
+		name: 'parseISODate (100 × YYYY-MM-DD)',
 		fn: function () {
 			let total = 0;
 			for (let i = 0; i < isoStrings.length; i++) total += parseISODate(isoStrings[i]).getTime();
 			return total;
+		},
+		competitors: {
+			'date-fns parseISO': function () {
+				let total = 0;
+				for (let i = 0; i < isoStrings.length; i++) total += dateFns.parseISO(isoStrings[i]).getTime();
+				return total;
+			}
 		}
 	},
 	{
-		name: 'addDays (100)',
+		name: 'isValidDate (100 mixed values)',
 		fn: function () {
-			return each(function (date, index) {
-				return addDays(date, index - 50).getTime();
-			});
+			let total = 0;
+			for (let i = 0; i < mixedValues.length; i++) total += isValidDate(mixedValues[i]) ? 1 : 0;
+			return total;
+		},
+		competitors: {
+			// `isValid` also accepts timestamps, so it reports more values as valid; the work is comparable.
+			'date-fns isValid': function () {
+				let total = 0;
+				for (let i = 0; i < mixedValues.length; i++) total += dateFns.isValid(mixedValues[i]) ? 1 : 0;
+				return total;
+			}
 		}
 	},
-	{
-		name: 'addMonths (100)',
-		fn: function () {
-			return each(function (date, index) {
-				return addMonths(date, index - 50).getTime();
-			});
+	dateCase(
+		'addDays (100)',
+		function (date, index) {
+			return addDays(date, index - 50).getTime();
+		},
+		function (date, index) {
+			return dateFns.addDays(date, index - 50).getTime();
 		}
-	},
-	{
-		name: 'addBusinessDays (100)',
-		fn: function () {
-			return each(function (date, index) {
-				return addBusinessDays(date, index - 50).getTime();
-			});
+	),
+	dateCase(
+		'addMonths (100)',
+		function (date, index) {
+			return addMonths(date, index - 50).getTime();
+		},
+		function (date, index) {
+			return dateFns.addMonths(date, index - 50).getTime();
 		}
-	},
-	{
-		name: 'diffInDays (100)',
-		fn: function () {
-			return each(function (date, index) {
-				return diffInDays(date, dates[99 - index]);
-			});
+	),
+	dateCase(
+		'addYears (100)',
+		function (date, index) {
+			return addYears(date, index - 50).getTime();
+		},
+		function (date, index) {
+			return dateFns.addYears(date, index - 50).getTime();
 		}
-	},
-	{
-		name: 'diffInMonths (100)',
-		fn: function () {
-			return each(function (date, index) {
-				return diffInMonths(date, dates[99 - index]);
-			});
+	),
+	dateCase(
+		'addBusinessDays (100)',
+		function (date, index) {
+			return addBusinessDays(date, index - 50).getTime();
+		},
+		function (date, index) {
+			return dateFns.addBusinessDays(date, index - 50).getTime();
 		}
-	},
-	{
-		name: 'startOfWeek (100)',
-		fn: function () {
-			return each(function (date) {
-				return startOfWeek(date, 1).getTime();
-			});
+	),
+	dateCase(
+		'diffInDays (100)',
+		function (date, _, other) {
+			return diffInDays(date, other);
+		},
+		function (date, _, other) {
+			return dateFns.differenceInCalendarDays(date, other);
 		}
-	},
-	{
-		name: 'getISOWeek (100)',
-		fn: function () {
-			return each(function (date) {
-				return getISOWeek(date);
-			});
+	),
+	dateCase(
+		'diffInMonths (100)',
+		function (date, _, other) {
+			return diffInMonths(date, other);
+		},
+		function (date, _, other) {
+			return dateFns.differenceInMonths(date, other);
 		}
-	},
-	{
-		name: 'getRelativeTime (100)',
-		fn: function () {
-			return each(function (date, index) {
-				return getRelativeTime(date, dates[99 - index]).length;
-			});
+	),
+	dateCase(
+		'diffInBusinessDays (100)',
+		function (date, _, other) {
+			return diffInBusinessDays(date, other);
+		},
+		function (date, _, other) {
+			return dateFns.differenceInBusinessDays(date, other);
 		}
-	},
+	),
+	dateCase(
+		'startOfDay (100)',
+		function (date) {
+			return startOfDay(date).getTime();
+		},
+		function (date) {
+			return dateFns.startOfDay(date).getTime();
+		}
+	),
+	dateCase(
+		'endOfDay (100)',
+		function (date) {
+			return endOfDay(date).getTime();
+		},
+		function (date) {
+			return dateFns.endOfDay(date).getTime();
+		}
+	),
+	dateCase(
+		'startOfWeek (100, Monday)',
+		function (date) {
+			return startOfWeek(date, 1).getTime();
+		},
+		function (date) {
+			return dateFns.startOfWeek(date, { weekStartsOn: 1 }).getTime();
+		}
+	),
+	dateCase(
+		'startOfMonth (100)',
+		function (date) {
+			return startOfMonth(date).getTime();
+		},
+		function (date) {
+			return dateFns.startOfMonth(date).getTime();
+		}
+	),
+	dateCase(
+		'endOfMonth (100)',
+		function (date) {
+			return endOfMonth(date).getTime();
+		},
+		function (date) {
+			return dateFns.endOfMonth(date).getTime();
+		}
+	),
+	dateCase(
+		'isSameDay (100)',
+		function (date, _, other) {
+			return isSameDay(date, other) ? 1 : 0;
+		},
+		function (date, _, other) {
+			return dateFns.isSameDay(date, other) ? 1 : 0;
+		}
+	),
+	dateCase(
+		'getISOWeek (100)',
+		function (date) {
+			return getISOWeek(date);
+		},
+		function (date) {
+			return dateFns.getISOWeek(date);
+		}
+	),
+	dateCase(
+		'getRelativeTime (100)',
+		function (date, _, other) {
+			return getRelativeTime(date, other).length;
+		},
+		function (date, _, other) {
+			// Loosely equivalent: English words instead of Intl.RelativeTimeFormat.
+			return dateFns.formatDistance(date, other, { addSuffix: true }).length;
+		}
+	),
 	{
 		name: 'eachDayOfInterval (1 year)',
 		fn: function () {
 			return eachDayOfInterval(dates[0], dates[12]);
+		},
+		competitors: {
+			'date-fns': function () {
+				return dateFns.eachDayOfInterval({ start: dates[0], end: dates[12] });
+			}
 		}
 	},
 	{

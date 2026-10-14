@@ -90,26 +90,24 @@ export interface MeetsContrastOptions {
 	largeText?: boolean;
 }
 
-const HEX_PATTERN = /^#?([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+/**
+ * One argument of a CSS colour function: a CSS `<number>` and an optional `%` or angle unit (both captured).
+ * Built into the two function patterns below, so a colour function is matched by a single regular expression.
+ */
+const COMPONENT = String.raw`([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn)?`;
 
-/** A CSS colour function call: its name and its (trimmed) argument list. */
-const CSS_FUNCTION_PATTERN = /^(rgba?|hsla?)\(\s*([^()]*?)\s*\)$/i;
+/** Legacy syntax `name(a, b, c[, d])`: the function name, then a number and a unit per argument. */
+const LEGACY_FUNCTION_PATTERN = new RegExp(String.raw`^(rgba?|hsla?)\(\s*${COMPONENT}\s*,\s*${COMPONENT}\s*,\s*${COMPONENT}(?:\s*,\s*${COMPONENT})?\s*\)$`, 'i');
 
-/** One argument of a CSS colour function: a CSS `<number>`, optionally followed by `%` or an angle unit. */
-const CSS_COMPONENT_PATTERN = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(%|deg|grad|rad|turn)?$/i;
+/** Modern syntax `name(a b c[ / d])`, where any argument may be `none`: the function name, then a number, a unit and `none` per argument. */
+const MODERN_COMPONENT = `(?:${COMPONENT}|(none))`;
+const MODERN_FUNCTION_PATTERN = new RegExp(
+	String.raw`^(rgba?|hsla?)\(\s*${MODERN_COMPONENT}\s+${MODERN_COMPONENT}\s+${MODERN_COMPONENT}(?:\s*\/\s*${MODERN_COMPONENT})?\s*\)$`,
+	'i'
+);
 
 /** How many of each CSS angle unit make a full turn (`''` is a unitless hue, which means degrees). */
 const UNITS_PER_TURN: Readonly<Record<string, number>> = { '': 360, deg: 360, grad: 400, rad: 2 * Math.PI, turn: 1 };
-
-/**
- * A parsed argument of a CSS colour function.
- */
-interface CssComponent {
-	/** The numeric value (`0` for `none`). */
-	value: number;
-	/** The lowercase unit: `''` (plain number or `none`), `'%'` or an angle unit. */
-	unit: string;
-}
 
 /** Minimum contrast ratios from WCAG 2.x success criteria 1.4.3 (AA) and 1.4.6 (AAA). */
 const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; large: number }>> = {
@@ -129,19 +127,23 @@ const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; larg
  * readChannel('toRgba', 'input.r', 12); // => 12
  */
 function readChannel(name: string, channel: string, value: unknown): number {
-	assertNumber(name, channel, value, !Number.isNaN(value), 'a number other than NaN');
-	return value;
+	// Only call into the (throwing) assertion for invalid values: the check below is all the hot path pays.
+	if (typeof value !== 'number' || Number.isNaN(value)) assertNumber(name, channel, value, false, 'a number other than NaN');
+	return value as number;
 }
 
 /**
- * Clamps a channel to `[0, 255]` and rounds it to the nearest integer (never `-0`: clamping turns `-0` into `0`).
- * @param {number} value - The channel value
+ * Clamps a channel to `[0, 255]` and rounds it to the nearest integer (never `-0`).
+ * @param {number} value - The channel value (not `NaN`)
  * @returns {number} An integer in `[0, 255]`
  * @example
  * toByte(255.6); // => 255
+ * toByte(-0); // => 0
  */
 function toByte(value: number): number {
-	return Math.round(clamp(value, 0, 255));
+	// Inlined clamp (about twice as fast as `Math.round(clamp(value, 0, 255))` on this hot path).
+	if (value >= 255) return 255;
+	return value > 0 ? Math.round(value) : 0;
 }
 
 /**
@@ -188,24 +190,37 @@ function linearChannel(value: number): number {
  */
 export function parseHex(hex: string): Rgba {
 	if (typeof hex !== 'string') throw new TypeError(`parseHex: \`hex\` must be a string, got ${describe(hex)}`);
-	const match = HEX_PATTERN.exec(hex);
-	if (match === null) throw new TypeError(`parseHex: \`hex\` must be a valid hex colour, got ${JSON.stringify(hex)}`);
-	return hexToRgba(match[1]);
+	const color = parseHexDigits(hex);
+	if (color === undefined) throw new TypeError(`parseHex: \`hex\` must be a valid hex colour, got ${JSON.stringify(hex)}`);
+	return color;
 }
 
 /**
- * Converts the 3, 4, 6 or 8 hex digits of a colour (already validated) to an {@link Rgba} colour.
- * The digits are parsed as a single integer (at most 32 bits) whose channels are then extracted with bit shifts.
- * @param {string} digits - The hex digits, without `#`
- * @returns {Rgba} The colour, with alpha `1` when there are no alpha digits
+ * Parses a whole string of 3, 4, 6 or 8 hex digits, optionally preceded by `#`, with a hand-written scanner (several
+ * times faster than a regular expression plus `parseInt`, and allocation-free until the result).
+ * @param {string} text - The candidate hex colour
+ * @returns {Rgba | undefined} The colour, or `undefined` when `text` is not a hex colour
  * @example
- * hexToRgba('f80'); // => { r: 255, g: 136, b: 0, a: 1 }
+ * parseHexDigits('#f80'); // => { r: 255, g: 136, b: 0, a: 1 }
+ * parseHexDigits('#ff80 '); // => undefined
  */
-function hexToRgba(digits: string): Rgba {
-	const value = parseInt(digits, 16);
+function parseHexDigits(text: string): Rgba | undefined {
+	const start = text.charCodeAt(0) === 35 ? 1 : 0; // '#'
+	const count = text.length - start;
+	if (count !== 3 && count !== 4 && count !== 6 && count !== 8) return undefined;
+	// The digits as one integer (at most 32 bits, exact in a double).
+	let value = 0;
+	for (let i = start; i < text.length; i++) {
+		const code = text.charCodeAt(i);
+		// Codes below '0' give a negative digit. `| 32` lowercases `A`-`F`; only `A`-`F` and `a`-`f` land in `a`-`f` that way.
+		const letter = (code | 32) - 87;
+		const digit = code <= 57 ? code - 48 : letter >= 10 && letter <= 15 ? letter : -1;
+		if (digit < 0) return undefined;
+		value = value * 16 + digit;
+	}
 	// Bits per channel: one hex digit (expanded by `* 17`, so `f` → `ff`) in the short forms, two digits otherwise.
-	const width = digits.length <= 4 ? 4 : 8;
-	const end = digits.length * 4;
+	const width = count <= 4 ? 4 : 8;
+	const end = count * 4;
 	return {
 		r: hexChannel(value, end - width, width),
 		g: hexChannel(value, end - 2 * width, width),
@@ -229,78 +244,51 @@ function hexChannel(value: number, shift: number, width: number): number {
 }
 
 /**
- * Parses one argument of a CSS colour function.
- * @param {string} token - The argument text, without surrounding whitespace
- * @param {boolean} legacy - Whether the comma-separated syntax is used (where `none` is not allowed)
- * @returns {CssComponent | undefined} The value and unit, or `undefined` when the token is not valid
+ * Parses an `rgb()`, `rgba()`, `hsl()` or `hsla()` call (CSS Color 4 grammar, legacy and modern syntaxes) with a single
+ * regular expression per syntax, then checks the units of the captured arguments.
+ * @param {string} text - The trimmed CSS colour
+ * @returns {Rgba | undefined} The colour, or `undefined` when `text` is not a valid colour function
  * @example
- * parseComponent('50%', false); // => { value: 50, unit: '%' }
+ * parseCssFunction('rgb(255 0 0 / 50%)'); // => { r: 255, g: 0, b: 0, a: 0.5 }
  */
-function parseComponent(token: string, legacy: boolean): CssComponent | undefined {
-	if (!legacy && token.toLowerCase() === 'none') return { value: 0, unit: '' };
-	const match = CSS_COMPONENT_PATTERN.exec(token);
+function parseCssFunction(text: string): Rgba | undefined {
+	const legacyMatch = LEGACY_FUNCTION_PATTERN.exec(text);
+	const match = legacyMatch ?? MODERN_FUNCTION_PATTERN.exec(text);
 	if (match === null) return undefined;
-	const value = Number(match[1]);
-	return Number.isFinite(value) ? { value, unit: (match[2] ?? '').toLowerCase() } : undefined;
-}
-
-/**
- * Whether every component has one of the allowed units.
- * @param {CssComponent[]} components - The parsed components
- * @param {string[]} units - The allowed units
- * @returns {boolean} `true` when all units are allowed
- * @example
- * hasUnits([{ value: 1, unit: '%' }], ['', '%']); // => true
- */
-function hasUnits(components: CssComponent[], units: string[]): boolean {
-	return components.every(function (component) {
-		return units.includes(component.unit);
-	});
-}
-
-/**
- * Parses the arguments of an `rgb()`, `rgba()`, `hsl()` or `hsla()` call (CSS Color 4 grammar, legacy and modern syntaxes).
- * @param {string} name - The lowercase function name
- * @param {string} args - The text between the parentheses, trimmed
- * @returns {Rgba | undefined} The colour, or `undefined` when the arguments are not valid
- * @example
- * parseCssFunction('rgb', '255 0 0 / 50%'); // => { r: 255, g: 0, b: 0, a: 0.5 }
- */
-function parseCssFunction(name: string, args: string): Rgba | undefined {
-	const legacy = args.includes(',');
-	// Legacy: `r, g, b[, a]`. Modern: `r g b[ / a]` (exactly three space-separated components before the optional slash).
-	const parts = args.split(legacy ? /\s*,\s*/ : /\s*\/\s*/);
-	const tokens = legacy ? parts : parts[0].split(/\s+/);
-	if (tokens.length !== 3 && !(legacy && tokens.length === 4)) return undefined;
-	if (!legacy) tokens.push(...parts.slice(1));
-	if (tokens.length > 4) return undefined;
-
-	const components: CssComponent[] = [];
-	for (const token of tokens) {
-		const component = parseComponent(token, legacy);
-		if (component === undefined) return undefined;
-		components.push(component);
+	const legacy = legacyMatch !== null;
+	// Captures per argument after the function name: number and unit, plus `none` in the modern syntax.
+	const stride = legacy ? 2 : 3;
+	// A missing alpha is 1; `none` is 0 (and has no unit).
+	const values = [0, 0, 0, 1];
+	const units = ['', '', '', ''];
+	for (let i = 0; i < 4; i++) {
+		const number = match[2 + i * stride];
+		if (number !== undefined) {
+			values[i] = Number(number);
+			if (!Number.isFinite(values[i])) return undefined;
+			units[i] = (match[3 + i * stride] ?? '').toLowerCase();
+		} else if (!legacy && match[4 + i * stride] !== undefined) {
+			values[i] = 0;
+		}
 	}
 
-	const [first, second, third, alpha = { value: 1, unit: '' }] = components;
-	if (!hasUnits([alpha], ['', '%'])) return undefined;
-	const a = clamp(alpha.unit === '%' ? alpha.value / 100 : alpha.value, 0, 1);
-	const channels = [first, second, third];
+	if (units[3] !== '' && units[3] !== '%') return undefined;
+	const a = clamp(units[3] === '%' ? values[3] / 100 : values[3], 0, 1);
 
-	if (name.startsWith('rgb')) {
-		// Legacy syntax: all three channels are numbers, or all three are percentages.
-		if (!hasUnits(channels, ['', '%']) || (legacy && !hasUnits(channels, [first.unit]))) return undefined;
-		const [r, g, b] = channels.map(function (channel) {
-			return toByte(channel.unit === '%' ? (channel.value * 255) / 100 : channel.value);
-		});
-		return { r, g, b, a };
+	if (match[1][0] === 'r' || match[1][0] === 'R') {
+		for (let i = 0; i < 3; i++) {
+			// Channels are numbers or percentages; the legacy syntax does not allow mixing them.
+			if ((units[i] !== '' && units[i] !== '%') || (legacy && units[i] !== units[0])) return undefined;
+			values[i] = toByte(units[i] === '%' ? (values[i] * 255) / 100 : values[i]);
+		}
+		return { r: values[0], g: values[1], b: values[2], a };
 	}
 
-	// Legacy syntax requires percentages for saturation and lightness; the modern one also accepts plain numbers.
-	if (first.unit === '%' || !hasUnits([second, third], legacy ? ['%'] : ['', '%'])) return undefined;
+	// The hue is a number or an angle. Legacy syntax requires percentages for saturation and lightness; the modern one also accepts plain numbers.
+	const perTurn = UNITS_PER_TURN[units[0]];
+	if (perTurn === undefined || (units[1] !== '%' && (legacy || units[1] !== '')) || (units[2] !== '%' && (legacy || units[2] !== ''))) return undefined;
 	// Reduce the hue in its own unit first, so huge values cannot overflow when converted to degrees.
-	const perTurn = UNITS_PER_TURN[first.unit];
-	const { r, g, b } = hslToRgb({ h: (modulo(first.value, perTurn) * 360) / perTurn, s: second.value, l: third.value });
+	const { r, g, b } = hslValuesToRgb((modulo(values[0], perTurn) * 360) / perTurn, values[1], values[2]);
 	return { r, g, b, a };
 }
 
@@ -316,11 +304,7 @@ function parseCssFunction(name: string, args: string): Rgba | undefined {
  */
 function parseCssColor(caller: string, name: string, input: string): Rgba {
 	const text = input.trim();
-	const hex = HEX_PATTERN.exec(text);
-	if (hex !== null) return hexToRgba(hex[1]);
-	if (text.toLowerCase() === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
-	const match = CSS_FUNCTION_PATTERN.exec(text);
-	const color = match === null ? undefined : parseCssFunction(match[1].toLowerCase(), match[2]);
+	const color = parseHexDigits(text) ?? (text.toLowerCase() === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : parseCssFunction(text));
 	if (color === undefined) {
 		throw new TypeError(`${caller}: \`${name}\` must be a CSS colour (hex, rgb(), hsl() or 'transparent'), got ${JSON.stringify(input)}`);
 	}
@@ -504,24 +488,39 @@ export function hslToRgb(hsl: Hsl): Rgb {
 	if (typeof hsl !== 'object' || hsl === null) throw new TypeError(`hslToRgb: \`hsl\` must be an { h, s, l } object, got ${describe(hsl)}`);
 	const hue = readChannel('hslToRgb', 'hsl.h', hsl.h);
 	if (!Number.isFinite(hue)) throw new RangeError(`hslToRgb: \`hsl.h\` must be finite, got ${hue}`);
+	return hslValuesToRgb(hue, readChannel('hslToRgb', 'hsl.s', hsl.s), readChannel('hslToRgb', 'hsl.l', hsl.l));
+}
+
+/**
+ * Converts (validated) HSL components to RGB, as {@link hslToRgb} does: the hue is normalized into `[0, 360)` and
+ * saturation and lightness are clamped to `[0, 100]`.
+ * @param {number} hue - A finite hue in degrees
+ * @param {number} saturation - Saturation in percent (not `NaN`)
+ * @param {number} lightness - Lightness in percent (not `NaN`)
+ * @returns {Rgb} The colour with integer channels in `[0, 255]`
+ * @example
+ * hslValuesToRgb(120, 100, 25); // => { r: 0, g: 128, b: 0 }
+ */
+function hslValuesToRgb(hue: number, saturation: number, lightness: number): Rgb {
 	const h = modulo(hue, 360);
-	const s = clamp(readChannel('hslToRgb', 'hsl.s', hsl.s), 0, 100) / 100;
-	const l = clamp(readChannel('hslToRgb', 'hsl.l', hsl.l), 0, 100) / 100;
-	const chroma = s * Math.min(l, 1 - l);
+	const l = clamp(lightness, 0, 100) / 100;
+	const chroma = (clamp(saturation, 0, 100) / 100) * Math.min(l, 1 - l);
+	return { r: hslChannel(0, h, l, chroma), g: hslChannel(8, h, l, chroma), b: hslChannel(4, h, l, chroma) };
+}
 
-	/**
-	 * Computes one RGB channel from the CSS Color 4 `hslToRgb` helper.
-	 * @param {number} offset - `0` for red, `8` for green, `4` for blue
-	 * @returns {number} The channel as an integer in `[0, 255]`
-	 * @example
-	 * channel(0); // red
-	 */
-	function channel(offset: number): number {
-		const k = (offset + h / 30) % 12;
-		return toByte((l - chroma * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255);
-	}
-
-	return { r: channel(0), g: channel(8), b: channel(4) };
+/**
+ * Computes one RGB channel with the CSS Color 4 `hslToRgb` formula.
+ * @param {number} offset - `0` for red, `8` for green, `4` for blue
+ * @param {number} h - The hue in `[0, 360)`
+ * @param {number} l - The lightness in `[0, 1]`
+ * @param {number} chroma - The chroma, `s * min(l, 1 - l)`
+ * @returns {number} The channel as an integer in `[0, 255]`
+ * @example
+ * hslChannel(0, 0, 0.5, 0.5); // => 255
+ */
+function hslChannel(offset: number, h: number, l: number, chroma: number): number {
+	const k = (offset + h / 30) % 12;
+	return toByte((l - chroma * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255);
 }
 
 /**
