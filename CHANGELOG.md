@@ -6,8 +6,14 @@ Full review and rewrite: every module is strictly typed, documented with complet
 
 ### Added
 
-- **New modules:** `guards`, `async`, `date`, `color`, `url`, `iterables`, `cache`, `emitter`, `store`, `random`, `format` and `validate`. The `date` module replaces an empty stub.
-- **~300 new utilities.** See [docs/API.md](./docs/API.md).
+- **New modules:** `guards`, `async`, `date`, `color`, `url`, `iterables`, `cache`, `emitter`, `store`, `random`, `format`, `validate`, `search` and `easing`. The `date` module replaces an empty stub.
+- **~350 new utilities**, including:
+    - AbortSignal combinators (`anySignal`, `timeoutSignal`, `abortable`);
+    - CSS color parsing (`parseColor`, `toCssRgb`, `toCssHsl`);
+    - Myers sequence diff (`diffSequences`, `longestCommonSubsequence`).
+
+    The full list is in [docs/API.md](./docs/API.md).
+
 - **Packaging:**
     - ESM-only, minified, unbundled build (one file per module), with JSDoc kept in the declarations;
     - `exports` map with per-module deep imports;

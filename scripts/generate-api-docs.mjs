@@ -13,6 +13,8 @@ const MODULES = [
 	['functions', 'Function composition, currying, memoization and rate limiting.'],
 	['async', 'Promise utilities: retries, timeouts, polling, limiters, keyed Promise.all and async debounce.'],
 	['color', 'Hex/RGB/HSL conversion, mixing, lightening and WCAG contrast checks.'],
+	['search', 'Fuzzy matching and ranking with highlight ranges, for command palettes and filter-as-you-type UIs.'],
+	['easing', 'Animation easing curves, CSS-accurate cubic-bezier() and steps(), and an analytic spring.'],
 	['format', 'Deterministic, cached Intl formatting: numbers, currency, percent, compact, units, lists, dates, ordinals.'],
 	['validate', 'Linear-time string validators (email, URL, UUID, IP, semver, ISO dates, Luhn, base64, ...) as type predicates.'],
 	['date', 'DST-safe, non-mutating local-time date arithmetic, formatting and parsing.'],

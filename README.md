@@ -8,7 +8,7 @@
 
 **Strictly typed utilities for everyday JavaScript.**
 
-18 focused modules. Zero runtime dependencies. Import the helpers you need, with types and examples available in your editor.
+20 focused modules. Zero runtime dependencies. Import the helpers you need, with types and examples available in your editor.
 
 [Install](#install) · [Quick start](#usage) · [Modules](#modules) · [Examples](#examples) · [API reference](./docs/API.md) · [Contributing](./CONTRIBUTING.md)
 
@@ -80,28 +80,30 @@ Start with the task. Each module links to its full API reference.
 | Generate random values and decorate methods    | [`random`](./docs/API.md#random), [`decorators`](./docs/API.md#decorators)                                                                                                 |
 
 <details>
-<summary>Browse the helpers in all 18 modules</summary>
+<summary>Browse the helpers in all 20 modules</summary>
 
-| Module                                   | Highlights                                                                                                                       |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| [`arrays`](./docs/API.md#arrays)         | `chunk`, `groupBy`, `partition`, `sortBy` (stable), `windowed`, `binarySearch`, `cartesianProduct`, `minBy`/`maxBy`, set algebra |
-| [`objects`](./docs/API.md#objects)       | `deepClone`, `deepMerge`, `isEqual`, `diff`, `flattenObject`/`unflattenObject`, `pick`/`omit`, type-safe path get/set            |
-| [`guards`](./docs/API.md#guards)         | 35+ narrowing predicates (`isPlainObject`, `isNonEmptyArray`, `isOneOf`, `isArrayOf`, …) and `assert`/`assertNever`              |
-| [`strings`](./docs/API.md#strings)       | every case style, `toSlug`, `dedent` tag, `wordWrap`, `levenshtein`, `mask`, `escapeHtml`, grapheme-aware `reverse`/`truncate`   |
-| [`math`](./docs/API.md#math)             | precise `sum`/`round`, `quantile`, `variance`, `clamp`/`lerp`/`mapRange`, `formatBytes`, `ordinal`, `gcd`/`lcm`, `isPrime`       |
-| [`functions`](./docs/API.md#functions)   | `debounce`/`throttle` with `cancel`/`flush`, `memoize`, `memoizeLast`, `curry`, `compose`/`pipe`, `once`, `attempt`              |
-| [`async`](./docs/API.md#async)           | `retry` with backoff, `withTimeout`, `createLimiter`, `mapWithConcurrency`, `pollUntil`, `promiseAllObject`, `debounceAsync`     |
-| [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`addBusinessDays`, ISO weeks, quarters, `getAge`, `formatDate`, `formatDuration`/`parseDuration`  |
-| [`format`](./docs/API.md#format)         | deterministic, cached Intl formatting: `formatCurrency`, `formatCompact`, `formatPercent`, `formatList`, `formatOrdinal`, …      |
-| [`validate`](./docs/API.md#validate)     | ReDoS-safe type predicates: `isEmail`, `isUrl`, `isUuid`, `isIP`, `isSemver`/`compareSemver`, ISO dates, Luhn, base64            |
-| [`color`](./docs/API.md#color)           | hex/RGB/HSL conversion, `mix`, `lighten`/`darken`, WCAG `contrastRatio`, `getReadableTextColor`, `meetsContrast`                 |
-| [`url`](./docs/API.md#url)               | `buildQueryString`/`parseQueryString` (pollution-safe), `withQuery`, `joinUrl`, `getQueryParam`                                  |
-| [`iterables`](./docs/API.md#iterables)   | lazy `map`/`filter`/`take`/`chunk`/`zip`/`windowed` over any (async) iterable, infinite sources, exact pull counts               |
-| [`cache`](./docs/API.md#cache)           | O(1) `createLRUCache` with TTL, eviction reasons and an injectable clock; drop-in cache for `memoize`                            |
-| [`emitter`](./docs/API.md#emitter)       | typed `createEmitter` with wildcard listeners, `once`, `waitFor` (timeout/abort) and error isolation                             |
-| [`store`](./docs/API.md#store)           | `createStore` for `useSyncExternalStore`, with equality-gated updates and cached `select()` stores                               |
-| [`random`](./docs/API.md#random)         | seeded `createRandom` (cross-platform deterministic), secure `randomId`/`randomUUID`/`randomBytes`, `weightedRandom`             |
-| [`decorators`](./docs/API.md#decorators) | `@memoize`/`@once` (per instance), `@bound`, `@debounced`, `@throttled`, `@retryable`, `@timeout`, `@readonly`, `@deprecated`    |
+| Module                                   | Highlights                                                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| [`arrays`](./docs/API.md#arrays)         | `chunk`, `groupBy`, `partition`, `sortBy` (stable), `windowed`, `binarySearch`, Myers `diffSequences`, `minBy`/`maxBy`, set algebra   |
+| [`objects`](./docs/API.md#objects)       | `deepClone`, `deepMerge`, `isEqual`, `diff`, `flattenObject`/`unflattenObject`, `pick`/`omit`, type-safe path get/set                 |
+| [`guards`](./docs/API.md#guards)         | 35+ narrowing predicates (`isPlainObject`, `isNonEmptyArray`, `isOneOf`, `isArrayOf`, …) and `assert`/`assertNever`                   |
+| [`strings`](./docs/API.md#strings)       | every case style, `toSlug`, `dedent` tag, `wordWrap`, `levenshtein`, `mask`, `escapeHtml`, grapheme-aware `reverse`/`truncate`        |
+| [`math`](./docs/API.md#math)             | precise `sum`/`round`, `quantile`, `variance`, `clamp`/`lerp`/`mapRange`, `formatBytes`, `ordinal`, `gcd`/`lcm`, `isPrime`            |
+| [`functions`](./docs/API.md#functions)   | `debounce`/`throttle` with `cancel`/`flush`, `memoize`, `memoizeLast`, `curry`, `compose`/`pipe`, `once`, `attempt`                   |
+| [`async`](./docs/API.md#async)           | `retry` with backoff, `withTimeout`, `createLimiter`, `mapWithConcurrency`, `pollUntil`, `anySignal`/`timeoutSignal`, `debounceAsync` |
+| [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`addBusinessDays`, ISO weeks, quarters, `getAge`, `formatDate`, `formatDuration`/`parseDuration`       |
+| [`format`](./docs/API.md#format)         | deterministic, cached Intl formatting: `formatCurrency`, `formatCompact`, `formatPercent`, `formatList`, `formatOrdinal`, …           |
+| [`validate`](./docs/API.md#validate)     | ReDoS-safe type predicates: `isEmail`, `isUrl`, `isUuid`, `isIP`, `isSemver`/`compareSemver`, ISO dates, Luhn, base64                 |
+| [`color`](./docs/API.md#color)           | CSS `parseColor` (hex, `rgb()`, `hsl()`), `mix`, `lighten`/`darken`, WCAG `contrastRatio`, `getReadableTextColor`, `meetsContrast`    |
+| [`search`](./docs/API.md#search)         | `fuzzyMatch`/`fuzzySearch` with optimal scoring and highlight ranges, `highlight` segments for rendering matches                      |
+| [`easing`](./docs/API.md#easing)         | 31 tree-shakeable easings, CSS-accurate `cubicBezier`/`steps`, analytic `spring`, `interpolate`                                       |
+| [`url`](./docs/API.md#url)               | `buildQueryString`/`parseQueryString` (pollution-safe), `withQuery`, `joinUrl`, `getQueryParam`                                       |
+| [`iterables`](./docs/API.md#iterables)   | lazy `map`/`filter`/`take`/`chunk`/`zip`/`windowed` over any (async) iterable, infinite sources, exact pull counts                    |
+| [`cache`](./docs/API.md#cache)           | O(1) `createLRUCache` with TTL, eviction reasons and an injectable clock; drop-in cache for `memoize`                                 |
+| [`emitter`](./docs/API.md#emitter)       | typed `createEmitter` with wildcard listeners, `once`, `waitFor` (timeout/abort) and error isolation                                  |
+| [`store`](./docs/API.md#store)           | `createStore` for `useSyncExternalStore`, with equality-gated updates and cached `select()` stores                                    |
+| [`random`](./docs/API.md#random)         | seeded `createRandom` (cross-platform deterministic), secure `randomId`/`randomUUID`/`randomBytes`, `weightedRandom`                  |
+| [`decorators`](./docs/API.md#decorators) | `@memoize`/`@once` (per instance), `@bound`, `@debounced`, `@throttled`, `@retryable`, `@timeout`, `@readonly`, `@deprecated`         |
 
 </details>
 
@@ -210,6 +212,34 @@ toArray(
 // Reproducible randomness (tests, simulations, procedural content).
 const rng = createRandom('docs');
 [rng.int(1, 6), rng.int(1, 6), rng.int(1, 6)]; // [3, 3, 5] on every platform
+```
+
+</details>
+
+<details>
+<summary>UI helpers: fuzzy search, easing, CSS colors and diffs</summary>
+
+```ts
+import { diffSequences } from '@emiliodominguez/js-helpers/arrays';
+import { parseColor } from '@emiliodominguez/js-helpers/color';
+import { cssEase, interpolate } from '@emiliodominguez/js-helpers/easing';
+import { fuzzySearch, highlight } from '@emiliodominguez/js-helpers/search';
+
+// Command palette: rank matches, then render highlighted segments (no innerHTML needed).
+const [best] = fuzzySearch(['Open File', 'Save File', 'Toggle Sidebar'], 'of');
+highlight(best.key, best.ranges);
+// [{ text: 'O', match: true }, { text: 'pen ', match: false }, { text: 'F', match: true }, { text: 'ile', match: false }]
+
+// Animate with the exact CSS `ease` curve.
+interpolate(0, 200, 0.5, cssEase); // 160.48…
+
+// Parse any CSS color syntax.
+parseColor('hsl(210 50% 40% / 0.5)'); // { r: 51, g: 102, b: 153, a: 0.5 }
+
+// Minimal edit scripts (Myers' algorithm) for lists or strings.
+diffSequences('kitten', 'sitting').filter(function (op) {
+	return op.type !== 'equal';
+}).length; // 5
 ```
 
 </details>

@@ -1,9 +1,10 @@
 import * as root from '.';
-import { chunk } from './arrays/index.js';
+import { chunk, diffSequences } from './arrays/index.js';
 import { createLRUCache } from './cache/index.js';
 import { retry, withTimeout, mapWithConcurrency } from './async/index.js';
-import { getReadableTextColor } from './color/index.js';
+import { getReadableTextColor, parseColor } from './color/index.js';
 import { addMonths, formatDate } from './date/index.js';
+import { cssEase, interpolate } from './easing/index.js';
 import { formatCompact, formatCurrency } from './format/index.js';
 import { bound, memoize, readonly } from './decorators/index.js';
 import { createEmitter } from './emitter/index.js';
@@ -12,6 +13,7 @@ import { isDefined } from './guards/index.js';
 import { count, filter, map, take, toArray } from './iterables/index.js';
 import { deepMerge, getFromObjectByKeys } from './objects/index.js';
 import { createRandom } from './random/index.js';
+import { fuzzySearch, highlight } from './search/index.js';
 import { createStore } from './store/index.js';
 import { toKebabCase, toSlug } from './strings/index.js';
 import { withQuery } from './url/index.js';
@@ -26,6 +28,7 @@ describe('root entry', function () {
 			'color',
 			'date',
 			'decorators',
+			'easing',
 			'emitter',
 			'format',
 			'functions',
@@ -34,6 +37,7 @@ describe('root entry', function () {
 			'math',
 			'objects',
 			'random',
+			'search',
 			'store',
 			'strings',
 			'url',
@@ -141,6 +145,23 @@ describe('README examples', function () {
 
 		const rng = createRandom('docs');
 		expect([rng.int(1, 6), rng.int(1, 6), rng.int(1, 6)]).toEqual([3, 3, 5]);
+	});
+
+	it('should match the "UI helpers" section', function () {
+		const [best] = fuzzySearch(['Open File', 'Save File', 'Toggle Sidebar'], 'of');
+		expect(highlight(best.key, best.ranges)).toEqual([
+			{ text: 'O', match: true },
+			{ text: 'pen ', match: false },
+			{ text: 'F', match: true },
+			{ text: 'ile', match: false }
+		]);
+		expect(interpolate(0, 200, 0.5, cssEase)).toBeCloseTo(160.48, 2);
+		expect(parseColor('hsl(210 50% 40% / 0.5)')).toEqual({ r: 51, g: 102, b: 153, a: 0.5 });
+		expect(
+			diffSequences('kitten', 'sitting').filter(function (op) {
+				return op.type !== 'equal';
+			})
+		).toHaveLength(5);
 	});
 
 	it('should match the decorators section', function () {
