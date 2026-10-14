@@ -95,22 +95,149 @@ function assertString(caller: string, name: string, value: unknown): asserts val
 	if (typeof value !== 'string') throw new TypeError(`${caller}: \`${name}\` must be a string, got ${typeName(value)}`);
 }
 
+/** Character class flag: a letter or a digit. */
+const WORD_CHAR = 1;
+/** Character class flag: a character that has an upper-case form (i.e. a lower-case letter). */
+const LOWER_CASE = 2;
+/** Character class flag: a character that has a lower-case form (i.e. an upper-case letter). */
+const UPPER_CASE = 4;
+/** Targets up to this many UTF-16 code units are aligned in scratch buffers reused across calls (larger ones get one-off buffers, so they are not retained). */
+const SHARED_LENGTH = 256;
+/** Largest back-pointer matrix (query code points × target code units) kept in the reused scratch buffers. */
+const SHARED_CELLS = 8192;
+
 /**
- * Lower-cases one character (the case-insensitive folding of {@link fuzzyMatch}).
- * @param {string} char - A code point
- * @returns {string} Its lower-case form
+ * A query split into code points, folded once per search.
  */
-function lower(char: string): string {
-	return char.toLowerCase();
+interface PreparedQuery {
+	/** Folded code points (see {@link fold}). */
+	codes: number[];
+	/** Original code points (for the exact-case bonus). */
+	raw: number[];
+	/** For an ASCII query, the characters (as one string) each query character matches, to reject targets with `indexOf`; `undefined` otherwise. */
+	needles: string[] | undefined;
 }
 
 /**
- * Returns its argument (the case-sensitive folding of {@link fuzzyMatch}).
- * @param {string} char - A code point
- * @returns {string} The same code point
+ * Scratch buffers of the alignment, indexed by target code point.
  */
-function identity(char: string): string {
-	return char;
+interface Workspace {
+	/** Folded code points of the target. */
+	codes: Int32Array;
+	/** Original code points of the target. */
+	raw: Int32Array;
+	/** UTF-16 offset of every code point, plus the target length at the end. */
+	offsets: Int32Array;
+	/** Two dynamic-programming rows. */
+	rows: [Float64Array, Float64Array];
+	/** Back pointers: position of the previous matched character, for every matched (query, target) pair. */
+	back: Int32Array;
+}
+
+/** Reused scratch buffers (matching is synchronous, so calls never overlap), allocated on first use. */
+let shared: Workspace | undefined;
+
+/**
+ * Allocates scratch buffers.
+ * @param {number} length - Largest target length (UTF-16 code units)
+ * @param {number} cells - Size of the back-pointer matrix
+ * @returns {Workspace} The buffers
+ */
+function allocate(length: number, cells: number): Workspace {
+	return {
+		codes: new Int32Array(length),
+		raw: new Int32Array(length),
+		offsets: new Int32Array(length + 1),
+		rows: [new Float64Array(length), new Float64Array(length)],
+		back: new Int32Array(cells)
+	};
+}
+
+/**
+ * Folds a code point for comparison: its lower case (as `String.prototype.toLowerCase` gives it for the lone character) unless
+ * `caseSensitive`. A character whose lower case is several code points (only `'İ'`) folds to itself, which no other character folds to.
+ * @param {number} code - A code point
+ * @param {boolean} caseSensitive - Whether case must match exactly
+ * @returns {number} The folded code point
+ */
+function fold(code: number, caseSensitive: boolean): number {
+	if (caseSensitive) return code;
+	if (code < 128) return code >= 65 && code <= 90 ? code + 32 : code;
+	const lower = String.fromCodePoint(code).toLowerCase();
+	const folded = lower.codePointAt(0) as number;
+	return String.fromCodePoint(folded) === lower ? folded : code;
+}
+
+/**
+ * Classifies a code point for the word-start bonus.
+ * @param {number} code - A code point
+ * @returns {number} A combination of `WORD_CHAR`, `LOWER_CASE` and `UPPER_CASE`
+ */
+function classify(code: number): number {
+	if (code < 128) return code >= 97 && code <= 122 ? WORD_CHAR | LOWER_CASE : code >= 65 && code <= 90 ? WORD_CHAR | UPPER_CASE : code >= 48 && code <= 57 ? WORD_CHAR : 0;
+	const char = String.fromCodePoint(code);
+	return (WORD.test(char) ? WORD_CHAR : 0) | (char === char.toUpperCase() ? 0 : LOWER_CASE) | (char === char.toLowerCase() ? 0 : UPPER_CASE);
+}
+
+/**
+ * Word-start bonus of a target position (computed only where a query character matches): the first character, a letter or digit
+ * after any other character, or a camelCase hump.
+ * @param {Int32Array} raw - Code points of the target
+ * @param {number} j - The position
+ * @returns {number} `BOUNDARY` or `0`
+ */
+function bonus(raw: Int32Array, j: number): number {
+	if (j === 0) return BOUNDARY;
+	const current = classify(raw[j]);
+	const previous = classify(raw[j - 1]);
+	return (current & WORD_CHAR && !(previous & WORD_CHAR)) || (previous & LOWER_CASE && current & UPPER_CASE) ? BOUNDARY : 0;
+}
+
+/**
+ * Splits and folds a query.
+ * @param {string} query - The query
+ * @param {boolean} caseSensitive - Whether case must match exactly
+ * @returns {PreparedQuery} Its code points, original and folded
+ */
+function prepare(query: string, caseSensitive: boolean): PreparedQuery {
+	const raw: number[] = [];
+	const codes: number[] = [];
+	let needles: string[] | undefined = [];
+	for (let k = 0; k < query.length; k++) {
+		const code = query.codePointAt(k) as number;
+		const folded = fold(code, caseSensitive);
+		raw.push(code);
+		codes.push(folded);
+		if (code > 127) {
+			needles = undefined;
+			if (code > 0xffff) k++;
+		} else {
+			// Without case sensitivity, an ASCII letter matches its two cases, and 'k' also the Kelvin sign (whose lower case is 'k').
+			const char = query[k];
+			needles?.push(caseSensitive || folded < 97 || folded > 122 ? char : folded === 107 ? 'kK\u212A' : String.fromCharCode(folded, folded - 32));
+		}
+	}
+	return { codes, raw, needles };
+}
+
+/**
+ * Whether `target` contains, in order, one of the characters of every needle (the subsequence test for ASCII queries, done with `indexOf`).
+ * @param {string[]} needles - The characters matched by each query character
+ * @param {string} target - The text searched
+ * @returns {boolean} `false` when the query cannot match
+ */
+function contains(needles: string[], target: string): boolean {
+	let from = 0;
+	for (const alternatives of needles) {
+		let found = -1;
+		for (const needle of alternatives) {
+			const index = target.indexOf(needle, from);
+			if (index >= 0 && (found < 0 || index < found)) found = index;
+		}
+		if (found < 0) return false;
+		from = found + 1;
+	}
+	return true;
 }
 
 /**
@@ -119,87 +246,85 @@ function identity(char: string): string {
  * `row[j]` holds the best score of an alignment of the first `i + 1` query characters whose last one is matched at target
  * position `j`. Gap penalties are affine, so the best gapped predecessor is maintained incrementally (Gotoh's algorithm):
  * `gap = max(gap + GAP_EXTENSION, previousRow[j - 2] + GAP_START)`.
- * @param {string} query - The query
+ * @param {PreparedQuery} query - The prepared query
  * @param {string} target - The text searched
  * @param {boolean} caseSensitive - Whether case must match exactly
  * @returns {FuzzyMatch | undefined} The best alignment, or `undefined` when the query is not a subsequence of the target
  */
-function match(query: string, target: string, caseSensitive: boolean): FuzzyMatch | undefined {
-	const q = Array.from(query);
-	const t = Array.from(target);
+function match(query: PreparedQuery, target: string, caseSensitive: boolean): FuzzyMatch | undefined {
+	const q = query.codes;
 	const m = q.length;
-	const n = t.length;
-	const fold = caseSensitive ? identity : lower;
-	const fq = q.map(fold);
-	const ft = t.map(fold);
+	const length = target.length;
 
-	// Fast rejection (the common case while filtering): greedy subsequence check.
-	let matched = 0;
-	for (let j = 0; j < n && matched < m; j++) if (fq[matched] === ft[j]) matched++;
-	if (matched < m) return undefined;
 	if (m === 0) return { score: 0, ranges: [] };
+	// Fast rejection (the common case while filtering), without allocating.
+	if (query.needles !== undefined && !contains(query.needles, target)) return undefined;
 
-	const bonus = t.map(function (char, j) {
-		const previous = t[j - 1];
-		return j === 0 || (WORD.test(char) && !WORD.test(previous)) || (previous !== previous.toUpperCase() && char !== char.toLowerCase()) ? BOUNDARY : 0;
-	});
-	const back = new Int32Array(m * n);
-	let previousRow = new Float64Array(0);
+	const cells = m * length;
+	const { codes, raw, offsets, rows, back } =
+		length <= SHARED_LENGTH && cells <= SHARED_CELLS ? (shared ??= allocate(SHARED_LENGTH, SHARED_CELLS)) : allocate(length, cells);
+	let n = 0;
+	// Greedy subsequence check (the alignment only exists if it passes), unless `contains` already did it.
+	let matched = query.needles === undefined ? 0 : m;
+	for (let k = 0; k < length; n++) {
+		const code = target.codePointAt(k) as number;
+		const folded = fold(code, caseSensitive);
+		if (folded === q[matched]) matched++;
+		offsets[n] = k;
+		k += code > 0xffff ? 2 : 1;
+		raw[n] = code;
+		codes[n] = folded;
+	}
+	offsets[n] = length;
+	if (matched < m) return undefined;
 
-	for (let i = 0; i < m; i++) {
-		const row = new Float64Array(n).fill(-Infinity);
-		let gap = -Infinity;
-		let gapFrom = -1;
-		for (let j = i; j < n; j++) {
-			if (i > 0 && j > 1) {
-				gap += GAP_EXTENSION;
-				const open = previousRow[j - 2] + GAP_START;
-				if (open >= gap) {
-					gap = open;
-					gapFrom = j - 2;
-				}
-			}
-			if (fq[i] !== ft[j]) continue;
-			let score = -Math.min(j, MAX_LEADING_PENALTY);
-			let from = -1;
-			if (i > 0) {
-				const consecutive = previousRow[j - 1] + CONSECUTIVE;
-				score = consecutive >= gap ? consecutive : gap;
-				from = consecutive >= gap ? j - 1 : gapFrom;
-			}
-			row[j] = score + MATCH + bonus[j] + (q[i] === t[j] ? EXACT_CASE : 0);
-			back[i * n + j] = from;
-		}
+	let [row, previousRow] = rows;
+	for (let j = 0; j < n; j++) row[j] = codes[j] === q[0] ? MATCH + bonus(raw, j) + (raw[j] === query.raw[0] ? EXACT_CASE : 0) - Math.min(j, MAX_LEADING_PENALTY) : -Infinity;
+	for (let i = 1; i < m; i++) {
+		const swap = previousRow;
 		previousRow = row;
+		row = swap;
+		const code = q[i];
+		const exact = query.raw[i];
+		// Best score of an alignment of the previous query characters ending at least two positions before `j` (gap of >= 1).
+		let gap = -Infinity;
+		let gapFrom = 0;
+		for (let j = i; j < n; j++) {
+			if (codes[j] === code) {
+				const consecutive = previousRow[j - 1] + CONSECUTIVE;
+				const isConsecutive = consecutive >= gap;
+				row[j] = (isConsecutive ? consecutive : gap) + MATCH + bonus(raw, j) + (raw[j] === exact ? EXACT_CASE : 0);
+				back[i * n + j] = isConsecutive ? j - 1 : gapFrom;
+			} else row[j] = -Infinity;
+			// Extend the gap for position j + 1, or open one after position j - 1.
+			gap += GAP_EXTENSION;
+			const open = previousRow[j - 1] + GAP_START;
+			if (open >= gap) {
+				gap = open;
+				gapFrom = j - 1;
+			}
+		}
 	}
 
 	let score = -Infinity;
 	let end = 0;
-	previousRow.forEach(function (value, j) {
-		if (value > score) {
-			score = value;
+	for (let j = m - 1; j < n; j++) {
+		if (row[j] > score) {
+			score = row[j];
 			end = j;
 		}
-	});
+	}
 
-	const positions = new Set<number>();
+	// Walk the back pointers from the last matched character, building the ranges from right to left.
+	const ranges: Array<[number, number]> = [];
 	for (let i = m - 1; i >= 0; i--) {
-		positions.add(end);
+		const last = ranges[ranges.length - 1];
+		if (last !== undefined && last[0] === offsets[end + 1]) last[0] = offsets[end];
+		else ranges.push([offsets[end], offsets[end + 1]]);
 		end = back[i * n + end];
 	}
 
-	const ranges: Array<[number, number]> = [];
-	let offset = 0;
-	t.forEach(function (char, j) {
-		if (positions.has(j)) {
-			const last = ranges[ranges.length - 1];
-			if (last !== undefined && last[1] === offset) last[1] += char.length;
-			else ranges.push([offset, offset + char.length]);
-		}
-		offset += char.length;
-	});
-
-	return { score, ranges };
+	return { score, ranges: ranges.reverse() };
 }
 
 /**
@@ -216,7 +341,7 @@ function match(query: string, target: string, caseSensitive: boolean): FuzzyMatc
  * - characters skipped before the first match cost `1` each, at most `8` in total.
  *
  * So an exact prefix always scores at least as much as the same query scattered over word starts, and shorter, tighter, earlier matches rank higher.
- * Among equally-scored alignments the one ending first is chosen, preferring consecutive matches.
+ * Among equally-scored alignments the one ending first is chosen, preferring consecutive matches, then the shortest gaps.
  *
  * Characters are compared per Unicode code point after `toLowerCase()` (locale-independent; skipped when `caseSensitive`), so the
  * ranges never split a surrogate pair. There is no normalization and no grapheme segmentation: a precomposed `'é'` does not
@@ -242,7 +367,8 @@ function match(query: string, target: string, caseSensitive: boolean): FuzzyMatc
 export function fuzzyMatch(query: string, target: string, options: FuzzyMatchOptions = {}): FuzzyMatch | undefined {
 	assertString('fuzzyMatch', 'query', query);
 	assertString('fuzzyMatch', 'target', target);
-	return match(query, target, options.caseSensitive === true);
+	const caseSensitive = options.caseSensitive === true;
+	return match(prepare(query, caseSensitive), target, caseSensitive);
 }
 
 /**
@@ -273,16 +399,24 @@ export function fuzzySearch<T>(items: Iterable<T>, query: string, options: Fuzzy
 	assertInteger('fuzzySearch', 'limit', limit, 0, true);
 	assertNumber('fuzzySearch', 'threshold', threshold, !Number.isNaN(threshold), 'a number');
 
+	const prepared = prepare(query, caseSensitive);
+	const name = key === undefined ? 'item' : 'key(item)';
 	const results: Array<FuzzySearchResult<T>> = [];
 	for (const item of items) {
 		const texts: unknown = key === undefined ? item : key(item);
 		let best: FuzzySearchResult<T> | undefined;
-		for (const text of Array.isArray(texts) ? (texts as unknown[]) : [texts]) {
-			assertString('fuzzySearch', key === undefined ? 'item' : 'key(item)', text);
-			const result = match(query, text, caseSensitive);
-			if (result !== undefined && result.score >= threshold && (best === undefined || result.score > best.score)) best = { item, key: text, ...result };
+		if (Array.isArray(texts)) {
+			for (const text of texts as unknown[]) {
+				assertString('fuzzySearch', name, text);
+				const result = match(prepared, text, caseSensitive);
+				if (result !== undefined && (best === undefined || result.score > best.score)) best = { item, key: text, score: result.score, ranges: result.ranges };
+			}
+		} else {
+			assertString('fuzzySearch', name, texts);
+			const result = match(prepared, texts, caseSensitive);
+			if (result !== undefined) best = { item, key: texts, score: result.score, ranges: result.ranges };
 		}
-		if (best !== undefined) results.push(best);
+		if (best !== undefined && best.score >= threshold) results.push(best);
 	}
 
 	return results
@@ -313,36 +447,32 @@ export function fuzzySearch<T>(items: Iterable<T>, query: string, options: Fuzzy
  */
 export function highlight(text: string, ranges: Iterable<readonly [number, number]>): HighlightSegment[] {
 	assertString('highlight', 'text', text);
-	const sorted = Array.from(ranges, function ([start, end]) {
-		assertNumber('highlight', 'start', start, Number.isInteger(start) && start >= 0 && start <= text.length, `an integer between 0 and ${text.length}`);
-		assertNumber('highlight', 'end', end, Number.isInteger(end) && end >= start && end <= text.length, `an integer between ${start} and ${text.length}`);
-		return [start, end];
-	}).sort(function (a, b) {
+	const length = text.length;
+	const sorted: Array<[number, number]> = [];
+	for (const [start, end] of ranges) {
+		// The messages are only built for invalid bounds.
+		if (!(Number.isInteger(start) && start >= 0 && start <= length)) assertNumber('highlight', 'start', start, false, `an integer between 0 and ${length}`);
+		if (!(Number.isInteger(end) && end >= start && end <= length)) assertNumber('highlight', 'end', end, false, `an integer between ${start} and ${length}`);
+		if (end > start) sorted.push([start, end]);
+	}
+	sorted.sort(function (a, b) {
 		return a[0] - b[0];
 	});
 
 	const segments: HighlightSegment[] = [];
+	// End of the text covered so far, and the matched segment that ends there (extended by overlapping or adjacent ranges).
 	let cursor = 0;
-
-	/**
-	 * Appends `text[cursor, end)` with the given flag (merged into the last segment when it has the same flag), if not empty.
-	 * @param {number} end - End of the segment
-	 * @param {boolean} matched - Whether the segment is marked
-	 * @returns {void}
-	 */
-	function push(end: number, matched: boolean): void {
-		if (end <= cursor) return;
-		const last = segments[segments.length - 1];
-		const slice = text.slice(cursor, end);
-		if (last !== undefined && last.match === matched) last.text += slice;
-		else segments.push({ text: slice, match: matched });
-		cursor = end;
-	}
-
+	let open: HighlightSegment | undefined;
 	for (const [start, end] of sorted) {
-		push(start, false);
-		push(end, true);
+		// A range that overlaps or touches the covered text extends the open segment (by nothing when it ends inside it).
+		if (open !== undefined && start <= cursor) open.text += text.slice(cursor, end);
+		else {
+			if (start > cursor) segments.push({ text: text.slice(cursor, start), match: false });
+			open = { text: text.slice(start, end), match: true };
+			segments.push(open);
+		}
+		cursor = Math.max(cursor, end);
 	}
-	push(text.length, false);
+	if (cursor < length) segments.push({ text: text.slice(cursor), match: false });
 	return segments;
 }

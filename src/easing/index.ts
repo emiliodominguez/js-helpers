@@ -64,7 +64,7 @@ export interface Spring {
 
 /** Overshoot constant of the "back" easings (overshoots by about 10%). */
 const BACK = 1.70158;
-/** Precision of the Newton–Raphson step of {@link cubicBezier}, in x units. */
+/** Precision of the curve parameter `s` solving `x(s) = t` in {@link cubicBezier}. */
 const BEZIER_EPSILON = 1e-12;
 /** Value of a `steps()` position: `[added to the current step, added to the number of steps to get the number of jumps]`. */
 const STEP_POSITIONS: Record<StepPosition, readonly [number, number]> = {
@@ -77,17 +77,6 @@ const STEP_POSITIONS: Record<StepPosition, readonly [number, number]> = {
 };
 
 /**
- * Builds the ease-in power curve `t ** exponent`.
- * @param {number} exponent - The power
- * @returns {EasingFunction} `t => t ** exponent`
- */
-function power(exponent: number): EasingFunction {
-	return function (t) {
-		return t ** exponent;
-	};
-}
-
-/**
  * The base (ease-out) bounce curve: four parabolic arcs of decreasing height (Robert Penner's constants, written with exact binary fractions).
  * @param {number} t - Progress
  * @returns {number} Eased progress
@@ -95,8 +84,10 @@ function power(exponent: number): EasingFunction {
 function bounce(t: number): number {
 	const x = 2.75 * t;
 	if (x < 1) return x * x;
-	const [center, halfWidth] = x < 2 ? [1.5, 0.5] : x < 2.5 ? [2.25, 0.25] : [2.625, 0.125];
-	return (x - center) ** 2 + 1 - halfWidth * halfWidth;
+	// Arcs of half-width 1/2, 1/4 and 1/8 centered at 1.5, 2.25 and 2.625 (= 3 - 3 · halfWidth).
+	const halfWidth = x < 2 ? 0.5 : x < 2.5 ? 0.25 : 0.125;
+	const d = x - (3 - 3 * halfWidth);
+	return d * d + 1 - halfWidth * halfWidth;
 }
 
 /**
@@ -149,10 +140,14 @@ export function linear(t: number): number {
 
 /**
  * Quadratic ease-in: `t²`. The `Out` / `InOut` variants are built with {@link easeOut} / {@link easeInOut}, like all named easings.
+ * @param {number} t - Progress
+ * @returns {number} Eased progress
  * @example
  * easeInQuad(0.5); // => 0.25
  */
-export const easeInQuad: EasingFunction = /* @__PURE__ */ power(2);
+export function easeInQuad(t: number): number {
+	return t * t;
+}
 /**
  * Quadratic ease-out.
  * @example
@@ -167,11 +162,15 @@ export const easeOutQuad: EasingFunction = /* @__PURE__ */ easeOut(easeInQuad);
 export const easeInOutQuad: EasingFunction = /* @__PURE__ */ easeInOut(easeInQuad);
 
 /**
- * Cubic ease-in: `t³`.
+ * Cubic ease-in: `t³` (computed with multiplications, like the other power easings: much faster than `**`).
+ * @param {number} t - Progress
+ * @returns {number} Eased progress
  * @example
  * easeInCubic(0.5); // => 0.125
  */
-export const easeInCubic: EasingFunction = /* @__PURE__ */ power(3);
+export function easeInCubic(t: number): number {
+	return t * t * t;
+}
 /**
  * Cubic ease-out.
  * @example
@@ -187,10 +186,15 @@ export const easeInOutCubic: EasingFunction = /* @__PURE__ */ easeInOut(easeInCu
 
 /**
  * Quartic ease-in: `t⁴`.
+ * @param {number} t - Progress
+ * @returns {number} Eased progress
  * @example
  * easeInQuart(0.5); // => 0.0625
  */
-export const easeInQuart: EasingFunction = /* @__PURE__ */ power(4);
+export function easeInQuart(t: number): number {
+	const square = t * t;
+	return square * square;
+}
 /**
  * Quartic ease-out.
  * @example
@@ -206,10 +210,15 @@ export const easeInOutQuart: EasingFunction = /* @__PURE__ */ easeInOut(easeInQu
 
 /**
  * Quintic ease-in: `t⁵`.
+ * @param {number} t - Progress
+ * @returns {number} Eased progress
  * @example
  * easeInQuint(0.5); // => 0.03125
  */
-export const easeInQuint: EasingFunction = /* @__PURE__ */ power(5);
+export function easeInQuint(t: number): number {
+	const square = t * t;
+	return square * square * t;
+}
 /**
  * Quintic ease-out.
  * @example
@@ -332,7 +341,8 @@ export const easeInOutBack: EasingFunction = /* @__PURE__ */ easeInOut(easeInBac
  * easeInElastic(1); // => 1
  */
 export function easeInElastic(t: number): number {
-	return t === 0 || t === 1 ? t : -(2 ** (10 * t - 10)) * Math.sin((10 * t - 10.75) * ((2 * Math.PI) / 3));
+	// Pinned at t = 0 (the formula gives 2^-10 · sin(...) there); at t = 1 the formula is exactly 1.
+	return t === 0 ? t : -(2 ** (10 * t - 10)) * Math.sin((10 * t - 10.75) * ((2 * Math.PI) / 3));
 }
 /**
  * Elastic ease-out: overshoots and oscillates around the target.
@@ -368,9 +378,38 @@ export const easeInBounce: EasingFunction = /* @__PURE__ */ easeOut(bounce);
 export const easeInOutBounce: EasingFunction = /* @__PURE__ */ easeInOut(easeInBounce);
 
 /**
+ * Solves `x(s) = t` for `s` in `[0, 1]`, where `x(s) = ((a·s + b)·s + c)·s` is increasing with `x(0) = 0` and `x(1) = 1`.
+ *
+ * Newton–Raphson from `s = t`, safeguarded by the bracket `[low, high]` of the root: a step that leaves it (or is infinite, where x
+ * is flat) bisects instead. Stops once the step is below `BEZIER_EPSILON`, or is NaN (0 / 0: exact root where x is flat). Takes
+ * about 5 steps for usual curves; the bound only matters for t < ~1e-19 at a vertical tangent.
+ * @param {number} a - Cubic coefficient
+ * @param {number} b - Quadratic coefficient
+ * @param {number} c - Linear coefficient
+ * @param {number} t - Target value, in `(0, 1)`
+ * @returns {number} The curve parameter `s`
+ */
+function solveBezier(a: number, b: number, c: number, t: number): number {
+	let s = t;
+	let low = 0;
+	let high = 1;
+	for (let i = 0; i < 64; i++) {
+		const error = ((a * s + b) * s + c) * s - t;
+		const step = error / ((3 * a * s + 2 * b) * s + c);
+		if (!(Math.abs(step) >= BEZIER_EPSILON)) break;
+		if (error < 0) low = s;
+		else high = s;
+		s -= step;
+		if (!(s > low && s < high)) s = (low + high) / 2;
+	}
+	return s;
+}
+
+/**
  * Creates an easing function equivalent to CSS `cubic-bezier(x1, y1, x2, y2)`: the curve from `(0, 0)` to `(1, 1)` with control
- * points `(x1, y1)` and `(x2, y2)`, evaluated by solving `x(s) = t` for the curve parameter `s` (Newton–Raphson, with a bisection
- * fallback that is always correct because `x` is monotonic when `x1, x2 ∈ [0, 1]`; the result is accurate to ~1e-12), then returning `y(s)`.
+ * points `(x1, y1)` and `(x2, y2)`, evaluated by solving `x(s) = t` for the curve parameter `s` to ~1e-12 (Newton–Raphson, safeguarded
+ * by bisection, which always converges because `x` is monotonic when `x1, x2 ∈ [0, 1]`; for `t > 0.5` on the mirrored curve, so that
+ * both ends are equally precise), then returning `y(s)`.
  *
  * Like browsers, inputs outside `[0, 1]` are extrapolated linearly along the tangent at the nearest end point.
  * @param {number} x1 - x of the first control point, in `[0, 1]`
@@ -394,42 +433,25 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): Eas
 	assertNumber('cubicBezier', 'x2', x2, x2 >= 0 && x2 <= 1, 'a number between 0 and 1');
 	assertNumber('cubicBezier', 'y2', y2, Number.isFinite(y2), 'a finite number');
 
-	// Polynomial coefficients: x(s) = ((ax·s + bx)·s + cx)·s, same for y.
+	// Polynomial coefficients: x(s) = ((ax·s + bx)·s + cx)·s, same for y, and for x̄(u) = 1 - x(1 - u), the x of the mirrored curve.
 	const cx = 3 * x1;
 	const bx = 3 * (x2 - x1) - cx;
 	const ax = 1 - cx - bx;
 	const cy = 3 * y1;
 	const by = 3 * (y2 - y1) - cy;
 	const ay = 1 - cy - by;
+	const mirroredCx = 3 - 3 * x2;
+	const mirroredBx = 3 * (x2 - x1) - mirroredCx;
+	const mirroredAx = 1 - mirroredCx - mirroredBx;
 	// End-point tangents for extrapolation (same rules as Chromium's gfx::CubicBezier).
 	const startGradient = x1 > 0 ? y1 / x1 : !y1 && x2 > 0 ? y2 / x2 : !y1 && !y2 ? 1 : 0;
 	const endGradient = x2 < 1 ? (y2 - 1) / (x2 - 1) : y2 === 1 && x1 < 1 ? (y1 - 1) / (x1 - 1) : y2 === 1 && y1 === 1 ? 1 : 0;
 
-	/**
-	 * Evaluates x(s) of the curve.
-	 * @param {number} s - Curve parameter
-	 * @returns {number} x(s)
-	 */
-	function sampleX(s: number): number {
-		return ((ax * s + bx) * s + cx) * s;
-	}
-
 	return function (t) {
 		// `+ 0` turns -0 into 0; t = 0 and t = 1 are returned as-is (a gradient may overflow to Infinity, and Infinity · 0 is NaN).
 		if (!(t > 0 && t < 1)) return t < 0 ? startGradient * t + 0 : t > 1 ? 1 + endGradient * (t - 1) : t + 0;
-		let s = t;
-		for (let i = 0; i < 8 && s >= 0 && s <= 1; i++) {
-			const error = sampleX(s) - t;
-			if (Math.abs(error) < BEZIER_EPSILON) return ((ay * s + by) * s + cy) * s;
-			s -= error / ((3 * ax * s + 2 * bx) * s + cx);
-		}
-		let low = 0;
-		let high = 1;
-		for (let i = 0; i < 64; i++) {
-			s = (low + high) / 2;
-			if (sampleX(s) < t) low = s;
-			else high = s;
-		}
+		// x(s) is only precise (relative to t) near s = 0, so the second half solves x̄(u) = 1 - t for u = 1 - s (1 - t is exact there).
+		const s = t <= 0.5 ? solveBezier(ax, bx, cx, t) : 1 - solveBezier(mirroredAx, mirroredBx, mirroredCx, 1 - t);
 		return ((ay * s + by) * s + cy) * s;
 	};
 }
@@ -489,7 +511,7 @@ export function steps(count: number, position: StepPosition = 'jump-end'): Easin
 	return function (t) {
 		// CSS also clamps negative steps to 0 for t >= 0, which only matters with its "before flag" (not modelled here).
 		const step = Math.floor(t * count) + offset;
-		return (t <= 1 && step > jumps ? jumps : step) / jumps;
+		return (t <= 1 ? Math.min(step, jumps) : step) / jumps;
 	};
 }
 
@@ -527,28 +549,32 @@ export function spring(options: SpringOptions = {}): Spring {
 
 	const omega = Math.sqrt(stiffness / mass);
 	const zeta = damping / (2 * Math.sqrt(stiffness) * Math.sqrt(mass));
-	/** Returns the displacement from the target `x = position - 1` (`x(0) = -1`, `x'(0) = velocity`) and its velocity at `time`. */
-	let state: (time: number) => [number, number];
+	/** `[x']`: velocity at the time of the last call of `displacement` (stored rather than returned, to avoid allocating). */
+	const speed = [0];
+	/** Returns the displacement from the target `x = position - 1` (`x(0) = -1`, `x'(0) = velocity`) at `time`, and stores its velocity in `speed[0]`. */
+	let displacement: (time: number) => number;
 
 	if (zeta < 1) {
 		// Under-damped: x = e^(-ζωt)·(B·sin(ωd·t) - cos(ωd·t)).
 		const decay = zeta * omega;
 		const omegaD = omega * Math.sqrt(1 - zeta * zeta);
 		const b = (velocity - decay) / omegaD;
-		state = function (time) {
+		displacement = function (time) {
 			const envelope = Math.exp(-decay * time);
 			const sin = Math.sin(omegaD * time);
 			const cos = Math.cos(omegaD * time);
 			const x = envelope * (b * sin - cos);
-			return [x, -decay * x + envelope * omegaD * (sin + b * cos)];
+			speed[0] = -decay * x + envelope * omegaD * (sin + b * cos);
+			return x;
 		};
 	} else if (zeta === 1) {
 		// Critically damped: x = e^(-ωt)·(B·t - 1).
 		const b = velocity - omega;
-		state = function (time) {
+		displacement = function (time) {
 			const envelope = Math.exp(-omega * time);
 			const x = envelope * (b * time - 1);
-			return [x, envelope * b - omega * x];
+			speed[0] = envelope * b - omega * x;
+			return x;
 		};
 	} else {
 		// Over-damped: x = C1·e^(r1·t) + C2·e^(r2·t); r1 = ω²/r2 avoids cancellation for large ζ.
@@ -556,10 +582,11 @@ export function spring(options: SpringOptions = {}): Spring {
 		const r1 = (omega * omega) / r2;
 		const c2 = (velocity + r1) / (r2 - r1);
 		const c1 = -1 - c2;
-		state = function (time) {
+		displacement = function (time) {
 			const e1 = c1 * Math.exp(r1 * time);
 			const e2 = c2 * Math.exp(r2 * time);
-			return [e1 + e2, r1 * e1 + r2 * e2];
+			speed[0] = r1 * e1 + r2 * e2;
+			return e1 + e2;
 		};
 	}
 
@@ -569,8 +596,8 @@ export function spring(options: SpringOptions = {}): Spring {
 	 * @returns {boolean} `true` once settled (and forever after)
 	 */
 	function settled(time: number): boolean {
-		const [x, v] = state(time);
-		return stiffness * x * x + mass * v * v <= stiffness * restDelta * restDelta;
+		const x = displacement(time);
+		return stiffness * x * x + mass * speed[0] * speed[0] <= stiffness * restDelta * restDelta;
 	}
 
 	/**
@@ -579,7 +606,7 @@ export function spring(options: SpringOptions = {}): Spring {
 	 * @returns {number} The position
 	 */
 	function position(time: number): number {
-		return time <= 0 ? 0 : time === Infinity ? 1 : 1 + state(time)[0];
+		return time <= 0 ? 0 : time === Infinity ? 1 : 1 + displacement(time);
 	}
 
 	let high = 1 / omega;

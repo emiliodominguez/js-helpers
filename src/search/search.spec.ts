@@ -38,15 +38,18 @@ describe('Search helpers', function () {
 		});
 
 		it('should reward word starts after separators and camelCase humps', function () {
-			for (const target of ['x a', 'x-a', 'x_a', 'x.a', 'x/a', 'x\\a', 'x:a', 'xA']) {
+			for (const target of ['x a', 'x-a', 'x_a', 'x.a', 'x/a', 'x\\a', 'x:a', 'x@a', 'x[a', 'x`a', 'x{a', 'x~a', 'xA']) {
 				// 16 match + 8 boundary + 1 exact case - 2 leading, or 16 match + 8 boundary - 1 leading for the camelCase hump
 				expect(helpers.fuzzyMatch('a', target)!.score).toBe(23);
 			}
 			expect(helpers.fuzzyMatch('a', 'xa')!.score).toBe(16);
+			for (const target of ['za', 'Za', '0a', '9a']) expect(helpers.fuzzyMatch('a', target)!.score).toBe(16); // after a letter or digit: no word start
 			expect(helpers.fuzzyMatch('a', 'XA')!.score).toBe(15); // no lower → upper hump, no exact case
 			expect(helpers.fuzzyMatch('b', 'a2b')!.score).toBe(16 + 1 - 2); // digits are word characters
 			expect(helpers.fuzzyMatch('é', 'xé')!.score).toBe(17 - 1);
 			expect(helpers.fuzzyMatch('é', 'x-é')!.score).toBe(25 - 2);
+			expect(helpers.fuzzyMatch('é', 'aÉ')!.score).toBe(24 - 1); // camelCase hump with a non-ASCII capital
+			expect(helpers.fuzzyMatch('a', '中A')!.score).toBe(16 - 1); // a caseless letter does not start a hump
 		});
 
 		it('should penalize gaps affinely and leading offsets with a cap', function () {
@@ -75,9 +78,20 @@ describe('Search helpers', function () {
 			]);
 		});
 
-		it('should prefer the earliest end and consecutive runs among ties', function () {
+		it('should prefer the earliest end, consecutive runs and then the shortest gap among ties', function () {
 			expect(helpers.fuzzyMatch('a', 'xaxa')!.ranges).toEqual([[1, 2]]);
+			expect(helpers.fuzzyMatch('a', 'xxxxxxxxxaxa')).toEqual({ score: 17 - 8, ranges: [[9, 10]] }); // both 'a' pay the capped leading penalty
 			expect(helpers.fuzzyMatch('aa', 'aaa')!.ranges).toEqual([[0, 2]]);
+			// 'A' + gap (24 - 3) ties with 'a' + consecutive (16 + 5): the consecutive run wins.
+			expect(helpers.fuzzyMatch('ab', 'Aab')).toEqual({ score: 38, ranges: [[1, 3]] });
+			// The first 'a' + a 3-character gap ties with the second 'a' + a 1-character gap: the shorter gap wins.
+			expect(helpers.fuzzyMatch('ab', 'a-a-b')).toEqual({
+				score: 45,
+				ranges: [
+					[2, 3],
+					[4, 5]
+				]
+			});
 		});
 
 		it('should rank prefixes above scattered matches', function () {
@@ -93,9 +107,39 @@ describe('Search helpers', function () {
 			expect(helpers.fuzzyMatch('é', 'é')).toBeDefined();
 		});
 
-		it('should handle a long target', function () {
+		it('should treat U+FFFF (the last single-unit code point) as one character', function () {
+			expect(helpers.fuzzyMatch('\uFFFFa', '\uFFFFab')!.ranges).toEqual([[0, 2]]);
+			expect(helpers.fuzzyMatch('ab', '\uFFFFab')!.ranges).toEqual([[1, 3]]);
+		});
+
+		it('should fold case per code point with toLowerCase, and only letters', function () {
+			expect(helpers.fuzzyMatch('z', 'Z')).toEqual({ score: 24, ranges: [[0, 1]] });
+			expect(helpers.fuzzyMatch('Z', 'z')).toBeDefined();
+			expect(helpers.fuzzyMatch('aa', 'Aa')!.ranges).toEqual([[0, 2]]); // the earliest of either case
+			expect(helpers.fuzzyMatch('aa', 'aA')!.ranges).toEqual([[0, 2]]);
+			expect(helpers.fuzzyMatch('[', ';[')!.ranges).toEqual([[1, 2]]); // ';' is not the lower case of '['
+			expect(helpers.fuzzyMatch('[', ';')).toBeUndefined();
+			expect(helpers.fuzzyMatch('{', '[')).toBeUndefined();
+			expect(helpers.fuzzyMatch('@', ' ')).toBeUndefined();
+			expect(helpers.fuzzyMatch('σ', 'ΑΣ')!.ranges).toEqual([[1, 2]]);
+			expect(helpers.fuzzyMatch('σ', 'ς')).toBeUndefined(); // no final-sigma folding
+			// The Kelvin sign's lower case is 'k'.
+			expect(helpers.fuzzyMatch('k', '\u212A')).toEqual({ score: 24, ranges: [[0, 1]] });
+			expect(helpers.fuzzyMatch('ok', 'O\u212A')!.ranges).toEqual([[0, 2]]);
+			expect(helpers.fuzzyMatch('k', '\u212A', { caseSensitive: true })).toBeUndefined();
+			// 'İ' lower-cases to two code points ('i' + a combining dot): it only matches itself.
+			expect(helpers.fuzzyMatch('İ', 'i')).toBeUndefined();
+			expect(helpers.fuzzyMatch('éi', 'éİ')).toBeUndefined();
+			expect(helpers.fuzzyMatch('İ', 'xİ')).toEqual({ score: 25 - 1, ranges: [[1, 2]] }); // exact case, camelCase hump
+		});
+
+		it('should handle long targets and queries', function () {
 			const target = `${'x'.repeat(5000)}needle${'y'.repeat(5000)}`;
 			expect(helpers.fuzzyMatch('needle', target)!.ranges).toEqual([[5000, 5006]]);
+			for (const length of [255, 256, 300]) expect(helpers.fuzzyMatch('z', `${'x'.repeat(length)}z`)!.ranges).toEqual([[length, length + 1]]);
+			expect(helpers.fuzzyMatch('a'.repeat(40), `b${'a'.repeat(249)}`)).toEqual({ score: 16 * 40 + 39 * 5 + 40 - 1, ranges: [[1, 41]] });
+			// Interleaved calls on short and long inputs do not interfere.
+			expect(helpers.fuzzyMatch('ab', 'xab')!.ranges).toEqual([[1, 3]]);
 		});
 
 		it('should throw a TypeError for non-string arguments', function () {
@@ -207,7 +251,7 @@ describe('Search helpers', function () {
 			}).toThrow(new TypeError('fuzzySearch: `key` must be a function, got string'));
 			expect(function () {
 				helpers.fuzzySearch(files, 'a', { limit: -1 });
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('fuzzySearch: `limit` must be an integer >= 0 or Infinity, got -1'));
 			expect(function () {
 				helpers.fuzzySearch(files, 'a', { limit: 1.5 });
 			}).toThrow(RangeError);
@@ -278,7 +322,7 @@ describe('Search helpers', function () {
 			}).toThrow(new RangeError('highlight: `start` must be an integer between 0 and 3, got -1'));
 			expect(function () {
 				helpers.highlight('abc', [[4, 4]]);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('highlight: `start` must be an integer between 0 and 3, got 4'));
 			expect(function () {
 				helpers.highlight('abc', [[2, 1]]);
 			}).toThrow(RangeError);

@@ -102,8 +102,9 @@ describe('Easing helpers (property-based)', function () {
 		});
 
 		it('should satisfy the reflection identity f(t) = 1 - f*(1 - t) with mirrored control points', function () {
+			// Dyadic t: `1 - t` must be exact (near a vertical tangent, the curve is too steep for a rounded 1 - t to compare the same point).
 			fc.assert(
-				fc.property(control, overshoot, control, overshoot, unit, function (x1, y1, x2, y2, t) {
+				fc.property(control, overshoot, control, overshoot, dyadic, function (x1, y1, x2, y2, t) {
 					const f = helpers.cubicBezier(x1, y1, x2, y2);
 					const mirrored = helpers.cubicBezier(1 - x2, 1 - y2, 1 - x1, 1 - y1);
 					const tolerance = 1e-7 * (1 + Math.abs(y1) + Math.abs(y2));

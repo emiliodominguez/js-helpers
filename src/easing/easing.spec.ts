@@ -84,6 +84,12 @@ describe('Easing helpers', function () {
 			expect(helpers.easeOut(helpers.easeOut(square))(0.25)).toBe(0.0625);
 			const inOut = helpers.easeInOut(square);
 			expect([0, 0.25, 0.5, 0.75, 1].map(inOut)).toEqual([0, 0.125, 0.5, 0.875, 1]);
+			// t = 0.5 belongs to the second half: 1 - easing(1) / 2 (visible when easing(1) is not 1).
+			expect(
+				helpers.easeInOut(function (t) {
+					return t / 2;
+				})(0.5)
+			).toBe(0.75);
 		});
 
 		it('should throw a TypeError for non-functions', function () {
@@ -112,7 +118,7 @@ describe('Easing helpers', function () {
 			for (const t of [1e-10, 0.001, 0.1, 0.3, 0.5, 0.7, 0.999, 1 - 1e-10]) expect(easing(t)).toBeCloseTo(t, 12);
 		});
 
-		it('should fall back to bisection when Newton–Raphson converges slowly or leaves [0, 1]', function () {
+		it('should converge where Newton–Raphson alone is slow or leaves [0, 1]', function () {
 			// x(s) = 3s² - 2s³ has a zero derivative at s = 0: Newton converges linearly near 0.
 			expect(helpers.cubicBezier(0, 0.5, 1, 0.5)(1e-9)).toBeCloseTo(3 * 0.5 * Math.sqrt(1e-9 / 3), 6);
 			// x(s) = 3s(1 - s)² + s³ has a zero derivative at s = 0.5.
@@ -123,6 +129,18 @@ describe('Easing helpers', function () {
 				expect(y).toBeLessThanOrEqual(1);
 			}
 			expect(flat(0.5)).toBeCloseTo(0.5, 12);
+		});
+
+		it('should stay accurate next to an end with a vertical tangent', function () {
+			// x1 = x2 = 0, y1 = y2 = 1: x(s) = s³ and y(s) = 3s - 3s² + s³.
+			const start = helpers.cubicBezier(0, 1, 0, 1);
+			for (const t of [1e-13, 2 ** -41, 1e-10, 1e-6]) {
+				const s = Math.cbrt(t);
+				expect(start(t)).toBeCloseTo(s * (3 - 3 * s + s * s), 10);
+			}
+			// x1 = x2 = 1, y1 = y2 = 0: x(s) = 1 - (1 - s)³ and y(s) = s³ (as precise: t > 0.5 is solved on the mirrored curve).
+			const end = helpers.cubicBezier(1, 0, 1, 0);
+			for (const k of [44, 40, 30, 20]) expect(end(1 - 2 ** -k)).toBeCloseTo((1 - Math.cbrt(2 ** -k)) ** 3, 10);
 		});
 
 		it('should support overshooting y control points', function () {
@@ -152,6 +170,7 @@ describe('Easing helpers', function () {
 			// otherwise 0
 			expect(helpers.cubicBezier(0, 0, 1, 0.5)(2)).toBe(1);
 			expect(helpers.cubicBezier(1, 0, 1, 1)(2)).toBe(1);
+			expect(helpers.cubicBezier(0.5, 1, 1, 0.5)(2)).toBe(1);
 			// never -0, and exact end points even when a tangent overflows
 			expect(helpers.cssEaseIn(-1)).toBe(0);
 			expect(helpers.cssEaseIn(-0)).toBe(0);
@@ -159,6 +178,9 @@ describe('Easing helpers', function () {
 			expect(steep(0)).toBe(0);
 			expect(steep(1)).toBe(1);
 			expect(steep(-1)).toBe(-Infinity);
+			const steepEnd = helpers.cubicBezier(0, 0, 1 - 2 ** -53, 1e300);
+			expect(steepEnd(1)).toBe(1);
+			expect(steepEnd(2)).toBe(-Infinity);
 			expect(helpers.cssEase(NaN)).toBeNaN();
 		});
 
@@ -169,6 +191,12 @@ describe('Easing helpers', function () {
 			expect(function () {
 				helpers.cubicBezier(0, 0, 1.1, 1);
 			}).toThrow(new RangeError('cubicBezier: `x2` must be a number between 0 and 1, got 1.1'));
+			expect(function () {
+				helpers.cubicBezier(1.5, 0, 1, 1);
+			}).toThrow(new RangeError('cubicBezier: `x1` must be a number between 0 and 1, got 1.5'));
+			expect(function () {
+				helpers.cubicBezier(0, 0, -0.1, 1);
+			}).toThrow(new RangeError('cubicBezier: `x2` must be a number between 0 and 1, got -0.1'));
 			expect(function () {
 				helpers.cubicBezier(NaN, 0, 1, 1);
 			}).toThrow(RangeError);
@@ -230,6 +258,17 @@ describe('Easing helpers', function () {
 			expect(function () {
 				helpers.steps(4, 'toString' as any);
 			}).toThrow(RangeError);
+			// No coercion of String objects or objects with a matching toString.
+			expect(function () {
+				helpers.steps(4, new String('end') as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.steps(4, {
+					toString: function () {
+						return 'end';
+					}
+				} as any);
+			}).toThrow(TypeError);
 			expect(function () {
 				helpers.steps(4, null as any);
 			}).toThrow(new TypeError('steps: `position` must be one of jump-start, start, jump-end, end, jump-none, jump-both, got null'));
@@ -283,6 +322,34 @@ describe('Easing helpers', function () {
 			expect(duration).toBeGreaterThan(helpers.spring({ stiffness: 100, damping: 20 }).duration);
 		});
 
+		it('should stay accurate for heavily over-damped springs (no cancellation in the slow root)', function () {
+			// k = 1, c = 2e8, m = 1: ζ = 1e8, slow root r = -1 / (ζ + √(ζ² - 1)) ≈ -5e-9, fast root ≈ -2e8.
+			const { position, duration } = helpers.spring({ stiffness: 1, damping: 2e8 });
+			const slow = -1 / (1e8 + Math.sqrt(1e16 - 1));
+			for (const t of [1e7, 1e8, 5e8]) expect(position(t)).toBeCloseTo(1 - Math.exp(slow * t), 9);
+			expect(duration).toBeGreaterThan(1e9);
+			expect(duration).toBeLessThan(2e9);
+		});
+
+		it('should settle exactly when the energy (k·x² + m·v²) / 2 drops to that of a restDelta displacement', function () {
+			const specs = [
+				{},
+				{ velocity: 5 },
+				{ stiffness: 100, damping: 20, velocity: -3 },
+				{ stiffness: 50, damping: 40, mass: 2, velocity: 8 },
+				{ restDelta: 0.01 },
+				{ stiffness: 100, damping: 50, velocity: 30, restDelta: 0.5 }
+			];
+			for (const spec of specs) {
+				const { stiffness = 100, mass = 1, restDelta = 0.001 } = spec as helpers.SpringOptions;
+				const { position, duration } = helpers.spring(spec);
+				const h = duration * 1e-6;
+				const x = position(duration) - 1;
+				const v = (position(duration + h) - position(duration - h)) / (2 * h);
+				expect((stiffness * x * x + mass * v * v) / (stiffness * restDelta * restDelta)).toBeCloseTo(1, 4);
+			}
+		});
+
 		it('should honour the initial velocity, mass and restDelta', function () {
 			expect(helpers.spring({ velocity: 10 }).position(0.05)).toBeGreaterThan(helpers.spring().position(0.05));
 			expect(helpers.spring({ velocity: -10 }).position(0.02)).toBeLessThan(0);
@@ -299,7 +366,19 @@ describe('Easing helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.spring({ mass: Infinity });
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('spring: `mass` must be a finite number > 0, got Infinity'));
+			for (const invalid of [0, -1, Infinity]) {
+				for (const name of ['stiffness', 'damping', 'mass']) {
+					expect(function () {
+						helpers.spring({ [name]: invalid });
+					}).toThrow(new RangeError(`spring: \`${name}\` must be a finite number > 0, got ${invalid}`));
+				}
+			}
+			for (const invalid of [0, -0.5, 1.5]) {
+				expect(function () {
+					helpers.spring({ restDelta: invalid });
+				}).toThrow(RangeError);
+			}
 			expect(function () {
 				helpers.spring({ velocity: NaN });
 			}).toThrow(new RangeError('spring: `velocity` must be a finite number, got NaN'));
