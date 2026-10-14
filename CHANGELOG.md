@@ -79,6 +79,13 @@ Full review and rewrite: every module is strictly typed, documented with complet
 - **async:** `retry` reported a retry after it had been aborted.
 - **functions:** `memoize` could return `undefined` when an expiring cache dropped an entry between its `has` and `get` lookups.
 - **arrays:** `removeDuplicates`, `union` and `symmetricDifference` turned `-0` into `0`.
+- **iterables:**
+    - `cycle`, `flatMap` and `concat` mishandled `throw()`;
+    - the async helpers left sync sources open when a yielded promise rejected.
+- **cache:** `clear`/`prune` skipped `onEvict` for the remaining entries when one callback threw.
+- **store:** a derived store could get stuck on a stale value after its `equals` threw.
+- **emitter:** wildcard handlers didn't type-check for event maps with optional keys.
+- **random:** `restore` accepted sparse state arrays, and `randomUUID` relied on `getRandomValues`' return value.
 - **decorators:** `@bound` threw on frozen instances.
 - **date:**
     - a zero-amount add could shift the time by an hour during the repeated DST hour;
