@@ -205,6 +205,21 @@ describe('isUrl', function () {
 		expect(helpers.isUrl('mailto:user@example.com', { protocols: ['mailto'], requireTld: true })).toBe(false);
 	});
 
+	it('requireTld rejects host names with empty labels', function () {
+		const options = { requireTld: true };
+		expect(helpers.isUrl('https://a..com', options)).toBe(false);
+		expect(helpers.isUrl('https://..com', options)).toBe(false);
+		expect(helpers.isUrl('https://example.com..', options)).toBe(false);
+		expect(helpers.isUrl('https://a..com')).toBe(true);
+	});
+
+	it('requireTld accepts the mixed-case host names of non-special schemes, which the URL parser does not lower-case', function () {
+		const options = { protocols: ['ssh', 'redis'], requireTld: true };
+		expect(helpers.isUrl('ssh://git@Host.Example.ORG:22/repo', options)).toBe(true);
+		expect(helpers.isUrl('redis://Cache.Example.Com', options)).toBe(true);
+		expect(helpers.isUrl('redis://Cache.EXAMPLE.C0M', options)).toBe(false);
+	});
+
 	it('throws a TypeError when protocols is not an array', function () {
 		expect(function () {
 			helpers.isUrl('https://example.com', { protocols: 'https' as any });

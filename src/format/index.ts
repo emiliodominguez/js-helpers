@@ -12,7 +12,8 @@
  *   contrast, works in local time).
  * - **Cached formatters.** Constructing an `Intl` formatter is far more expensive than calling `format` on it, so formatters are cached
  *   per `(kind, locales, options)` in a small least-recently-used cache (50 entries) shared by the whole module. Formatters are
- *   immutable, so a cached one always produces exactly what a freshly constructed one would.
+ *   immutable, so a cached one always produces exactly what a freshly constructed one would. (Options whose value is an object, and
+ *   `Intl.Locale` objects in a locale list, bypass the cache.)
  * - **Validation.** Where a number is required, a non-number throws `TypeError`, and `NaN` / `±Infinity` throw `RangeError` instead of
  *   being rendered as `'NaN'` / `'∞'`, which is never what a UI wants to show. Errors raised by `Intl` itself (an invalid currency code,
  *   unit, time zone or option combination) propagate unchanged: they are already `RangeError`/`TypeError` with a clear message.
@@ -22,7 +23,7 @@
 
 import { createLRUCache } from '../cache/index.js';
 import type { DateInput } from '../date/index.js';
-import { isDate, isIterable } from '../guards/index.js';
+import { isDate, isIterable, isString } from '../guards/index.js';
 
 /**
  * A BCP 47 language tag (`'de-DE'`) or a priority list of tags (`['fr-CA', 'fr']`).
@@ -59,7 +60,11 @@ export interface FormatCurrencyOptions extends NumberFormatPassThroughOptions {
 export interface FormatPercentOptions extends NumberFormatPassThroughOptions {
 	/** Locale(s) to format with. Defaults to `'en-US'`. */
 	locale?: LocaleInput;
-	/** Exact number of fraction digits (an integer from 0 to 100). Overrides `minimumFractionDigits`/`maximumFractionDigits`. */
+	/**
+	 * Exact number of fraction digits (an integer from 0 to 20, the range every supported runtime's `Intl` accepts). Overrides
+	 * `minimumFractionDigits`/`maximumFractionDigits`; like them, it is ignored by `Intl` when significant-digit options are also given
+	 * (unless `roundingPriority` says otherwise).
+	 */
 	decimals?: number;
 }
 
@@ -139,6 +144,9 @@ export interface PluralRuleOptions extends Intl.PluralRulesOptions {
 /** Locale used when none is given, and appended as the last fallback of every locale list. */
 const DEFAULT_LOCALE = 'en-US';
 
+/** Largest `decimals` accepted by {@link formatPercent}: the `maximumFractionDigits` limit of pre-ES2023 engines (Node 20); newer ones allow 100. */
+const MAX_PERCENT_DECIMALS = 20;
+
 /** Maximum number of cached `Intl` formatters. */
 const FORMATTER_CACHE_SIZE = 50;
 
@@ -168,6 +176,30 @@ function resolveLocales(locale: LocaleInput | undefined): string[] {
 }
 
 /**
+ * Builds the formatter cache key for `(kind, locales, options)`. Every option value is tagged with its type so that values `JSON`
+ * would conflate (`NaN`, `±Infinity` and `null`; a number and an object whose `toJSON` returns it) get distinct keys. `undefined`
+ * options are skipped, as `Intl` treats them as absent.
+ * @param {string} kind - A key prefix identifying the formatter class
+ * @param {readonly unknown[]} locales - The resolved locale list
+ * @param {object} options - The options passed to the constructor
+ * @returns {string | undefined} The key, or `undefined` (do not cache) when a locale is not a string or an option value is an object or
+ * a function: `Intl` reads those through `toString`/`valueOf`, which a key cannot capture
+ */
+function cacheKey(kind: string, locales: readonly unknown[], options: object): string | undefined {
+	if (!locales.every(isString)) return undefined;
+
+	const entries: string[] = [];
+
+	for (const [name, value] of Object.entries(options)) {
+		if (value === undefined) continue;
+		if ((typeof value === 'object' && value !== null) || typeof value === 'function') return undefined;
+		entries.push(name, typeof value, String(value));
+	}
+
+	return JSON.stringify([kind, locales, entries]);
+}
+
+/**
  * Returns a cached `Intl` formatter for `(kind, locale, options)`, constructing and caching it on a miss.
  * @template T - The formatter type
  * @template O - The options type
@@ -180,13 +212,13 @@ function resolveLocales(locale: LocaleInput | undefined): string[] {
  */
 function getFormatter<T, O>(kind: string, Formatter: new (locales: string[], options: O) => T, locale: LocaleInput | undefined, options: O): T {
 	const locales = resolveLocales(locale);
-	const key = `${kind}|${JSON.stringify(locales)}|${JSON.stringify(options)}`;
-	const cached = formatterCache.get(key);
+	const key = cacheKey(kind, locales, options as object);
+	const cached = key === undefined ? undefined : formatterCache.get(key);
 
 	if (cached !== undefined) return cached as T;
 
 	const formatter = new Formatter(locales, options);
-	formatterCache.set(key, formatter);
+	if (key !== undefined) formatterCache.set(key, formatter);
 
 	return formatter;
 }
@@ -296,7 +328,7 @@ export function formatCurrency(value: number | bigint, currency: string, options
  * default of 0 applies unless `minimumFractionDigits`/`maximumFractionDigits` are given) and other `Intl.NumberFormat` options
  * @returns {string} The formatted percentage
  * @throws {TypeError} when `value` is not a number
- * @throws {RangeError} when `value` is `NaN`/`±Infinity`, `decimals` is not an integer from 0 to 100, or the locale or an option is invalid
+ * @throws {RangeError} when `value` is `NaN`/`±Infinity`, `decimals` is not an integer from 0 to 20, or the locale or an option is invalid
  * @example
  * formatPercent(0.256); // => '26%'
  * formatPercent(0.256, { decimals: 1 }); // => '25.6%'
@@ -309,8 +341,8 @@ export function formatPercent(value: number, options: FormatPercentOptions = {})
 	const { locale, decimals, ...rest } = options;
 
 	if (decimals !== undefined) {
-		if (!Number.isInteger(decimals) || decimals < 0 || decimals > 100) {
-			throw new RangeError(`formatPercent: decimals must be an integer from 0 to 100, received ${decimals}`);
+		if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_PERCENT_DECIMALS) {
+			throw new RangeError(`formatPercent: decimals must be an integer from 0 to ${MAX_PERCENT_DECIMALS}, received ${decimals}`);
 		}
 
 		rest.minimumFractionDigits = decimals;

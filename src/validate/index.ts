@@ -72,8 +72,8 @@ const URL_FORBIDDEN_CHARACTER = /[\p{Cc}\s]/u;
 /** Schemes the URL parser treats as "special": it accepts them without `//` (`http:example.com`) and with extra slashes. */
 const SPECIAL_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'ws', 'wss', 'ftp', 'file']);
 
-/** A top-level domain: ASCII letters, or an IDNA (punycode) label. */
-const TLD_PATTERN = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+/** A top-level domain: ASCII letters, or an IDNA (punycode) label. Case-insensitive: the URL parser only lower-cases the hosts of special schemes. */
+const TLD_PATTERN = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/i;
 
 /** Any RFC 9562 UUID layout; captures the version digit and the variant digit. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-([0-9a-f])[0-9a-f]{3}-([0-9a-f])[0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -164,14 +164,14 @@ function getUrlConstructor(): UrlConstructor {
 }
 
 /**
- * Checks whether a host name ends in a top-level domain (a single trailing dot is allowed).
- * @param {string} hostname - The host name, as normalized by the URL parser (lowercase, punycode)
+ * Checks whether a host name ends in a top-level domain (a single trailing dot is allowed) and has no empty label.
+ * @param {string} hostname - The host name, as returned by the URL parser (lowercase and punycode for special schemes, as written otherwise)
  * @returns {boolean} `true` when there is at least one label before an alphabetic or punycode TLD
  */
 function hasTld(hostname: string): boolean {
 	const host = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
 	const dot = host.lastIndexOf('.');
-	return dot > 0 && TLD_PATTERN.test(host.slice(dot + 1));
+	return dot > 0 && !host.startsWith('.') && !host.includes('..') && TLD_PATTERN.test(host.slice(dot + 1));
 }
 
 /**

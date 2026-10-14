@@ -60,16 +60,59 @@ describe('Format helpers', function () {
 			helpers.formatNumber(1, { minimumIntegerDigits: 19, maximumFractionDigits: 0 });
 			expect(spy).toHaveBeenCalledTimes(1);
 
-			for (let digits = 0; digits <= 50; digits++) {
-				helpers.formatNumber(1, { minimumIntegerDigits: 18, maximumFractionDigits: digits });
+			// 51 distinct option sets, all within the ranges every supported engine accepts (Node 20 caps fraction digits at 20).
+			for (let i = 0; i <= 50; i++) {
+				helpers.formatNumber(1, { minimumIntegerDigits: 18, minimumFractionDigits: i % 17, maximumFractionDigits: 17 + Math.floor(i / 17) });
 			}
 			expect(spy).toHaveBeenCalledTimes(52);
 
 			// The most recently used entry is still cached; the first one was evicted.
-			helpers.formatNumber(1, { minimumIntegerDigits: 18, maximumFractionDigits: 50 });
+			helpers.formatNumber(1, { minimumIntegerDigits: 18, minimumFractionDigits: 50 % 17, maximumFractionDigits: 17 + Math.floor(50 / 17) });
 			expect(spy).toHaveBeenCalledTimes(52);
 			helpers.formatNumber(1, { minimumIntegerDigits: 19, maximumFractionDigits: 0 });
 			expect(spy).toHaveBeenCalledTimes(53);
+		});
+
+		it('should not let option values that JSON conflates share a formatter', function () {
+			// JSON.stringify maps NaN, Infinity and null to `null`, and uses `toJSON` instead of the value Intl actually reads.
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: null as any })).toBe('1');
+			expect(function () {
+				helpers.formatNumber(1.25, { maximumFractionDigits: NaN });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatNumber(1.25, { maximumFractionDigits: Infinity });
+			}).toThrow(RangeError);
+			const zero = {
+				toJSON(): number {
+					return 3;
+				},
+				valueOf(): number {
+					return 0;
+				}
+			};
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: zero as any })).toBe('1');
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: 3 })).toBe('1.25');
+		});
+
+		it('should not let distinct locale or option objects share a formatter', function () {
+			expect(helpers.formatNumber(1234.5, { locale: [new Intl.Locale('de-DE')] as any })).toBe('1.234,5');
+			expect(normalizeSpaces(helpers.formatNumber(1234.5, { locale: [new Intl.Locale('fr-FR')] as any }))).toBe('1 234,5');
+			function zone(name: string): any {
+				return {
+					toString(): string {
+						return name;
+					}
+				};
+			}
+			expect(helpers.formatDateTime(0, { hour: 'numeric', hourCycle: 'h23', timeZone: zone('Asia/Tokyo') })).toBe('09');
+			expect(helpers.formatDateTime(0, { hour: 'numeric', hourCycle: 'h23', timeZone: zone('Europe/Madrid') })).toBe('01');
+		});
+
+		it('should share a formatter between an absent option and an undefined one', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1, { minimumIntegerDigits: 21 });
+			helpers.formatNumber(1, { minimumIntegerDigits: 21, maximumFractionDigits: undefined });
+			expect(spy).toHaveBeenCalledTimes(1);
 		});
 
 		it('should not cache formatters whose construction failed', function () {
@@ -199,12 +242,13 @@ describe('Format helpers', function () {
 		});
 
 		it('should reject invalid decimals', function () {
-			for (const decimals of [-1, 1.5, 101, NaN, Infinity]) {
+			// Capped at 20 on every engine: Node 20's Intl rejects more, newer engines accept up to 100.
+			for (const decimals of [-1, 1.5, 21, 100, NaN, Infinity]) {
 				expect(function () {
 					helpers.formatPercent(0.5, { decimals });
-				}).toThrow(RangeError);
+				}).toThrow(new RangeError(`formatPercent: decimals must be an integer from 0 to 20, received ${decimals}`));
 			}
-			expect(helpers.formatPercent(0.5, { decimals: 100 })).toMatch(/^50\.0{100}%$/);
+			expect(helpers.formatPercent(0.5, { decimals: 20 })).toMatch(/^50\.0{20}%$/);
 		});
 
 		it('should validate the value', function () {
