@@ -2,11 +2,11 @@
 
 ![js-helpers: Small utilities. Solid foundations. Yellow, graphite and aluminum code-shaped building blocks.](https://raw.githubusercontent.com/emiliodominguez/js-helpers/main/docs/assets/js-helpers-banner.jpg)
 
-[![CI](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml/badge.svg)](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
-![Tested with fast-check](https://img.shields.io/badge/property--tested-fast--check-ff69b4)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/emiliodominguez/js-helpers/tests.yml?branch=main&style=for-the-badge&label=CI&labelColor=161b22&logo=githubactions&logoColor=white)](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml)
+[![TypeScript: strict](https://img.shields.io/badge/TypeScript-strict-3178c6?style=for-the-badge&labelColor=161b22&logo=typescript&logoColor=white)](./tsconfig.json)
+[![Dependencies: 0](https://img.shields.io/badge/dependencies-0-2ea44f?style=for-the-badge&labelColor=161b22&logo=npm&logoColor=white)](./package.json)
+[![Property-tested: fast-check](https://img.shields.io/badge/property--tested-fast--check-8250df?style=for-the-badge&labelColor=161b22&logo=jest&logoColor=white)](#testing-philosophy)
+[![License: MIT](https://img.shields.io/badge/license-MIT-3da639?style=for-the-badge&labelColor=161b22&logo=opensourceinitiative&logoColor=white)](./LICENSE)
 
 Strictly-typed, zero-dependency TypeScript utilities, verified with property-based tests.
 
