@@ -33,7 +33,7 @@ export type EventHandler<P> = (payload: P) => void;
  * discriminated union, so checking `event` narrows `payload`.
  * @template Events - The event map
  */
-export type WildcardHandler<Events extends EventMap> = (...args: { [K in keyof Events]: [event: K, payload: Events[K]] }[keyof Events]) => void;
+export type WildcardHandler<Events extends EventMap> = (...args: { [K in keyof Events]-?: [event: K, payload: Events[K]] }[keyof Events]) => void;
 
 /**
  * The argument list accepted by `emit` after the event name: the payload is optional when `P` is `void`, `undefined` or includes `undefined`.
@@ -77,7 +77,11 @@ export interface Emitter<Events extends EventMap> {
 	clear(event?: keyof Events | '*'): void;
 	/** Number of registrations for `event` (`'*'` for wildcard listeners), or the total when called without argument. */
 	listenerCount(event?: keyof Events | '*'): number;
-	/** Resolves with the payload of the next `event` accepted by `filter`. Its internal listener is always removed on settle. */
+	/**
+	 * Resolves with the payload of the next `event` accepted by `filter`. Its internal listener, timer and abort listener are always removed
+	 * on settle. The internal listener counts as a registration, so `clear()` removes it too: the promise then only settles through
+	 * `timeout` or `signal`.
+	 */
 	waitFor<K extends keyof Events>(event: K, options?: WaitForOptions<Events[K]>): Promise<Events[K]>;
 }
 
@@ -118,7 +122,8 @@ function assertHandler(caller: string, value: unknown): asserts value is AnyFunc
  * - `'*'` is reserved for wildcard listeners and cannot be emitted.
  * @template Events - Maps each event name to its payload type (`void` payloads can be emitted without argument)
  * @returns {Emitter<Events>} A new emitter
- * @throws {TypeError} from `on`/`once`/`off` when the handler is not a function, from `emit`/`waitFor` when the event is `'*'`
+ * @throws {TypeError} from `on`/`once`/`off` when the handler is not a function, from `emit` when the event is `'*'`, and (as a rejection)
+ *   from `waitFor` when the event is `'*'` or `filter` is not a function
  * @throws {RangeError} (as a rejection) from `waitFor` when `timeout` is neither a number between `0` and `2^31 - 1` nor `Infinity`
  * @example
  * const events = createEmitter<{ ready: void; message: { text: string } }>();

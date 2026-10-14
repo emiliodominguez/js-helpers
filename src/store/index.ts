@@ -154,11 +154,12 @@ function derive<S, T>(source: ReadonlyStore<S>, selector: (state: S) => T, equal
 		if (!hasValue || !Object.is(state, sourceState)) {
 			const next = selector(state);
 
-			sourceState = state;
+			// Only record the source state once `equals` has returned: if it throws, the next call must recompute.
 			if (!hasValue || !equals(value, next)) {
 				value = next;
 				version++;
 			}
+			sourceState = state;
 			hasValue = true;
 		}
 

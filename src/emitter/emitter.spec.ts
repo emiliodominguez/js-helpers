@@ -119,6 +119,37 @@ describe('createEmitter', function () {
 			const e: Emitter<{ a: number }> = createEmitter<{ a: number }>();
 			expect(e.listenerCount()).toBe(0);
 		});
+
+		it('types wildcard handlers of event maps with optional events', function () {
+			interface Optional {
+				a: number;
+				b?: string;
+			}
+			const events = createEmitter<Optional>();
+			const seen: unknown[] = [];
+
+			events.on('*', function (event, payload) {
+				if (event === 'a') {
+					const n: number = payload;
+					seen.push(n);
+				} else {
+					const text: string | undefined = payload;
+					seen.push(text);
+				}
+			});
+			events.emit('a', 1);
+			events.emit('b');
+			type W = Parameters<WildcardHandler<Optional>>;
+			const w: W = ['b', undefined];
+			// @ts-expect-error mismatched pair
+			const w2: W = ['a', 'x'];
+
+			expect(seen).toEqual([1, undefined]);
+			expect([w, w2]).toEqual([
+				['b', undefined],
+				['a', 'x']
+			]);
+		});
 	});
 
 	describe('on / emit', function () {

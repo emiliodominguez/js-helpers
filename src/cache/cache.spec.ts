@@ -361,6 +361,42 @@ describe('createLRUCache', function () {
 			}).toThrow('boom');
 			expect([...cache]).toEqual([['b', 2]]);
 		});
+
+		it('reports every entry removed by clear or prune even when onEvict throws, then rethrows', function () {
+			const clock = fakeClock();
+			const seen: string[] = [];
+			let failing = ['a'];
+			const cache = createLRUCache<string, number>({
+				max: 5,
+				now: clock.now,
+				onEvict: function (key: string): void {
+					seen.push(key);
+					if (failing.includes(key)) throw new Error(`boom ${key}`);
+				}
+			});
+
+			cache.set('a', 1).set('b', 2).set('c', 3);
+			expect(function () {
+				cache.clear();
+			}).toThrow('boom a');
+			expect(seen).toEqual(['a', 'b', 'c']);
+			expect(cache.size).toBe(0);
+
+			seen.length = 0;
+			failing = ['a', 'c'];
+			cache.set('a', 1, { ttl: 1 }).set('b', 2, { ttl: 1 }).set('c', 3, { ttl: 1 }).set('d', 4);
+			clock.advance(1);
+			let thrown: unknown;
+			try {
+				cache.prune();
+			} catch (error) {
+				thrown = error;
+			}
+			expect(seen).toEqual(['a', 'b', 'c']);
+			expect(thrown).toBeInstanceOf(AggregateError);
+			expect((thrown as AggregateError).errors.map(String)).toEqual(['Error: boom a', 'Error: boom c']);
+			expect([...cache.keys()]).toEqual(['d']);
+		});
 	});
 
 	describe('memoize integration', function () {

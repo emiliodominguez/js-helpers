@@ -20,7 +20,10 @@ export interface LRUCacheOptions<K, V> {
 	max: number;
 	/** Default time-to-live of an entry in milliseconds (`> 0`; `Infinity`, the default, means entries never expire). */
 	ttl?: number;
-	/** Clock used for expiry, in milliseconds. Defaults to `Date.now`. Inject a fake clock for deterministic tests. */
+	/**
+	 * Clock used for expiry, in milliseconds. Defaults to `Date.now`. Inject a fake clock for deterministic tests. Expiry instants are
+	 * absolute (`setTime + ttl`), so a clock that jumps backwards extends the lifetime of the entries stored before the jump.
+	 */
 	now?: () => number;
 	/** Called after an entry has been removed (the cache is already in its new state, so the callback may use it). */
 	onEvict?: (key: K, value: V, reason: LRUEvictionReason) => void;
@@ -105,7 +108,8 @@ function assertTTL(ttl: number | undefined): void {
  *   least-recently-used entry at a capacity eviction. Until then they count towards `size` and `max`.
  * - `onEvict(key, value, reason)` fires once per removed entry (see {@link LRUEvictionReason}), never for misses. Overwriting a live entry
  *   reports the old value as `'replaced'` unless it is the very same value (`Object.is`), so a resource is never disposed while still stored.
- *   It is called after the cache has been updated; an exception it throws propagates to the caller, but the cache stays consistent.
+ *   It is called after the cache has been updated; an exception it throws propagates to the caller, but the cache stays consistent, and
+ *   `clear`/`prune` still report every removed entry before rethrowing (an `AggregateError` when several calls threw).
  * - For a TTL-only cache use `max: Infinity` (see the second example).
  * Type arguments: pass them explicitly for standalone use (`createLRUCache<string, User>(...)`), or let them be inferred from a contextual
  * type or `onEvict`. When nothing determines them they default to `unknown`, so a bare `createLRUCache({ max })` works standalone and
@@ -116,6 +120,7 @@ function assertTTL(ttl: number | undefined): void {
  * @returns {LRUCache<K, V>} A new, empty cache
  * @throws {TypeError} when `options` is not an object, or `now`/`onEvict` is provided but not a function
  * @throws {RangeError} when `max` is not an integer `>= 1` (or `Infinity`), or `ttl` (here or in `set`) is not a number `> 0`
+ * @throws {AggregateError} from `clear`/`prune` when several `onEvict` calls threw
  * @example
  * const cache = createLRUCache<string, number>({ max: 2 });
  * cache.set('a', 1).set('b', 2);
@@ -155,6 +160,28 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	 */
 	function notify(key: K, value: V, reason: LRUEvictionReason): void {
 		if (onEvict) onEvict(key, value, reason);
+	}
+
+	/**
+	 * Reports several removals, calling `onEvict` for every one of them even if some calls throw; the errors are rethrown afterwards (the
+	 * error itself, or an `AggregateError` holding every error in call order when several calls threw).
+	 * @param {Array<[K, Entry<V>, LRUEvictionReason]>} removed - The removed entries and why
+	 * @returns {void}
+	 * @throws {AggregateError} when several `onEvict` calls threw (a single error is rethrown as is)
+	 */
+	function notifyAll(removed: Array<[K, Entry<V>, LRUEvictionReason]>): void {
+		const errors: unknown[] = [];
+
+		for (const [key, entry, reason] of removed) {
+			try {
+				notify(key, entry.value, reason);
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) throw new AggregateError(errors, `createLRUCache: ${errors.length} onEvict calls threw`);
 	}
 
 	/**
@@ -248,19 +275,22 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		},
 		clear(): void {
 			const time = now();
-			const removed = [...store];
+			const removed = [...store].map(function ([key, entry]): [K, Entry<V>, LRUEvictionReason] {
+				return [key, entry, time >= entry.expiresAt ? 'expired' : 'cleared'];
+			});
 			store.clear();
 
-			for (const [key, entry] of removed) notify(key, entry.value, time >= entry.expiresAt ? 'expired' : 'cleared');
+			notifyAll(removed);
 		},
 		prune(): number {
 			const time = now();
-			const expired = [...store].filter(function ([, entry]): boolean {
-				return time >= entry.expiresAt;
-			});
+			const expired: Array<[K, Entry<V>, LRUEvictionReason]> = [];
 
+			for (const [key, entry] of store) {
+				if (time >= entry.expiresAt) expired.push([key, entry, 'expired']);
+			}
 			for (const [key] of expired) store.delete(key);
-			for (const [key, entry] of expired) notify(key, entry.value, 'expired');
+			notifyAll(expired);
 
 			return expired.length;
 		},

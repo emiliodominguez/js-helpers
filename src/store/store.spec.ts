@@ -539,6 +539,27 @@ describe('createStore', function () {
 			expect(view.getState()).toBe(2);
 		});
 
+		it('recomputes after the equality function threw instead of serving a stale value', function () {
+			const store = createStore(1);
+			let failing = false;
+			const view = store.select(
+				function (n) {
+					return { n };
+				},
+				function (a, b) {
+					if (failing) throw new Error('equals');
+					return a.n === b.n;
+				}
+			);
+
+			expect(view.getState()).toEqual({ n: 1 });
+			failing = true;
+			store.setState(2);
+			expect(view.getState).toThrow('equals');
+			failing = false;
+			expect(view.getState()).toEqual({ n: 2 });
+		});
+
 		it('does not attach to the source when the selector throws on subscribe', function () {
 			const store = createStore(-1);
 			const view = store.select(function (n) {
