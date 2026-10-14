@@ -7,10 +7,12 @@ const MODULES = [
 	['arrays', 'Collection helpers: set algebra, grouping, chunking, sorting, sampling.'],
 	['objects', 'Shallow/deep cloning, merging, equality, path access and object reshaping.'],
 	['guards', 'Runtime type predicates that narrow `unknown` values.'],
-	['strings', 'Unicode-aware transformations, case conversion, escaping and templating.'],
+	['strings', 'Unicode-aware transformations, case conversion, escaping, templating and text metrics.'],
+	['url', 'Query-string building and parsing, URL joining and query merging, without URL object types.'],
 	['math', 'Precise arithmetic, statistics, number theory and random numbers.'],
 	['functions', 'Function composition, currying, memoization and rate limiting.'],
-	['async', 'Promise utilities: sleeping, timeouts, retries and bounded concurrency.'],
+	['async', 'Promise utilities: retries, timeouts, polling, limiters, keyed Promise.all and async debounce.'],
+	['color', 'Hex/RGB/HSL conversion, mixing, lightening and WCAG contrast checks.'],
 	['date', 'DST-safe, non-mutating local-time date arithmetic, formatting and parsing.'],
 	['decorators', 'Class decorators for TypeScript (legacy and TC39 standard) and Babel.']
 ];

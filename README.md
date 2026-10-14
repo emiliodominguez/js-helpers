@@ -8,13 +8,13 @@
 
 Strictly-typed, zero-dependency TypeScript utilities, verified with property-based tests.
 
-**~200 functions** across 9 modules: `arrays`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date` and `decorators`.
+**300+ functions** across 11 modules: `arrays`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `color`, `url` and `decorators`.
 
 - **Correct first.** Unicode-aware strings, DST-safe dates, compensated summation, injection-safe string replacement, a deep merge that blocks prototype pollution, and deep clone/equality that handle circular references.
 - **Typed for real.** Type predicates that narrow, path-aware getters (`'user.posts.0.title'` resolves to `string | undefined`), tuple-typed `zip`, typed `curry`/`compose`/`pipe`, and a left-to-right `Merge` type.
-- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 890+ tests at ~100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
+- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 1,500+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
 - **Pure and predictable.** Nothing mutates its input unless the name says so. Bad arguments throw a descriptive `RangeError`/`TypeError` instead of returning garbage, looping forever or overflowing the stack.
-- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. All ~200 functions together are about 40 kB of JavaScript before gzip, and the whole tarball is about 54 kB. JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
+- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 23 kB gzipped; a typical module is 1.5–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
 
 ## Install
 
@@ -50,17 +50,19 @@ objects.isEqual(new Map([[1, { a: [1] }]]), new Map([[1, { a: [1] }]])); // true
 
 ## Modules
 
-| Module                                   | Highlights                                                                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| [`arrays`](./docs/API.md#arrays)         | `chunk`, `groupBy`, `keyBy`, `partition`, `sortBy` (stable), `zip`, `range`, `shuffle`, set algebra                |
-| [`objects`](./docs/API.md#objects)       | `deepClone`, `deepMerge`, `isEqual`, `pick`/`omit`, `getFromObjectByKeys`/`setInObjectByKeys`, `deepFreeze`        |
-| [`guards`](./docs/API.md#guards)         | 26 narrowing predicates: `isPlainObject`, `isDefined`, `isNil`, `isPromise`, `isIterable`, …                       |
-| [`strings`](./docs/API.md#strings)       | camel/pascal/snake/kebab/constant case, `toSlug`, `escapeHtml`, `interpolate`, grapheme-aware `reverse`/`truncate` |
-| [`math`](./docs/API.md#math)             | precise `sum`/`round`, `clamp`, `lerp`, `mapRange`, `median`, `variance`, `gcd`/`lcm`, `isPrime`                   |
-| [`functions`](./docs/API.md#functions)   | `debounce`/`throttle` with `cancel`/`flush`, `memoize`, `curry`, `compose`/`pipe`, `once`                          |
-| [`async`](./docs/API.md#async)           | `retry` with backoff and jitter, `withTimeout`, `mapWithConcurrency`, abortable `sleep`, `createDeferred`          |
-| [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`diffInDays`, `startOf*`/`endOf*`, `formatDate`, `parseISODate`                     |
-| [`decorators`](./docs/API.md#decorators) | `@memoize` (per instance), `@bound`, `@debounced`, `@throttled`, `@readonly`, `@log`, `@deprecated`                |
+| Module                                   | Highlights                                                                                                                       |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [`arrays`](./docs/API.md#arrays)         | `chunk`, `groupBy`, `partition`, `sortBy` (stable), `windowed`, `binarySearch`, `cartesianProduct`, `minBy`/`maxBy`, set algebra |
+| [`objects`](./docs/API.md#objects)       | `deepClone`, `deepMerge`, `isEqual`, `diff`, `flattenObject`/`unflattenObject`, `pick`/`omit`, type-safe path get/set            |
+| [`guards`](./docs/API.md#guards)         | 35+ narrowing predicates (`isPlainObject`, `isNonEmptyArray`, `isOneOf`, `isArrayOf`, …) and `assert`/`assertNever`              |
+| [`strings`](./docs/API.md#strings)       | every case style, `toSlug`, `dedent` tag, `wordWrap`, `levenshtein`, `mask`, `escapeHtml`, grapheme-aware `reverse`/`truncate`   |
+| [`math`](./docs/API.md#math)             | precise `sum`/`round`, `quantile`, `variance`, `clamp`/`lerp`/`mapRange`, `formatBytes`, `ordinal`, `gcd`/`lcm`, `isPrime`       |
+| [`functions`](./docs/API.md#functions)   | `debounce`/`throttle` with `cancel`/`flush`, `memoize`, `memoizeLast`, `curry`, `compose`/`pipe`, `once`, `attempt`              |
+| [`async`](./docs/API.md#async)           | `retry` with backoff, `withTimeout`, `createLimiter`, `mapWithConcurrency`, `pollUntil`, `promiseAllObject`, `debounceAsync`     |
+| [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`addBusinessDays`, ISO weeks, quarters, `getAge`, `formatDate`, `formatDuration`/`parseDuration`  |
+| [`color`](./docs/API.md#color)           | hex/RGB/HSL conversion, `mix`, `lighten`/`darken`, WCAG `contrastRatio`, `getReadableTextColor`, `meetsContrast`                 |
+| [`url`](./docs/API.md#url)               | `buildQueryString`/`parseQueryString` (pollution-safe), `withQuery`, `joinUrl`, `getQueryParam`                                  |
+| [`decorators`](./docs/API.md#decorators) | `@memoize`/`@once` (per instance), `@bound`, `@debounced`, `@throttled`, `@retryable`, `@timeout`, `@readonly`, `@deprecated`    |
 
 📖 **[Full API reference →](./docs/API.md)**. Every export is listed there with its summary. The JSDoc on each function documents its parameters, return value, thrown errors and examples, so your editor shows them on hover. Run `yarn docs` to get a browsable TypeDoc site.
 
@@ -72,6 +74,8 @@ import { isDefined } from '@emiliodominguez/js-helpers/guards';
 import { retry, withTimeout, mapWithConcurrency } from '@emiliodominguez/js-helpers/async';
 import { debounce } from '@emiliodominguez/js-helpers/functions';
 import { addMonths, formatDate } from '@emiliodominguez/js-helpers/date';
+import { getReadableTextColor } from '@emiliodominguez/js-helpers/color';
+import { withQuery } from '@emiliodominguez/js-helpers/url';
 
 // Type-safe deep access: the return type is inferred from the path.
 const city = getFromObjectByKeys(user, 'address.city', 'Unknown'); // string
@@ -97,6 +101,10 @@ save.flush(); // run now, e.g. on beforeunload
 
 // Calendar math that respects month lengths and DST.
 formatDate(addMonths(new Date(2024, 0, 31), 1), 'YYYY-MM-DD'); // '2024-02-29'
+
+// Accessible colors and clean URLs.
+getReadableTextColor('#1e3a8a'); // '#ffffff'
+withQuery('/search?page=2#results', { q: 'café', page: 3 }); // '/search?q=caf%C3%A9&page=3#results'
 ```
 
 ### Decorators
@@ -125,6 +133,26 @@ class SearchBox {
 ```
 
 > `@readonly` with `experimentalDecorators` requires `useDefineForClassFields: false`. That is the default for targets below ES2022. With define semantics the class field shadows the decorator's accessor.
+
+## Size
+
+Zero dependencies. Sizes are for the minified ESM build; bundlers only include the functions you import.
+
+| Module       | Minified | Gzipped |
+| ------------ | -------: | ------: |
+| `arrays`     |   7.1 kB |  2.6 kB |
+| `async`      |   5.7 kB |  2.2 kB |
+| `color`      |   3.5 kB |  1.6 kB |
+| `date`       |  10.1 kB |  3.5 kB |
+| `decorators` |   4.7 kB |  1.5 kB |
+| `functions`  |   5.4 kB |  2.1 kB |
+| `guards`     |   4.3 kB |  1.5 kB |
+| `math`       |   8.3 kB |  2.9 kB |
+| `objects`    |  10.8 kB |  3.7 kB |
+| `strings`    |   9.0 kB |  3.6 kB |
+| `url`        |   2.8 kB |  1.3 kB |
+
+All modules together are about 23 kB gzipped. CI enforces the total with `yarn check:size`.
 
 ## Testing philosophy
 
@@ -191,6 +219,8 @@ yarn validate        # lint + typecheck + tests + build (what CI runs)
 
 - The root entry exports namespaces (`import { strings } from …`). Use deep imports to get individual functions.
 - The package is ESM-only and requires Node 20.19+. CommonJS code on those versions can still `require()` it.
+- `guards` checks for built-ins (`isMap`, `isDate`, …) verify internal slots, so objects built with `Object.create(Map.prototype)`, and proxies of real instances, are no longer accepted.
+- `memoize` cache keys now tell `NaN`, `Infinity`, `-0` and `undefined` apart. Previously they collided.
 
 ## Contributing
 

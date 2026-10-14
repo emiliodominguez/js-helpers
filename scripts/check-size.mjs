@@ -1,15 +1,22 @@
-// Fails when the published tarball grows past its budget. Run after `yarn build`.
+// Fails when the package grows past its budget. Run after `yarn build`.
+// The budget that matters to consumers is `runtimeGzip`: the gzipped JavaScript of every module combined
+// (bundlers only include the functions you import). Type declarations carry the full JSDoc and only affect install size.
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 
-const BUDGET = { packed: 60 * 1024, unpacked: 260 * 1024 };
+const BUDGET = { runtimeGzip: 26 * 1024, packed: 100 * 1024 };
 const [report] = JSON.parse(execSync('npm pack --dry-run --json', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-const javascript = report.files
-	.filter(function (file) {
-		return file.path.endsWith('.js');
-	})
-	.reduce(function (total, file) {
-		return total + file.size;
-	}, 0);
+const javascript = Buffer.concat(
+	report.files
+		.filter(function (file) {
+			return file.path.endsWith('.js');
+		})
+		.map(function (file) {
+			return readFileSync(file.path);
+		})
+);
+const runtimeGzip = gzipSync(javascript, { level: 9 }).length;
 
 /**
  * Formats a byte count as kilobytes.
@@ -20,9 +27,9 @@ function kb(bytes) {
 	return `${(bytes / 1024).toFixed(1)} kB`;
 }
 
-console.log(`packed ${kb(report.size)} · unpacked ${kb(report.unpackedSize)} · runtime JS ${kb(javascript)} · ${report.entryCount} files`);
+console.log(`runtime JS ${kb(javascript.length)} (${kb(runtimeGzip)} gzip) · packed ${kb(report.size)} · unpacked ${kb(report.unpackedSize)} · ${report.entryCount} files`);
 
-if (report.size > BUDGET.packed || report.unpackedSize > BUDGET.unpacked) {
-	console.error(`Size budget exceeded (packed ≤ ${kb(BUDGET.packed)}, unpacked ≤ ${kb(BUDGET.unpacked)}).`);
+if (runtimeGzip > BUDGET.runtimeGzip || report.size > BUDGET.packed) {
+	console.error(`Size budget exceeded (runtime gzip ≤ ${kb(BUDGET.runtimeGzip)}, packed ≤ ${kb(BUDGET.packed)}).`);
 	process.exit(1);
 }

@@ -6,8 +6,8 @@ Full review and rewrite: every module is strictly typed, documented with complet
 
 ### Added
 
-- **New modules:** `guards`, `async` and `date`. The `date` module replaces an empty stub.
-- **~120 new utilities.** See [docs/API.md](./docs/API.md).
+- **New modules:** `guards`, `async`, `date`, `color` and `url`. The `date` module replaces an empty stub.
+- **~250 new utilities.** See [docs/API.md](./docs/API.md).
 - **Packaging:**
     - ESM-only, minified, unbundled build (one file per module), with JSDoc kept in the declarations;
     - `exports` map with per-module deep imports;
@@ -59,6 +59,30 @@ Full review and rewrite: every module is strictly typed, documented with complet
 
 - `@memoize` shared one cache across all instances.
 - `@readonly` did nothing.
+
+**Found in a second review pass**
+
+- **arrays:** `range` could include its exclusive end through float drift.
+- **objects:**
+    - `omit` ignored numeric keys and `mapValues` turned arrays into objects.
+    - `setInObjectByKeys` could write into inherited built-ins such as `Object.prototype.toString`.
+- **strings:** `substring` swapped its indices when one of them was `NaN`.
+- **math:**
+    - `log(81, 3)` returned 4.000000000000001;
+    - `modulo` could return the divisor itself;
+    - `lerp` returned `NaN` at infinite endpoints;
+    - `median` and `variance` underflowed or overflowed.
+- **functions:**
+    - `memoize` keys collided for `NaN`/`Infinity`/`undefined`/`-0`;
+    - `debounce` and `throttle` ignored waits above 2^31−1 ms;
+    - `once` ran twice on re-entrant calls.
+- **async:** `retry` reported a retry after it had been aborted.
+- **decorators:** `@bound` threw on frozen instances.
+- **date:**
+    - a zero-amount add could shift the time by an hour during the repeated DST hour;
+    - `startOf*` returned an Invalid Date at the range limit;
+    - cross-realm Dates were rejected.
+- **guards:** the `is*` checks for built-ins accepted fake objects built from a built-in's prototype.
 
 ### Changed (breaking)
 

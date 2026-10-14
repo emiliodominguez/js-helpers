@@ -1,16 +1,18 @@
 import * as root from '.';
 import { chunk } from './arrays/index.js';
 import { retry, withTimeout, mapWithConcurrency } from './async/index.js';
+import { getReadableTextColor } from './color/index.js';
 import { addMonths, formatDate } from './date/index.js';
 import { bound, memoize, readonly } from './decorators/index.js';
 import { debounce } from './functions/index.js';
 import { isDefined } from './guards/index.js';
 import { deepMerge, getFromObjectByKeys } from './objects/index.js';
 import { toKebabCase, toSlug } from './strings/index.js';
+import { withQuery } from './url/index.js';
 
 describe('root entry', function () {
 	it('should expose every module as a namespace', function () {
-		expect(Object.keys(root).sort()).toEqual(['arrays', 'async', 'date', 'decorators', 'functions', 'guards', 'math', 'objects', 'strings']);
+		expect(Object.keys(root).sort()).toEqual(['arrays', 'async', 'color', 'date', 'decorators', 'functions', 'guards', 'math', 'objects', 'strings', 'url']);
 		expect(root.strings.isEmpty).not.toBe(root.objects.isEmpty);
 		expect(root.objects.isString).toBe(root.guards.isString);
 	});
@@ -67,6 +69,8 @@ describe('README examples', function () {
 		expect(persist).toHaveBeenCalledWith('draft');
 
 		expect(formatDate(addMonths(new Date(2024, 0, 31), 1), 'YYYY-MM-DD')).toBe('2024-02-29');
+		expect(getReadableTextColor('#1e3a8a')).toBe('#ffffff');
+		expect(withQuery('/search?page=2#results', { q: 'café', page: 3 })).toBe('/search?q=caf%C3%A9&page=3#results');
 	});
 
 	it('should match the decorators section', function () {
