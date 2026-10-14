@@ -1,0 +1,638 @@
+import { AbortError, TimeoutError } from '../async/index.js';
+import type { AbortSignalLike } from '../utils/index.js';
+import { createEmitter, type EmitArgs, type Emitter, type WildcardHandler } from '.';
+
+interface TestEvents {
+	ready: void;
+	done: undefined;
+	maybe: number | undefined;
+	message: { text: string };
+	count: number;
+	[key: symbol]: string;
+}
+
+/**
+ * A promise state probe that does not depend on timers.
+ */
+async function stateOf(promise: Promise<unknown>): Promise<'pending' | 'fulfilled' | 'rejected'> {
+	const marker = {};
+	try {
+		const winner = await Promise.race([promise, Promise.resolve(marker)]);
+		return winner === marker ? 'pending' : 'fulfilled';
+	} catch {
+		return 'rejected';
+	}
+}
+
+/**
+ * A manually controlled abort signal that counts its listeners.
+ */
+function createSignal(): AbortSignalLike & { abort(reason?: unknown): void; listeners: number } {
+	const listeners = new Set<() => void>();
+	const signal = {
+		aborted: false,
+		reason: undefined as unknown,
+		get listeners() {
+			return listeners.size;
+		},
+		addEventListener(_type: 'abort', listener: () => void) {
+			listeners.add(listener);
+		},
+		removeEventListener(_type: 'abort', listener: () => void) {
+			listeners.delete(listener);
+		},
+		abort(reason?: unknown) {
+			signal.aborted = true;
+			signal.reason = reason;
+			for (const listener of [...listeners]) listener();
+			listeners.clear();
+		}
+	};
+	return signal;
+}
+
+describe('createEmitter', function () {
+	describe('types', function () {
+		it('types payloads, optional payloads and wildcard handlers', function () {
+			const events = createEmitter<TestEvents>();
+
+			events.emit('ready');
+			events.emit('ready', undefined);
+			events.emit('done');
+			events.emit('maybe');
+			events.emit('maybe', 3);
+			events.emit('message', { text: 'hi' });
+			events.emit(Symbol.for('x'), 'symbol payload');
+
+			// @ts-expect-error payload required
+			events.emit('message');
+			// @ts-expect-error wrong payload type
+			events.emit('count', 'one');
+			// @ts-expect-error unknown event
+			events.emit('nope');
+			// @ts-expect-error void events take no meaningful payload
+			events.emit('ready', 1);
+
+			events.on('message', function (msg) {
+				const text: string = msg.text;
+				return text;
+			});
+			// @ts-expect-error handler payload type mismatch
+			events.on('count', function (value: string) {
+				return value;
+			});
+			events.on('*', function (event, payload) {
+				if (event === 'count') {
+					const n: number = payload;
+					return n;
+				}
+				if (event === 'message') {
+					const text: string = payload.text;
+					return text;
+				}
+				return undefined;
+			});
+			// @ts-expect-error wildcard handlers receive the event first
+			events.on('*', function (payload: { text: string }) {
+				return payload;
+			});
+
+			const waited: Promise<{ text: string }> = events.waitFor('message', {
+				filter: function (msg) {
+					return msg.text.length > 0;
+				}
+			});
+			void waited.catch(function () {});
+			events.clear();
+
+			type A = EmitArgs<void>;
+			type B = EmitArgs<number>;
+			const a: A = [];
+			const b: B = [1];
+			// @ts-expect-error payload required
+			const c: B = [];
+			type W = Parameters<WildcardHandler<{ a: number; b: string }>>;
+			const w: W = ['a', 1];
+			// @ts-expect-error mismatched pair
+			const w2: W = ['a', 'x'];
+			expect([a, b, w]).toEqual([[], [1], ['a', 1]]);
+			const e: Emitter<{ a: number }> = createEmitter<{ a: number }>();
+			expect(e.listenerCount()).toBe(0);
+		});
+	});
+
+	describe('on / emit', function () {
+		it('calls handlers in registration order with the payload', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: string[] = [];
+
+			events.on('count', function (n) {
+				calls.push(`a${n}`);
+			});
+			events.on('count', function (n) {
+				calls.push(`b${n}`);
+			});
+			events.emit('count', 1);
+			events.emit('count', 2);
+
+			expect(calls).toEqual(['a1', 'b1', 'a2', 'b2']);
+		});
+
+		it('passes exactly the given payload argument (none when omitted) and ignores extra arguments', function () {
+			const events = createEmitter<TestEvents>();
+			const handler = jest.fn();
+
+			events.on('ready', handler);
+			events.emit('ready');
+			(events.emit as any)('ready', 1, 2);
+
+			events.emit('ready', undefined);
+
+			expect(handler.mock.calls).toEqual([[], [1], [undefined]]);
+		});
+
+		it('emitting an event without listeners is a no-op', function () {
+			const events = createEmitter<TestEvents>();
+			expect(function () {
+				events.emit('count', 1);
+			}).not.toThrow();
+		});
+
+		it('supports symbol, numeric and unicode event names', function () {
+			const sym = Symbol('s');
+			const events = createEmitter<{ [sym]: string; 0: number; 'café ☕': boolean }>();
+			const calls: unknown[] = [];
+
+			events.on(sym, function (v) {
+				calls.push(v);
+			});
+			events.on(0, function (v) {
+				calls.push(v);
+			});
+			events.on('café ☕', function (v) {
+				calls.push(v);
+			});
+			events.emit(sym, 's');
+			events.emit(0, 1);
+			events.emit('café ☕', true);
+
+			expect(calls).toEqual(['s', 1, true]);
+		});
+
+		it('calls a handler registered twice twice, and its unsubscribe removes only its own registration', function () {
+			const events = createEmitter<TestEvents>();
+			const handler = jest.fn();
+
+			const first = events.on('count', handler);
+			events.on('count', handler);
+			events.emit('count', 1);
+			expect(handler).toHaveBeenCalledTimes(2);
+
+			first();
+			first();
+			expect(events.listenerCount('count')).toBe(1);
+			events.emit('count', 2);
+			expect(handler).toHaveBeenCalledTimes(3);
+		});
+
+		it('does not call handlers added during an emit for that emit', function () {
+			const events = createEmitter<TestEvents>();
+			const late = jest.fn();
+			const lateWildcard = jest.fn();
+
+			events.on('count', function () {
+				events.on('count', late);
+				events.on('*', lateWildcard);
+			});
+			events.emit('count', 1);
+			expect(late).not.toHaveBeenCalled();
+			expect(lateWildcard).not.toHaveBeenCalled();
+
+			events.emit('count', 2);
+			expect(late).toHaveBeenCalledWith(2);
+		});
+
+		it('skips handlers removed during an emit that have not run yet', function () {
+			const events = createEmitter<TestEvents>();
+			const second = jest.fn();
+			const wildcard = jest.fn();
+			const handles: { stopSecond?: () => void } = {};
+
+			events.on('count', function () {
+				handles.stopSecond?.();
+				events.off('*', wildcard);
+			});
+			handles.stopSecond = events.on('count', second);
+			events.on('*', wildcard);
+			events.emit('count', 1);
+
+			expect(second).not.toHaveBeenCalled();
+			expect(wildcard).not.toHaveBeenCalled();
+		});
+
+		it('skips pending handlers after clear() during an emit', function () {
+			const events = createEmitter<TestEvents>();
+			const second = jest.fn();
+
+			events.on('count', function () {
+				events.clear();
+			});
+			events.on('count', second);
+			events.emit('count', 1);
+
+			expect(second).not.toHaveBeenCalled();
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('runs nested emits depth first', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: string[] = [];
+
+			events.on('count', function (n) {
+				calls.push(`count${n}`);
+				if (n === 1) events.emit('message', { text: 'nested' });
+				calls.push(`after${n}`);
+			});
+			events.on('message', function (msg) {
+				calls.push(msg.text);
+			});
+			events.emit('count', 1);
+
+			expect(calls).toEqual(['count1', 'nested', 'after1']);
+		});
+
+		it('calls every handler and rethrows a single error', function () {
+			const events = createEmitter<TestEvents>();
+			const boom = new Error('boom');
+			const after = jest.fn();
+
+			events.on('count', function () {
+				throw boom;
+			});
+			events.on('count', after);
+			events.on('*', after);
+
+			expect(function () {
+				events.emit('count', 1);
+			}).toThrow(boom);
+			expect(after).toHaveBeenCalledTimes(2);
+		});
+
+		it('throws an AggregateError holding every error in call order when several handlers throw', function () {
+			const events = createEmitter<TestEvents>();
+			const e1 = new Error('1');
+			const e2 = new Error('2');
+
+			events.on('count', function () {
+				throw e1;
+			});
+			events.on('*', function () {
+				throw e2;
+			});
+
+			let caught: unknown;
+			try {
+				events.emit('count', 1);
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(AggregateError);
+			expect((caught as AggregateError).errors).toEqual([e1, e2]);
+			expect((caught as AggregateError).message).toContain('count');
+		});
+
+		it('does not depend on `this`', function () {
+			const { on, emit, listenerCount } = createEmitter<TestEvents>();
+			const handler = jest.fn();
+
+			on('count', handler);
+			emit('count', 5);
+			expect(handler).toHaveBeenCalledWith(5);
+			expect(listenerCount()).toBe(1);
+		});
+
+		it('rejects non-function handlers and emitting the wildcard', function () {
+			const events = createEmitter<TestEvents>();
+
+			expect(function () {
+				events.on('count', null as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				events.once('count', 'x' as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				events.off('count', 1 as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				(events.emit as any)('*');
+			}).toThrow(/reserved/);
+		});
+	});
+
+	describe('wildcard', function () {
+		it('receives every event with its name, after the specific handlers', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: unknown[][] = [];
+
+			events.on('*', function (event, payload) {
+				calls.push(['*', event, payload]);
+			});
+			events.on('count', function (n) {
+				calls.push(['count', n]);
+			});
+			events.emit('count', 1);
+			events.emit('ready');
+
+			expect(calls).toEqual([
+				['count', 1],
+				['*', 'count', 1],
+				['*', 'ready', undefined]
+			]);
+		});
+
+		it('supports once and off for wildcard handlers', function () {
+			const events = createEmitter<TestEvents>();
+			const once = jest.fn();
+			const always = jest.fn();
+
+			events.once('*', once);
+			events.on('*', always);
+			events.emit('count', 1);
+			events.emit('count', 2);
+			expect(once).toHaveBeenCalledTimes(1);
+			expect(always).toHaveBeenCalledTimes(2);
+
+			expect(events.off('*', always)).toBe(true);
+			events.emit('count', 3);
+			expect(always).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	describe('once', function () {
+		it('runs at most once and can be cancelled before it runs', function () {
+			const events = createEmitter<TestEvents>();
+			const handler = jest.fn();
+			const cancelled = jest.fn();
+
+			events.once('count', handler);
+			const cancel = events.once('count', cancelled);
+			cancel();
+			events.emit('count', 1);
+			events.emit('count', 2);
+
+			expect(handler.mock.calls).toEqual([[1]]);
+			expect(cancelled).not.toHaveBeenCalled();
+			expect(events.listenerCount('count')).toBe(0);
+		});
+
+		it('is removed before running, so a nested emit does not call it again', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: number[] = [];
+
+			events.once('count', function (n) {
+				calls.push(n);
+				events.emit('count', n + 1);
+			});
+			events.emit('count', 1);
+
+			expect(calls).toEqual([1]);
+		});
+	});
+
+	describe('off', function () {
+		it('removes every registration of the handler for that event only', function () {
+			const events = createEmitter<TestEvents>();
+			const handler = jest.fn();
+
+			events.on('count', handler);
+			events.once('count', handler);
+			events.on('maybe', handler);
+
+			expect(events.off('count', handler)).toBe(true);
+			expect(events.off('count', handler)).toBe(false);
+			expect(events.off('ready', handler)).toBe(false);
+			events.emit('count', 1);
+			events.emit('maybe', 2);
+
+			expect(handler.mock.calls).toEqual([[2]]);
+		});
+
+		it('keeps other handlers of the event', function () {
+			const events = createEmitter<TestEvents>();
+			const a = jest.fn();
+			const b = jest.fn();
+
+			events.on('count', a);
+			events.on('count', b);
+			events.off('count', a);
+
+			expect(events.listenerCount('count')).toBe(1);
+			events.emit('count', 1);
+			expect(b).toHaveBeenCalledTimes(1);
+			expect(a).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('clear / listenerCount', function () {
+		it('counts per event, wildcard and total', function () {
+			const events = createEmitter<TestEvents>();
+
+			events.on('count', jest.fn());
+			events.on('count', jest.fn());
+			events.on('ready', jest.fn());
+			events.on('*', jest.fn());
+
+			expect(events.listenerCount('count')).toBe(2);
+			expect(events.listenerCount('ready')).toBe(1);
+			expect(events.listenerCount('message')).toBe(0);
+			expect(events.listenerCount('*')).toBe(1);
+			expect(events.listenerCount()).toBe(4);
+
+			events.clear('count');
+			expect(events.listenerCount()).toBe(2);
+			events.clear('*');
+			expect(events.listenerCount()).toBe(1);
+			events.clear('message');
+			events.clear();
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('makes previously returned unsubscribe functions harmless', function () {
+			const events = createEmitter<TestEvents>();
+			const handler = jest.fn();
+			const stop = events.on('count', handler);
+
+			events.clear();
+			const other = events.on('count', handler);
+			stop();
+			expect(events.listenerCount('count')).toBe(1);
+			other();
+			expect(events.listenerCount('count')).toBe(0);
+		});
+	});
+
+	describe('waitFor', function () {
+		afterEach(function () {
+			jest.useRealTimers();
+		});
+
+		it('resolves with the next payload and removes its listener', async function () {
+			const events = createEmitter<TestEvents>();
+			const promise = events.waitFor('count');
+
+			expect(events.listenerCount('count')).toBe(1);
+			events.emit('count', 7);
+			events.emit('count', 8);
+
+			await expect(promise).resolves.toBe(7);
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('resolves void events with undefined', async function () {
+			const events = createEmitter<TestEvents>();
+			const promise = events.waitFor('ready');
+
+			events.emit('ready');
+			await expect(promise).resolves.toBeUndefined();
+		});
+
+		it('only resolves with payloads accepted by filter', async function () {
+			const events = createEmitter<TestEvents>();
+			const promise = events.waitFor('count', {
+				filter: function (n) {
+					return n > 2;
+				}
+			});
+
+			events.emit('count', 1);
+			events.emit('count', 2);
+			expect(await stateOf(promise)).toBe('pending');
+			events.emit('count', 3);
+
+			await expect(promise).resolves.toBe(3);
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('rejects with the error thrown by filter without breaking the emit', async function () {
+			const events = createEmitter<TestEvents>();
+			const boom = new Error('filter');
+			const other = jest.fn();
+			const promise = events.waitFor('count', {
+				filter: function () {
+					throw boom;
+				}
+			});
+
+			events.on('count', other);
+			expect(function () {
+				events.emit('count', 1);
+			}).not.toThrow();
+
+			await expect(promise).rejects.toBe(boom);
+			expect(other).toHaveBeenCalled();
+			expect(events.listenerCount()).toBe(1);
+		});
+
+		it('rejects with a TimeoutError and cleans up', async function () {
+			jest.useFakeTimers();
+			const events = createEmitter<TestEvents>();
+			const signal = createSignal();
+			const promise = events.waitFor('count', { timeout: 100, signal });
+
+			jest.advanceTimersByTime(99);
+			expect(await stateOf(promise)).toBe('pending');
+			jest.advanceTimersByTime(1);
+
+			await expect(promise).rejects.toBeInstanceOf(TimeoutError);
+			await expect(promise).rejects.toThrow(/count/);
+			expect(events.listenerCount()).toBe(0);
+			expect(signal.listeners).toBe(0);
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('clears its timer when the event arrives in time', async function () {
+			jest.useFakeTimers();
+			const events = createEmitter<TestEvents>();
+			const promise = events.waitFor('count', { timeout: 100 });
+
+			events.emit('count', 1);
+			await expect(promise).resolves.toBe(1);
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('timeout 0 rejects on the next timer tick', async function () {
+			const events = createEmitter<TestEvents>();
+			await expect(events.waitFor('count', { timeout: 0 })).rejects.toBeInstanceOf(TimeoutError);
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('rejects with the abort reason and cleans up', async function () {
+			jest.useFakeTimers();
+			const events = createEmitter<TestEvents>();
+			const signal = createSignal();
+			const reason = new Error('stop');
+			const promise = events.waitFor('count', { signal, timeout: 1000 });
+
+			expect(signal.listeners).toBe(1);
+			signal.abort(reason);
+
+			await expect(promise).rejects.toBe(reason);
+			expect(events.listenerCount()).toBe(0);
+			expect(signal.listeners).toBe(0);
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('rejects with an AbortError when the signal has no reason', async function () {
+			const events = createEmitter<TestEvents>();
+			const signal = createSignal();
+			const promise = events.waitFor('count', { signal });
+
+			signal.abort();
+			await expect(promise).rejects.toBeInstanceOf(AbortError);
+		});
+
+		it('rejects immediately for an already aborted signal without registering anything', async function () {
+			const events = createEmitter<TestEvents>();
+			const controller = new AbortController();
+			controller.abort('why');
+
+			await expect(events.waitFor('count', { signal: controller.signal })).rejects.toBe('why');
+			expect(events.listenerCount()).toBe(0);
+
+			const bare = createSignal();
+			(bare as { aborted: boolean }).aborted = true;
+			await expect(events.waitFor('count', { signal: bare })).rejects.toBeInstanceOf(AbortError);
+		});
+
+		it('removes the abort listener when resolved', async function () {
+			const events = createEmitter<TestEvents>();
+			const signal = createSignal();
+			const promise = events.waitFor('count', { signal });
+
+			events.emit('count', 1);
+			await expect(promise).resolves.toBe(1);
+			expect(signal.listeners).toBe(0);
+		});
+
+		it('works with a real AbortController', async function () {
+			const events = createEmitter<TestEvents>();
+			const controller = new AbortController();
+			const promise = events.waitFor('count', { signal: controller.signal });
+
+			controller.abort();
+			await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+			expect(events.listenerCount()).toBe(0);
+		});
+
+		it('rejects invalid arguments', async function () {
+			const events = createEmitter<TestEvents>();
+
+			for (const timeout of [-1, NaN, 2 ** 31, '5' as any]) {
+				await expect(events.waitFor('count', { timeout })).rejects.toThrow(RangeError);
+			}
+			await expect(events.waitFor('count', { filter: 'x' as any })).rejects.toThrow(TypeError);
+			await expect((events.waitFor as any)('*')).rejects.toThrow(TypeError);
+			expect(events.listenerCount()).toBe(0);
+		});
+	});
+});
