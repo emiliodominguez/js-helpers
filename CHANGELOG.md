@@ -96,13 +96,20 @@ Full review and rewrite: every module is strictly typed, documented with complet
     - cross-realm Dates were rejected.
 - **guards:** the `is*` checks for built-ins accepted fake objects built from a built-in's prototype.
 
+- **Consistency pass across all modules:**
+    - Argument errors share one message format, ``fn: `param` must be …, got value``.
+    - A wrong type (for example a string where a number belongs) throws `TypeError`; a right type with an invalid value throws `RangeError`.
+    - Callbacks and `random` generators are validated everywhere, even for empty input.
+    - The shared assertion helpers are deduplicated, which saves about 430 B gzipped.
+
 ### Changed (breaking)
 
 See [Migrating from 1.x](./README.md#migrating-from-1x).
 
 - The package is renamed to `@emiliodominguez/js-helpers`, because `js-helpers` is taken on npm.
 - **Behaviour:**
-    - `modulo` is now a floored modulo;
-    - `countSubString` is case-sensitive;
-    - `hasProperty` only checks own properties;
-    - `round` rounds halves away from zero.
+    - non-number arguments to numeric parameters now throw `TypeError` instead of `RangeError`, and a few value errors moved from `TypeError` to `RangeError` (e.g. `sortBy` with an unknown `order`, `debounce` with both edges disabled);
+        - `modulo` is now a floored modulo;
+        - `countSubString` is case-sensitive;
+        - `hasProperty` only checks own properties;
+        - `round` rounds halves away from zero.

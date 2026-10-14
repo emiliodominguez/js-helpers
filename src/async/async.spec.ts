@@ -936,7 +936,28 @@ describe('Async helpers (round 2)', function () {
 		});
 
 		it('should reject with a TypeError for non-function tasks', async function () {
-			await expect(sequence([jest.fn(), 42 as any])).rejects.toThrow('task at index 1 is not a function');
+			await expect(sequence([jest.fn(), 42 as any])).rejects.toThrow(new TypeError('sequence: `tasks[1]` must be a function, got number'));
+		});
+	});
+
+	describe('argument validation', function () {
+		it('validates the retry callbacks up front instead of failing on the first retry', async function () {
+			const fn = jest.fn().mockRejectedValue(new Error('boom'));
+			await expect(retry(fn, { shouldRetry: 'yes' as any })).rejects.toThrow(new TypeError('retry: `shouldRetry` must be a function, got string'));
+			await expect(retry(fn, { onRetry: 1 as any })).rejects.toThrow(new TypeError('retry: `onRetry` must be a function, got number'));
+			await expect(retry(undefined as any)).rejects.toThrow(new TypeError('retry: `fn` must be a function, got undefined'));
+			expect(fn).not.toHaveBeenCalled();
+		});
+
+		it('throws a TypeError for non-number arguments and a RangeError for invalid numbers', async function () {
+			await expect(sleep('5' as any)).rejects.toThrow(new TypeError('sleep: `ms` must be a number between 0 and 2147483647, got string'));
+			await expect(retry(jest.fn(), { retries: -1 })).rejects.toThrow(new RangeError('retry: `retries` must be an integer >= 0 or Infinity, got -1'));
+			await expect(pollUntil(jest.fn(), { timeout: -1 })).rejects.toThrow(
+				new RangeError('pollUntil: `timeout` must be Infinity or a number between 0 and 2147483647, got -1')
+			);
+			expect(function () {
+				createLimiter(null as any);
+			}).toThrow(TypeError);
 		});
 	});
 });

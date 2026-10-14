@@ -215,7 +215,10 @@ describe('String helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.truncate('hello', Infinity);
-			}).toThrow(/non-negative integer/);
+			}).toThrow(new RangeError('truncate: `length` must be an integer >= 0, got Infinity'));
+			expect(function () {
+				helpers.truncate('hello', '3' as any);
+			}).toThrow(new TypeError('truncate: `length` must be an integer >= 0, got string'));
 		});
 	});
 

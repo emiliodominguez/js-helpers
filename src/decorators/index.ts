@@ -12,6 +12,7 @@ import {
 	type Throttled,
 	type ThrottleOptions
 } from '../functions/index.js';
+import { assertDelay } from '../utils/assert.js';
 import type { AnyFunction, RandomGenerator } from '../utils/index.js';
 
 /**
@@ -69,11 +70,6 @@ export interface AsyncMethodDecorator {
 	<T extends (...args: never[]) => PromiseLike<unknown>>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
 	<T extends (...args: never[]) => PromiseLike<unknown>>(value: T, context: ClassMethodDecoratorContext): T;
 }
-
-/**
- * Largest delay accepted by `setTimeout` (2^31 - 1 ms).
- */
-const MAX_TIMEOUT = 2 ** 31 - 1;
 
 /**
  * Key used for the per-instance state of methods called with a non-object `this` (e.g. detached calls in sloppy code).
@@ -529,8 +525,8 @@ export function bound(targetOrValue: unknown, keyOrContext: unknown, descriptor?
  * @param {number} wait - The quiet period in milliseconds
  * @param {DebounceOptions} [options] - `leading`, `trailing` and `maxWait`, as for {@link debounce}
  * @returns {UniversalMethodDecorator} The decorator (legacy and standard)
- * @throws {RangeError} when `wait` or `options.maxWait` is negative, `NaN` or infinite
- * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
+ * @throws {RangeError} when `wait` or `options.maxWait` is negative, `NaN` or infinite, or when both `leading` and `trailing` are `false`
+ * @throws {TypeError} when `wait` or `options.maxWait` is not a number, or when applied to something other than a method
  * @example
  * ```ts
  * import { sleep } from '@emiliodominguez/js-helpers/async';
@@ -573,8 +569,8 @@ export function debounced(wait: number, options?: DebounceOptions): UniversalMet
  * @param {number} wait - The window length in milliseconds
  * @param {ThrottleOptions} [options] - `leading` and `trailing`, as for {@link throttle}
  * @returns {UniversalMethodDecorator} The decorator (legacy and standard)
- * @throws {RangeError} when `wait` is negative, `NaN` or infinite
- * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
+ * @throws {RangeError} when `wait` is negative, `NaN` or infinite, or when both `leading` and `trailing` are `false`
+ * @throws {TypeError} when `wait` is not a number, or when applied to something other than a method
  * @example
  * ```ts
  * import { sleep } from '@emiliodominguez/js-helpers/async';
@@ -761,7 +757,7 @@ export function retryable(options: RetryOptions = {}, random: RandomGenerator = 
  * @param {string} [message] - Message of the `TimeoutError` (defaults to `Operation timed out after <ms> ms`)
  * @returns {AsyncMethodDecorator} The decorator (legacy and standard)
  * @throws {RangeError} when `ms` is negative, `NaN` or larger than `2^31 - 1`
- * @throws {TypeError} when applied to something other than a method
+ * @throws {TypeError} when `ms` is not a number, or when applied to something other than a method
  * @example
  * ```ts
  * class Api {
@@ -772,9 +768,7 @@ export function retryable(options: RetryOptions = {}, random: RandomGenerator = 
  * ```
  */
 export function timeout(ms: number, message?: string): AsyncMethodDecorator {
-	if (typeof ms !== 'number' || !(ms >= 0 && ms <= MAX_TIMEOUT)) {
-		throw new RangeError(`@timeout: \`ms\` must be a number between 0 and ${MAX_TIMEOUT}, got ${String(ms)}`);
-	}
+	assertDelay('@timeout', 'ms', ms);
 
 	return createMethodDecorator('timeout', function (method: UnknownMethod): UnknownMethod {
 		return function timeoutMethod(this: unknown, ...args: unknown[]): Promise<unknown> {

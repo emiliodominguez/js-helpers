@@ -1,4 +1,5 @@
 import { sum } from '../math/index.js';
+import { assertFunction, assertInteger, assertNumber, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -35,37 +36,6 @@ export type SortOrder = 'asc' | 'desc';
  * Largest length a JavaScript array can have.
  */
 const MAX_ARRAY_LENGTH = 2 ** 32 - 1;
-
-/**
- * Throws a `RangeError` unless `value` is an integer `>= min`.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {number} value - The value to validate
- * @param {number} min - Smallest accepted value
- * @returns {void}
- * @throws {RangeError} when `value` is not an integer or is smaller than `min`
- */
-function assertInteger(caller: string, name: string, value: number, min: number): void {
-	if (!Number.isInteger(value) || value < min) {
-		throw new RangeError(`${caller}: \`${name}\` must be an integer >= ${min}, got ${String(value)}`);
-	}
-}
-
-/**
- * Draws a uniformly distributed index in `[0, length)` from `random`.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {RandomGenerator} random - Generator returning floats in `[0, 1)`
- * @param {number} length - Exclusive upper bound of the index
- * @returns {number} An integer in `[0, length)`
- * @throws {RangeError} when `random()` returns a value outside `[0, 1)`
- */
-function randomIndex(caller: string, random: RandomGenerator, length: number): number {
-	const value = random();
-	if (!(value >= 0 && value < 1)) {
-		throw new RangeError(`${caller}: \`random()\` must return a number in [0, 1), got ${String(value)}`);
-	}
-	return Math.floor(value * length);
-}
 
 /**
  * Type guard telling whether a (possibly nested) element is an array.
@@ -324,6 +294,7 @@ export function isSubset<T>(subset: Iterable<T>, superset: Iterable<T>): boolean
  * @param {number} size - The maximum length of each chunk (a positive integer)
  * @returns {T[][]} A new array of chunks (empty when the input is empty)
  * @throws {RangeError} when `size` is not a positive integer
+ * @throws {TypeError} when `size` is not a number
  * @example
  * chunk([1, 2, 3, 4, 5], 2); // => [[1, 2], [3, 4], [5]]
  */
@@ -361,6 +332,7 @@ export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
  * @param {number} [end] - The exclusive end of the range
  * @param {number} [step=1] - The increment between values (may be negative, never 0)
  * @returns {number[]} The generated numbers
+ * @throws {TypeError} when `start`, `end` or `step` is not a number
  * @throws {RangeError} when an argument is not finite, `step` is 0, or the result would exceed the maximum array length
  * @example
  * range(5); // => [0, 1, 2, 3, 4]
@@ -372,10 +344,9 @@ export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
 export function range(start: number, end?: number, step = 1): number[] {
 	const from = end === undefined ? 0 : start;
 	const to = end === undefined ? start : end;
-	if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(step)) {
-		throw new RangeError(`range: arguments must be finite numbers, got (${String(start)}, ${String(end)}, ${String(step)})`);
-	}
-	if (step === 0) throw new RangeError('range: `step` must not be 0');
+	assertNumber('range', 'start', start, Number.isFinite(start), 'a finite number');
+	if (end !== undefined) assertNumber('range', 'end', end, Number.isFinite(end), 'a finite number');
+	assertNumber('range', 'step', step, Number.isFinite(step) && step !== 0, 'a finite number other than 0');
 	const ratio = (to - from) / step;
 	const nearest = Math.round(ratio);
 	// `ratio` carries rounding errors (`2.1 / 0.3` is `7.000000000000001`); when it is an integer up to those errors,
@@ -420,10 +391,12 @@ export function zip<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Arra
  * @param {ReadonlyArray<T>} array - The items to group
  * @param {(item: T, index: number) => K} keyFn - Returns the group key of an item
  * @returns {Partial<Record<K, T[]>>} An object mapping each key to the items that produced it
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * groupBy([1, 2, 3, 4], function (n) { return n % 2 === 0 ? 'even' : 'odd'; }); // => { odd: [1, 3], even: [2, 4] }
  */
 export function groupBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Partial<Record<K, T[]>> {
+	assertFunction('groupBy', 'keyFn', keyFn);
 	const groups = Object.create(null) as Partial<Record<K, T[]>>;
 	for (let i = 0; i < array.length; i++) {
 		const item = array[i];
@@ -443,10 +416,12 @@ export function groupBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn
  * @param {ReadonlyArray<T>} array - The items to index
  * @param {(item: T, index: number) => K} keyFn - Returns the key of an item
  * @returns {Record<K, T>} An object mapping each key to the last item that produced it
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * keyBy([{ id: 'a', v: 1 }, { id: 'a', v: 2 }], function (o) { return o.id; }); // => { a: { id: 'a', v: 2 } }
  */
 export function keyBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Record<K, T> {
+	assertFunction('keyBy', 'keyFn', keyFn);
 	const result = Object.create(null) as Record<K, T>;
 	for (let i = 0; i < array.length; i++) {
 		result[keyFn(array[i], i)] = array[i];
@@ -462,10 +437,12 @@ export function keyBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: 
  * @param {ReadonlyArray<T>} array - The items to count
  * @param {(item: T, index: number) => K} keyFn - Returns the key of an item
  * @returns {Record<K, number>} An object mapping each key to the number of items that produced it
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * countBy(['one', 'two', 'three'], function (s) { return s.length; }); // => { 3: 2, 5: 1 }
  */
 export function countBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Record<K, number> {
+	assertFunction('countBy', 'keyFn', keyFn);
 	const counts = Object.create(null) as Record<K, number>;
 	for (let i = 0; i < array.length; i++) {
 		const key = keyFn(array[i], i);
@@ -481,6 +458,7 @@ export function countBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn
  * @param {ReadonlyArray<T>} array - The items to split
  * @param {(item: T, index: number) => item is S} predicate - Type guard deciding which side an item goes to
  * @returns {[S[], Exclude<T, S>[]]} `[matching, nonMatching]`
+ * @throws {TypeError} when `predicate` is not a function
  * @example
  * partition([1, 'a', 2], function (v): v is number { return typeof v === 'number'; }); // => [[1, 2], ['a']]
  */
@@ -491,6 +469,7 @@ export function partition<T, S extends T>(array: ReadonlyArray<T>, predicate: (i
  * @param {ReadonlyArray<T>} array - The items to split
  * @param {(item: T, index: number) => boolean} predicate - Decides which side an item goes to
  * @returns {[T[], T[]]} `[matching, nonMatching]`
+ * @throws {TypeError} when `predicate` is not a function
  * @example
  * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // => [[2, 4], [1, 3]]
  */
@@ -501,10 +480,12 @@ export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index
  * @param {ReadonlyArray<T>} array - The items to split
  * @param {(item: T, index: number) => boolean} predicate - Decides which side an item goes to
  * @returns {[T[], T[]]} `[matching, nonMatching]`
+ * @throws {TypeError} when `predicate` is not a function
  * @example
  * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // => [[2, 4], [1, 3]]
  */
 export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index: number) => boolean): [T[], T[]] {
+	assertFunction('partition', 'predicate', predicate);
 	const matching: T[] = [];
 	const rest: T[] = [];
 	for (let i = 0; i < array.length; i++) {
@@ -520,10 +501,12 @@ export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index
  * @param {ReadonlyArray<T>} array - The items to deduplicate
  * @param {(item: T, index: number) => unknown} keyFn - Returns the identity key of an item
  * @returns {T[]} A new array with one item per distinct key, in first-appearance order
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * uniqueBy([{ id: 1, v: 'a' }, { id: 1, v: 'b' }, { id: 2, v: 'c' }], function (o) { return o.id; }); // => [{ id: 1, v: 'a' }, { id: 2, v: 'c' }]
  */
 export function uniqueBy<T>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => unknown): T[] {
+	assertFunction('uniqueBy', 'keyFn', keyFn);
 	const seen = new Set<unknown>();
 	const result: T[] = [];
 	for (let i = 0; i < array.length; i++) {
@@ -575,13 +558,15 @@ function compareKeys(a: number | string | bigint, b: number | string | bigint): 
  * @param {(item: T, index: number) => SortKey} selector - Returns the sort key of an item
  * @param {SortOrder} [order='asc'] - `'asc'` for ascending or `'desc'` for descending keys
  * @returns {T[]} A new sorted array
- * @throws {TypeError} when `order` is neither `'asc'` nor `'desc'`
+ * @throws {TypeError} when `selector` is not a function
+ * @throws {RangeError} when `order` is neither `'asc'` nor `'desc'`
  * @example
  * sortBy([{ n: 'b' }, { n: 'a' }], function (o) { return o.n; }); // => [{ n: 'a' }, { n: 'b' }]
  * sortBy([1, 3, 2], function (n) { return n; }, 'desc'); // => [3, 2, 1]
  */
 export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, order: SortOrder = 'asc'): T[] {
-	if (order !== 'asc' && order !== 'desc') throw new TypeError(`sortBy: \`order\` must be 'asc' or 'desc', got ${String(order)}`);
+	assertFunction('sortBy', 'selector', selector);
+	if (order !== 'asc' && order !== 'desc') throw new RangeError(`sortBy: \`order\` must be 'asc' or 'desc', got ${String(order)}`);
 	const direction = order === 'asc' ? 1 : -1;
 	const entries = Array.from(array, function (item, index) {
 		return { item, index, key: toComparable(selector(item, index)) };
@@ -607,13 +592,14 @@ export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: nu
  * @param {RandomGenerator} [random=Math.random] - Generator of floats in `[0, 1)`, injectable for deterministic results
  * @returns {T[]} A new array containing the same items in random order
  * @throws {RangeError} when `random()` returns a value outside `[0, 1)`
+ * @throws {TypeError} when `random` is not a function
  * @example
  * shuffle([1, 2, 3, 4]); // e.g. [3, 1, 4, 2]
  */
 export function shuffle<T>(array: ReadonlyArray<T>, random: RandomGenerator = Math.random): T[] {
 	const result = Array.from(array);
 	for (let i = result.length - 1; i > 0; i--) {
-		const j = randomIndex('shuffle', random, i + 1);
+		const j = Math.floor(draw('shuffle', random) * (i + 1));
 		const swap = result[i];
 		result[i] = result[j];
 		result[j] = swap;
@@ -628,13 +614,14 @@ export function shuffle<T>(array: ReadonlyArray<T>, random: RandomGenerator = Ma
  * @param {RandomGenerator} [random=Math.random] - Generator of floats in `[0, 1)`, injectable for deterministic results
  * @returns {T | undefined} A random item, or `undefined` when the array is empty (`random` is then not called)
  * @throws {RangeError} when `random()` returns a value outside `[0, 1)`
+ * @throws {TypeError} when `random` is not a function
  * @example
  * sample(['a', 'b', 'c']); // e.g. 'b'
  * sample([]); // => undefined
  */
 export function sample<T>(array: ReadonlyArray<T>, random: RandomGenerator = Math.random): T | undefined {
 	if (array.length === 0) return undefined;
-	return array[randomIndex('sample', random, array.length)];
+	return array[Math.floor(draw('sample', random) * array.length)];
 }
 
 /**
@@ -644,6 +631,7 @@ export function sample<T>(array: ReadonlyArray<T>, random: RandomGenerator = Mat
  * @param {number} n - How many items to take (a non-negative integer)
  * @returns {T[]} A new array with at most `n` items
  * @throws {RangeError} when `n` is negative or not an integer
+ * @throws {TypeError} when `n` is not a number
  * @example
  * take([1, 2, 3], 2); // => [1, 2]
  */
@@ -659,6 +647,7 @@ export function take<T>(array: ReadonlyArray<T>, n: number): T[] {
  * @param {number} n - How many items to skip (a non-negative integer)
  * @returns {T[]} A new array with the remaining items
  * @throws {RangeError} when `n` is negative or not an integer
+ * @throws {TypeError} when `n` is not a number
  * @example
  * drop([1, 2, 3], 2); // => [3]
  */
@@ -714,6 +703,7 @@ export function unzip<T extends ReadonlyArray<unknown>>(tuples: ReadonlyArray<T>
  * @param {number} [step=1] - The distance between the starts of two consecutive windows (a positive integer)
  * @returns {T[][]} A new array of windows (each window is a fresh array)
  * @throws {RangeError} when `size` or `step` is not a positive integer
+ * @throws {TypeError} when `size` or `step` is not a number
  * @example
  * windowed([1, 2, 3, 4], 2); // => [[1, 2], [2, 3], [3, 4]]
  * windowed([1, 2, 3, 4, 5], 2, 2); // => [[1, 2], [3, 4]]
@@ -776,12 +766,14 @@ function extremeBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number
  * @param {ReadonlyArray<T>} array - The items to inspect
  * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
  * @returns {T | undefined} The first item with the smallest key, or `undefined` when the array is empty or every key is `NaN`
+ * @throws {TypeError} when `selector` is not a function
  * @example
  * const items = [{ n: 3 }, { n: 1 }, { n: 1 }];
  * minBy(items, function (o) { return o.n; }) === items[1]; // => true // ties keep the first
  * minBy([NaN, 2], function (n) { return n; }); // => 2
  */
 export function minBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
+	assertFunction('minBy', 'selector', selector);
 	return extremeBy(array, selector, -1);
 }
 
@@ -794,11 +786,13 @@ export function minBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  * @param {ReadonlyArray<T>} array - The items to inspect
  * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
  * @returns {T | undefined} The first item with the largest key, or `undefined` when the array is empty or every key is `NaN`
+ * @throws {TypeError} when `selector` is not a function
  * @example
  * maxBy([{ n: 3 }, { n: 7 }], function (o) { return o.n; }); // => { n: 7 }
  * maxBy(['b', 'a', 'B'], function (s) { return s; }); // => 'b'
  */
 export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
+	assertFunction('maxBy', 'selector', selector);
 	return extremeBy(array, selector, 1);
 }
 
@@ -810,10 +804,12 @@ export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  * @param {ReadonlyArray<T>} array - The items to add up
  * @param {(item: T, index: number) => number} selector - Returns the number contributed by an item
  * @returns {number} The total (`0` for an empty array)
+ * @throws {TypeError} when `selector` is not a function
  * @example
  * sumBy([{ price: 0.1 }, { price: 0.2 }, { price: 0.3 }], function (o) { return o.price; }); // => 0.6
  */
 export function sumBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => number): number {
+	assertFunction('sumBy', 'selector', selector);
 	return sum(Array.from(array, selector));
 }
 
@@ -825,15 +821,19 @@ export function sumBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  * @param {number} length - The length of the array
  * @param {boolean} allowEnd - Whether `length` itself is a valid (insertion) position
  * @returns {number} The resolved index, in `[0, length)` (or `[0, length]` when `allowEnd`)
+ * @throws {TypeError} when `index` is not a number
  * @throws {RangeError} when `index` is not an integer or is out of range
  */
 function resolveIndex(caller: string, name: string, index: number, length: number, allowEnd: boolean): number {
-	if (!Number.isInteger(index)) throw new RangeError(`${caller}: \`${name}\` must be an integer, got ${String(index)}`);
 	const resolved = index < 0 ? length + index : index;
 	const upper = allowEnd ? length : length - 1;
-	if (resolved < 0 || resolved > upper) {
-		throw new RangeError(`${caller}: \`${name}\` ${index} is out of range for an array of length ${length}`);
-	}
+	assertNumber(
+		caller,
+		name,
+		index,
+		Number.isInteger(index) && resolved >= 0 && resolved <= upper,
+		upper < 0 ? 'a valid index, but the array is empty' : `an integer in [${-length}, ${upper}]`
+	);
 	return resolved;
 }
 
@@ -847,6 +847,7 @@ function resolveIndex(caller: string, name: string, index: number, length: numbe
  * @param {number} to - Index of the item in the result, in `[-length, length - 1]`
  * @returns {T[]} A new array, a permutation of the input
  * @throws {RangeError} when `from` or `to` is not an integer or is out of range (any index is out of range for an empty array)
+ * @throws {TypeError} when `from` or `to` is not a number
  * @example
  * move(['a', 'b', 'c', 'd'], 0, 2); // => ['b', 'c', 'a', 'd']
  * move(['a', 'b', 'c'], -1, 0); // => ['c', 'a', 'b']
@@ -870,6 +871,7 @@ export function move<T>(array: ReadonlyArray<T>, from: number, to: number): T[] 
  * @param {...T} items - The items to insert (in order)
  * @returns {T[]} A new array of length `array.length + items.length`
  * @throws {RangeError} when `index` is not an integer or is out of range
+ * @throws {TypeError} when `index` is not a number
  * @example
  * insertAt([1, 2, 3], 1, 9, 8); // => [1, 9, 8, 2, 3]
  * insertAt([1, 2, 3], -1, 9); // => [1, 2, 9, 3]
@@ -895,6 +897,7 @@ export function insertAt<T>(array: ReadonlyArray<T>, index: number, ...items: T[
  * @returns {T[]} A new array without the removed items
  * @throws {RangeError} when `index` is not an integer or is out of range (any index is out of range for an empty array)
  * @throws {RangeError} when `count` is not a non-negative integer
+ * @throws {TypeError} when `index` or `count` is not a number
  * @example
  * removeAt([1, 2, 3, 4], 1); // => [1, 3, 4]
  * removeAt([1, 2, 3, 4], -2, 2); // => [1, 2]
@@ -928,10 +931,13 @@ function naturalCompare(a: unknown, b: unknown): number {
  * @param {T} value - The value to locate
  * @param {Comparator<T> | undefined} compare - The comparator (`undefined` for the natural `<` order)
  * @returns {[number, Comparator<T>]} The lower-bound index and the comparator actually used
+ * @throws {TypeError} when `compare` is given but is not a function
  * @throws {RangeError} when `value` is `NaN` and no comparator is given
  */
 function lowerBound<T>(caller: string, sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T> | undefined): [number, Comparator<T>] {
-	if (compare === undefined && Number.isNaN(value)) throw new RangeError(`${caller}: cannot locate NaN with the default comparator`);
+	if (compare === undefined) {
+		if (Number.isNaN(value)) throw new RangeError(`${caller}: \`value\` must not be NaN when no comparator is given, got NaN`);
+	} else assertFunction(caller, 'compare', compare);
 	const order: Comparator<T> = compare ?? naturalCompare;
 	let low = 0;
 	let high = sortedArray.length;
@@ -965,6 +971,7 @@ export function sortedIndex<T extends number | string | bigint>(sortedArray: Rea
  * @param {T} value - The value to locate
  * @param {Comparator<T>} compare - The comparator the array is sorted by
  * @returns {number} An index in `[0, length]`
+ * @throws {TypeError} when `compare` is given but is not a function
  * @example
  * sortedIndex([{ n: 1 }, { n: 5 }], { n: 3 }, function (a, b) { return a.n - b.n; }); // => 1
  */
@@ -977,6 +984,7 @@ export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare:
  * @param {Comparator<T>} [compare] - The comparator the array is sorted by
  * @returns {number} The lowest insertion index
  * @throws {RangeError} when `value` is `NaN` and no comparator is given
+ * @throws {TypeError} when `compare` is given but is not a function
  * @example
  * sortedIndex([1, 3], 2); // => 1
  */
@@ -1005,6 +1013,7 @@ export function binarySearch<T extends number | string | bigint>(sortedArray: Re
  * @param {T} value - The value to find
  * @param {Comparator<T>} compare - The comparator the array is sorted by
  * @returns {number} The index of a matching item, or `-1`
+ * @throws {TypeError} when `compare` is given but is not a function
  * @example
  * binarySearch(['b', 'c'], 'B', function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }); // => 0
  */
@@ -1017,6 +1026,7 @@ export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare
  * @param {Comparator<T>} [compare] - The comparator the array is sorted by
  * @returns {number} The lowest matching index, or `-1`
  * @throws {RangeError} when `value` is `NaN` and no comparator is given
+ * @throws {TypeError} when `compare` is given but is not a function
  * @example
  * binarySearch([1, 3], 3); // => 1
  */
@@ -1100,11 +1110,13 @@ function keySet<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): Set<unkn
  * @param {Iterable<U>} b - The items whose keys are excluded
  * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
  * @returns {T[]} The items of `a` with a distinct key missing from `b`, in first-appearance order
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * differenceBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // => [{ id: 1 }]
  * differenceBy([1.2, 2.5, 3.1], [2.1], Math.floor); // => [1.2, 3.1]
  */
 export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
+	assertFunction('differenceBy', 'keyFn', keyFn);
 	const excluded = keySet(b, keyFn);
 	const result: T[] = [];
 	for (const item of a) {
@@ -1127,10 +1139,12 @@ export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (i
  * @param {Iterable<U>} b - The items whose keys are kept
  * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
  * @returns {T[]} The items of `a` with a distinct key also present in `b`, in first-appearance order
+ * @throws {TypeError} when `keyFn` is not a function
  * @example
  * intersectionBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // => [{ id: 2 }]
  */
 export function intersectionBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
+	assertFunction('intersectionBy', 'keyFn', keyFn);
 	const remaining = keySet(b, keyFn);
 	const result: T[] = [];
 	for (const item of a) {

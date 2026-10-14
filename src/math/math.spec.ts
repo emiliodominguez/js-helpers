@@ -314,7 +314,18 @@ describe('Math helpers', function () {
 		it('should never return max, even when rounding would', function () {
 			expect(helpers.randomBetween(1, 2, constant(ALMOST_ONE))).toBeLessThan(2);
 			expect(helpers.randomBetween(-2, -1, constant(ALMOST_ONE))).toBeLessThan(-1);
-			expect(helpers.randomBetween(-1, 0, constant(1))).toBeLessThan(0);
+		});
+
+		it('should reject a random source returning values outside [0, 1), like the other random helpers', function () {
+			expect(function () {
+				helpers.randomBetween(-1, 0, constant(1));
+			}).toThrow(new RangeError('randomBetween: `random()` must return a number in [0, 1), got 1'));
+			expect(function () {
+				helpers.randomIntBetween(1, 6, constant(NaN));
+			}).toThrow(new RangeError('randomIntBetween: `random()` must return a number in [0, 1), got NaN'));
+			expect(function () {
+				helpers.randomBetween(0, 1, 'x' as any);
+			}).toThrow(new TypeError('randomBetween: `random` must be a function, got string'));
 		});
 
 		it('should return min when min === max', function () {
@@ -353,7 +364,6 @@ describe('Math helpers', function () {
 		it('should include both bounds', function () {
 			expect(helpers.randomIntBetween(1, 6, constant(0))).toBe(1);
 			expect(helpers.randomIntBetween(1, 6, constant(ALMOST_ONE))).toBe(6);
-			expect(helpers.randomIntBetween(1, 6, constant(1))).toBe(6);
 		});
 
 		it('should narrow non-integer bounds to the integers inside them', function () {
@@ -1102,6 +1112,29 @@ describe('Math helpers', function () {
 					helpers.roundToStep(1, step);
 				}).toThrow(RangeError);
 			}
+		});
+	});
+
+	describe('argument validation', function () {
+		it('uses the library-wide message format, with a TypeError for non-numbers', function () {
+			expect(function () {
+				helpers.round(1, 1.5);
+			}).toThrow(new RangeError('round: `decimals` must be an integer, got 1.5'));
+			expect(function () {
+				helpers.round(1, '2' as any);
+			}).toThrow(new TypeError('round: `decimals` must be an integer, got string'));
+			expect(function () {
+				helpers.gcd(4, 1.5);
+			}).toThrow(new RangeError('gcd: `b` must be an integer, got 1.5'));
+			expect(function () {
+				helpers.normalize([1, NaN]);
+			}).toThrow(new RangeError('normalize: `numbers[1]` must be a finite number, got NaN'));
+			expect(function () {
+				helpers.weightedAverage([1, 2], [1, -1]);
+			}).toThrow(new RangeError('weightedAverage: `weights[1]` must be a finite number >= 0, got -1'));
+			expect(function () {
+				helpers.clamp(1, 2, 1);
+			}).toThrow(new RangeError('clamp: `minimum` must not be greater than `maximum`, got 2 and 1'));
 		});
 	});
 });

@@ -471,7 +471,7 @@ describe('Decorators', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				decorators.debounced(10, { leading: false, trailing: false });
-			}).toThrow(TypeError);
+			}).toThrow(RangeError);
 		});
 
 		it('should work as a standard decorator', function () {
@@ -767,10 +767,16 @@ describe('Decorators (round 2)', function () {
 			await expect(throwing()).rejects.toThrow('thrown');
 		});
 
-		it.each([-1, NaN, 2 ** 31, '10' as any])('should throw a RangeError eagerly for ms = %p', function (ms) {
+		it.each([-1, NaN, 2 ** 31])('should throw a RangeError eagerly for ms = %p', function (ms) {
 			expect(function () {
 				decorators.timeout(ms);
 			}).toThrow(RangeError);
+		});
+
+		it('should throw a TypeError eagerly for a non-number ms', function () {
+			expect(function () {
+				decorators.timeout('10' as any);
+			}).toThrow(new TypeError('@timeout: `ms` must be a number between 0 and 2147483647, got string'));
 		});
 	});
 

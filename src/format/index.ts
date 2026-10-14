@@ -168,7 +168,7 @@ const formatterCache = createLRUCache<string, unknown>({ max: FORMATTER_CACHE_SI
  */
 function resolveLocales(locale: LocaleInput | undefined): string[] {
 	if (locale === undefined) return [DEFAULT_LOCALE];
-	if (typeof locale !== 'string' && !Array.isArray(locale)) throw new TypeError(`format: locale must be a string or an array of strings, received ${typeName(locale)}`);
+	if (typeof locale !== 'string' && !Array.isArray(locale)) throw new TypeError(`format: \`locale\` must be a string or an array of strings, got ${typeName(locale)}`);
 
 	const requested: string[] = typeof locale === 'string' ? [locale] : [...locale];
 
@@ -241,8 +241,8 @@ function typeName(value: unknown): string {
  * @throws {RangeError} when `value` is `NaN` or `±Infinity`
  */
 function assertFiniteNumber(name: string, value: unknown): asserts value is number {
-	if (typeof value !== 'number') throw new TypeError(`${name}: value must be a number, received ${typeName(value)}`);
-	if (!Number.isFinite(value)) throw new RangeError(`${name}: value must be finite, received ${value}`);
+	if (typeof value !== 'number') throw new TypeError(`${name}: \`value\` must be a number, got ${typeName(value)}`);
+	if (!Number.isFinite(value)) throw new RangeError(`${name}: \`value\` must be finite, got ${value}`);
 }
 
 /**
@@ -266,7 +266,7 @@ function assertNumeric(name: string, value: unknown): asserts value is number | 
  * @throws {TypeError} when `value` is not a string
  */
 function assertString(name: string, label: string, value: unknown): asserts value is string {
-	if (typeof value !== 'string') throw new TypeError(`${name}: ${label} must be a string, received ${typeName(value)}`);
+	if (typeof value !== 'string') throw new TypeError(`${name}: \`${label}\` must be a string, got ${typeName(value)}`);
 }
 
 /**
@@ -342,7 +342,7 @@ export function formatPercent(value: number, options: FormatPercentOptions = {})
 
 	if (decimals !== undefined) {
 		if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_PERCENT_DECIMALS) {
-			throw new RangeError(`formatPercent: decimals must be an integer from 0 to ${MAX_PERCENT_DECIMALS}, received ${decimals}`);
+			throw new RangeError(`formatPercent: \`decimals\` must be an integer from 0 to ${MAX_PERCENT_DECIMALS}, got ${decimals}`);
 		}
 
 		rest.minimumFractionDigits = decimals;
@@ -416,12 +416,12 @@ export function formatUnit(value: number | bigint, unit: string, options: Format
  * formatList([]); // => ''
  */
 export function formatList(items: Iterable<string>, options: FormatListOptions = {}): string {
-	if (typeof items === 'string' || !isIterable(items)) throw new TypeError(`formatList: items must be an iterable of strings, received ${typeName(items)}`);
+	if (typeof items === 'string' || !isIterable(items)) throw new TypeError(`formatList: \`items\` must be an iterable of strings, got ${typeName(items)}`);
 
 	const list = Array.from(items);
 
 	for (const item of list) {
-		if (typeof item !== 'string') throw new TypeError(`formatList: every item must be a string, received ${typeName(item)}`);
+		if (typeof item !== 'string') throw new TypeError(`formatList: every item must be a string, got ${typeName(item)}`);
 	}
 
 	const { locale, type = 'conjunction', style = 'long' } = options;
@@ -453,8 +453,8 @@ export function formatList(items: Iterable<string>, options: FormatListOptions =
 export function formatDateTime(date: DateInput, options: FormatDateTimeOptions = {}): string {
 	const time = isDate(date) ? date.getTime() : date;
 
-	if (typeof time !== 'number') throw new TypeError(`formatDateTime: date must be a Date or a number, received ${typeName(date)}`);
-	if (Number.isNaN(new Date(time).getTime())) throw new RangeError('formatDateTime: Invalid date');
+	if (typeof time !== 'number') throw new TypeError(`formatDateTime: \`date\` must be a Date or a number, got ${typeName(date)}`);
+	if (Number.isNaN(new Date(time).getTime())) throw new RangeError('formatDateTime: `date` must be a valid date, got Invalid Date');
 
 	const { locale, timeZone = 'UTC', ...rest } = options;
 
@@ -510,7 +510,7 @@ export function formatRelativeTime(value: number, unit: Intl.RelativeTimeFormatU
  */
 export function formatOrdinal(n: number, options: FormatOrdinalOptions = {}): string {
 	assertFiniteNumber('formatOrdinal', n);
-	if (!Number.isInteger(n)) throw new RangeError(`formatOrdinal: n must be an integer, received ${n}`);
+	if (!Number.isInteger(n)) throw new RangeError(`formatOrdinal: \`n\` must be an integer, got ${n}`);
 
 	const { locale, suffixes } = options;
 	const value = n === 0 ? 0 : n;

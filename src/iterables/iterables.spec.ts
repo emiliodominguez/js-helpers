@@ -67,10 +67,16 @@ describe('iterables', function () {
 		it('throws a RangeError for non-finite arguments', function () {
 			expect(function () {
 				helpers.count(NaN);
-			}).toThrow(new RangeError('count: arguments must be finite numbers, got (NaN, 1)'));
+			}).toThrow(new RangeError('count: `start` must be a finite number, got NaN'));
 			expect(function () {
 				helpers.count(0, Infinity);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('count: `step` must be a finite number, got Infinity'));
+			expect(function () {
+				helpers.count('0' as any);
+			}).toThrow(new TypeError('count: `start` must be a finite number, got string'));
+			expect(function () {
+				helpers.take([], '1' as any);
+			}).toThrow(new TypeError('take: `n` must be an integer >= 0 or Infinity, got string'));
 		});
 	});
 

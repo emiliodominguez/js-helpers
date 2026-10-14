@@ -197,7 +197,7 @@ function hasTld(hostname: string): boolean {
  */
 export function isUrl(value: unknown, options: IsUrlOptions = {}): value is string {
 	const { protocols = ['http', 'https'], requireTld = false } = options;
-	if (!Array.isArray(protocols)) throw new TypeError('isUrl: `protocols` must be an array of strings');
+	if (!Array.isArray(protocols)) throw new TypeError(`isUrl: \`protocols\` must be an array of strings, got ${typeof protocols}`);
 	if (typeof value !== 'string' || URL_FORBIDDEN_CHARACTER.test(value)) return false;
 
 	const UrlParser = getUrlConstructor();

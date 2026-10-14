@@ -356,7 +356,7 @@ describe('createEmitter', function () {
 			}).toThrow(TypeError);
 			expect(function () {
 				(events.emit as any)('*');
-			}).toThrow(/reserved/);
+			}).toThrow(new RangeError("emit: `event` must not be '*' (reserved for wildcard listeners), got '*'"));
 		});
 	});
 
@@ -658,11 +658,14 @@ describe('createEmitter', function () {
 		it('rejects invalid arguments', async function () {
 			const events = createEmitter<TestEvents>();
 
-			for (const timeout of [-1, NaN, 2 ** 31, '5' as any]) {
+			for (const timeout of [-1, NaN, 2 ** 31]) {
 				await expect(events.waitFor('count', { timeout })).rejects.toThrow(RangeError);
 			}
-			await expect(events.waitFor('count', { filter: 'x' as any })).rejects.toThrow(TypeError);
-			await expect((events.waitFor as any)('*')).rejects.toThrow(TypeError);
+			await expect(events.waitFor('count', { timeout: '5' as any })).rejects.toThrow(
+				new TypeError('waitFor: `timeout` must be Infinity or a number between 0 and 2147483647, got string')
+			);
+			await expect(events.waitFor('count', { filter: 'x' as any })).rejects.toThrow(new TypeError('waitFor: `filter` must be a function, got string'));
+			await expect((events.waitFor as any)('*')).rejects.toThrow(RangeError);
 			expect(events.listenerCount()).toBe(0);
 		});
 	});

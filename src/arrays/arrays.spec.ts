@@ -618,10 +618,10 @@ describe('Arrays helpers', function () {
 			expect(selector).toHaveBeenCalledTimes(5);
 		});
 
-		it('should throw a TypeError for an invalid order', function () {
+		it('should throw a RangeError for an invalid order', function () {
 			expect(function () {
 				helpers.sortBy([1], Number, 'DESC' as any);
-			}).toThrow(TypeError);
+			}).toThrow(RangeError);
 		});
 	});
 
@@ -930,7 +930,7 @@ describe('Arrays helpers', function () {
 		it('move throws for any index of an empty array', function () {
 			expect(function () {
 				helpers.move([], 0, 0);
-			}).toThrow(/out of range/);
+			}).toThrow('move: `from` must be a valid index, but the array is empty, got 0');
 		});
 
 		it('insertAt inserts items before the index (negative indices count from the end)', function () {
@@ -1091,6 +1091,137 @@ describe('Arrays helpers', function () {
 			expect(helpers.differenceBy<{ id: number }, number>(users, once(2), key)).toEqual([{ id: 1 }]);
 			expect(helpers.intersectionBy<{ id: number }, number>(once(...users), [2], key)).toEqual([{ id: 2 }]);
 			expect(helpers.intersectionBy([NaN], [NaN], Number)).toEqual([NaN]);
+		});
+	});
+
+	describe('argument validation', function () {
+		it('rejects non-function callbacks with a TypeError, even for empty input', function () {
+			const callbacks: Array<[string, () => unknown]> = [
+				[
+					'groupBy: `keyFn`',
+					function () {
+						return helpers.groupBy([], undefined as any);
+					}
+				],
+				[
+					'keyBy: `keyFn`',
+					function () {
+						return helpers.keyBy([], undefined as any);
+					}
+				],
+				[
+					'countBy: `keyFn`',
+					function () {
+						return helpers.countBy([], undefined as any);
+					}
+				],
+				[
+					'partition: `predicate`',
+					function () {
+						return helpers.partition([], undefined as any);
+					}
+				],
+				[
+					'uniqueBy: `keyFn`',
+					function () {
+						return helpers.uniqueBy([], undefined as any);
+					}
+				],
+				[
+					'sortBy: `selector`',
+					function () {
+						return helpers.sortBy([], undefined as any);
+					}
+				],
+				[
+					'minBy: `selector`',
+					function () {
+						return helpers.minBy([], undefined as any);
+					}
+				],
+				[
+					'maxBy: `selector`',
+					function () {
+						return helpers.maxBy([], undefined as any);
+					}
+				],
+				[
+					'sumBy: `selector`',
+					function () {
+						return helpers.sumBy([], undefined as any);
+					}
+				],
+				[
+					'differenceBy: `keyFn`',
+					function () {
+						return helpers.differenceBy([], [], undefined as any);
+					}
+				],
+				[
+					'intersectionBy: `keyFn`',
+					function () {
+						return helpers.intersectionBy([], [], undefined as any);
+					}
+				],
+				[
+					'sortedIndex: `compare`',
+					function () {
+						return helpers.sortedIndex([], 1, 'x' as any);
+					}
+				],
+				[
+					'binarySearch: `compare`',
+					function () {
+						return helpers.binarySearch([], 1, null as any);
+					}
+				],
+				[
+					'shuffle: `random`',
+					function () {
+						return helpers.shuffle([1, 2], 0.5 as any);
+					}
+				],
+				[
+					'sample: `random`',
+					function () {
+						return helpers.sample([1], 0.5 as any);
+					}
+				]
+			];
+			for (const [prefix, call] of callbacks) {
+				expect(call).toThrow(TypeError);
+				expect(call).toThrow(`${prefix} must be a function`);
+			}
+		});
+
+		it('rejects non-number counts with a TypeError and invalid numbers with a RangeError', function () {
+			expect(function () {
+				helpers.chunk([1], '2' as any);
+			}).toThrow(new TypeError('chunk: `size` must be an integer >= 1, got string'));
+			expect(function () {
+				helpers.chunk([1], 0);
+			}).toThrow(new RangeError('chunk: `size` must be an integer >= 1, got 0'));
+			expect(function () {
+				helpers.insertAt([1], null as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.insertAt([1], 5);
+			}).toThrow(new RangeError('insertAt: `index` must be an integer in [-1, 1], got 5'));
+		});
+
+		it('validates every argument of range by name', function () {
+			expect(function () {
+				helpers.range(NaN);
+			}).toThrow(new RangeError('range: `start` must be a finite number, got NaN'));
+			expect(function () {
+				helpers.range(0, Infinity);
+			}).toThrow(new RangeError('range: `end` must be a finite number, got Infinity'));
+			expect(function () {
+				helpers.range(0, null as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.range(0, 5, 0);
+			}).toThrow(new RangeError('range: `step` must be a finite number other than 0, got 0'));
 		});
 	});
 });

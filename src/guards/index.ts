@@ -1,3 +1,4 @@
+import { assertFunction, describe as typeName } from '../utils/assert.js';
 import type { AnyFunction, Primitive } from '../utils/index.js';
 
 /**
@@ -483,17 +484,6 @@ function checkArrayBuffer(target: object): void {
 }
 
 /**
- * Asserts that a value is a function, for the guard factories.
- * @param {unknown} value - The value to check
- * @param {string} name - The parameter name, used in the error message
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertFunction(value: unknown, name: string): void {
-	if (typeof value !== 'function') throw new TypeError(`${name} must be a function`);
-}
-
-/**
  * Builds a short, never-throwing description of an arbitrary value for error messages.
  * @param {unknown} value - The value to describe
  * @returns {string} The description
@@ -584,7 +574,7 @@ export function isNonEmptyArray(value: unknown): value is [unknown, ...unknown[]
  * isKeyOf(colors, 42); // => false
  */
 export function isKeyOf<T extends object>(object: T, key: unknown): key is keyof T {
-	if (object === null || object === undefined) throw new TypeError('object must not be null or undefined');
+	if (object === null || object === undefined) throw new TypeError(`isKeyOf: \`object\` must not be null or undefined, got ${object}`);
 	if (typeof key !== 'string' && typeof key !== 'number' && typeof key !== 'symbol') return false;
 
 	return Object.prototype.hasOwnProperty.call(object, key);
@@ -604,7 +594,7 @@ export function isKeyOf<T extends object>(object: T, key: unknown): key is keyof
  * isDirection('left'); // => false
  */
 export function isOneOf<const T extends ReadonlyArray<unknown>>(values: T): (value: unknown) => value is T[number] {
-	if (!Array.isArray(values)) throw new TypeError('values must be an array');
+	if (!Array.isArray(values)) throw new TypeError(`isOneOf: \`values\` must be an array, got ${typeName(values)}`);
 
 	const allowed = new Set<unknown>(values);
 
@@ -627,8 +617,8 @@ export function isOneOf<const T extends ReadonlyArray<unknown>>(values: T): (val
  * isUser({}); // => false
  */
 export function isInstanceOf<T>(constructor: abstract new (...args: never[]) => T): (value: unknown) => value is T {
-	assertFunction(constructor, 'constructor');
-	if (!isInstanceofTarget(constructor)) throw new TypeError('constructor is not a valid instanceof target');
+	assertFunction('isInstanceOf', 'constructor', constructor);
+	if (!isInstanceofTarget(constructor)) throw new TypeError('isInstanceOf: `constructor` must be a valid instanceof target, got a function without a prototype');
 
 	return function isInstance(value: unknown): value is T {
 		return value instanceof constructor;
@@ -664,7 +654,7 @@ function isInstanceofTarget(candidate: unknown): boolean {
  * isStringArray([]); // => true
  */
 export function isArrayOf<T>(guard: Guard<T>): (value: unknown) => value is T[] {
-	assertFunction(guard, 'guard');
+	assertFunction('isArrayOf', 'guard', guard);
 
 	return function isArrayOfGuarded(value: unknown): value is T[] {
 		if (!Array.isArray(value)) return false;
@@ -692,7 +682,7 @@ export function isArrayOf<T>(guard: Guard<T>): (value: unknown) => value is T[] 
  * isScores(new Map()); // => false // not a plain object
  */
 export function isRecordOf<T>(guard: Guard<T>): (value: unknown) => value is Record<PropertyKey, T> {
-	assertFunction(guard, 'guard');
+	assertFunction('isRecordOf', 'guard', guard);
 
 	return function isRecordOfGuarded(value: unknown): value is Record<PropertyKey, T> {
 		if (!isPlainObject(value)) return false;

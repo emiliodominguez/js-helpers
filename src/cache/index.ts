@@ -1,4 +1,4 @@
-import { isFunction } from '../guards/index.js';
+import { assertFunction, assertInteger, assertNumber, describe } from '../utils/assert.js';
 
 /**
  * Why an entry left an {@link LRUCache}, as reported to `onEvict`:
@@ -86,15 +86,15 @@ interface Entry<V> {
 }
 
 /**
- * Throws a `RangeError` unless `ttl` is `undefined` or a number `> 0` (`Infinity` included).
- * @param {number | undefined} ttl - The TTL to validate
+ * Throws unless `ttl` is a number `> 0` (`Infinity` included).
+ * @param {string} caller - Name of the function, used in the error message
+ * @param {number} ttl - The TTL to validate
  * @returns {void}
+ * @throws {TypeError} when `ttl` is not a number
  * @throws {RangeError} when `ttl` is not a positive number
  */
-function assertTTL(ttl: number | undefined): void {
-	if (ttl !== undefined && !(typeof ttl === 'number' && ttl > 0)) {
-		throw new RangeError(`createLRUCache: ttl must be a positive number of milliseconds (or Infinity), got ${String(ttl)}`);
-	}
+function assertTTL(caller: string, ttl: number): void {
+	assertNumber(caller, 'ttl', ttl, ttl > 0, 'a number > 0 or Infinity');
 }
 
 /**
@@ -118,7 +118,7 @@ function assertTTL(ttl: number | undefined): void {
  * @template V - The value type (defaults to `unknown`)
  * @param {LRUCacheOptions<K, V>} options - `max` (required), and optional `ttl`, `now`, `onEvict`, `updateAgeOnGet`
  * @returns {LRUCache<K, V>} A new, empty cache
- * @throws {TypeError} when `options` is not an object, or `now`/`onEvict` is provided but not a function
+ * @throws {TypeError} when `options` is not an object, `now`/`onEvict` is provided but not a function, or `max`/`ttl` is not a number
  * @throws {RangeError} when `max` is not an integer `>= 1` (or `Infinity`), or `ttl` (here or in `set`) is not a number `> 0`
  * @throws {AggregateError} from `clear`/`prune` when several `onEvict` calls threw
  * @example
@@ -145,16 +145,14 @@ function assertTTL(ttl: number | undefined): void {
  * square(4); // => 16
  */
 export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOptions<K, V>): LRUCache<K, V> {
-	if (typeof options !== 'object' || options === null) throw new TypeError('createLRUCache: options must be an object');
+	if (typeof options !== 'object' || options === null) throw new TypeError(`createLRUCache: \`options\` must be an object, got ${describe(options)}`);
 
 	const { max, ttl: defaultTTL = Infinity, now = Date.now, onEvict, updateAgeOnGet = false } = options;
 
-	if (!(max === Infinity || (Number.isInteger(max) && max >= 1))) {
-		throw new RangeError(`createLRUCache: max must be an integer >= 1 (or Infinity), got ${String(max)}`);
-	}
-	assertTTL(defaultTTL);
-	if (!isFunction(now)) throw new TypeError('createLRUCache: now must be a function');
-	if (onEvict !== undefined && !isFunction(onEvict)) throw new TypeError('createLRUCache: onEvict must be a function');
+	assertInteger('createLRUCache', 'max', max, 1, true);
+	assertTTL('createLRUCache', defaultTTL);
+	assertFunction('createLRUCache', 'now', now);
+	if (onEvict !== undefined) assertFunction('createLRUCache', 'onEvict', onEvict);
 
 	// Oldest (least-recently used) first; bumping is delete + re-set.
 	const store = new Map<K, Entry<V>>();
@@ -248,7 +246,7 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		},
 		set(key: K, value: V, setOptions?: LRUCacheSetOptions): LRUCache<K, V> {
 			const ttl = setOptions?.ttl ?? defaultTTL;
-			assertTTL(ttl);
+			assertTTL('LRUCache.set', ttl);
 
 			const time = now();
 			const previous = store.get(key);

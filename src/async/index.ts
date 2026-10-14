@@ -1,12 +1,8 @@
 import { debounce, type Result } from '../functions/index.js';
+import { assertDelay, assertFunction, assertInteger, assertNumber, MAX_TIMEOUT } from '../utils/assert.js';
 import type { AbortSignalLike, RandomGenerator } from '../utils/index.js';
 
 export type { Result } from '../functions/index.js';
-
-/**
- * Largest delay accepted by `setTimeout` (2^31 - 1 ms, about 24.8 days); larger values fire immediately on most hosts.
- */
-const MAX_TIMEOUT = 2 ** 31 - 1;
 
 /**
  * Error used to reject operations cancelled through an abort signal that carries no `reason`.
@@ -100,20 +96,6 @@ function abortReason(signal: AbortSignalLike): unknown {
 }
 
 /**
- * Throws a `RangeError` unless `value` is a finite number in `[0, MAX_TIMEOUT]`.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {number} value - The value to validate
- * @returns {void}
- * @throws {RangeError} when `value` is not a usable timer delay
- */
-function assertDelay(caller: string, name: string, value: number): void {
-	if (typeof value !== 'number' || !(value >= 0 && value <= MAX_TIMEOUT)) {
-		throw new RangeError(`${caller}: \`${name}\` must be a number between 0 and ${MAX_TIMEOUT}, got ${String(value)}`);
-	}
-}
-
-/**
  * Creates a promise that can be resolved or rejected from the outside.
  * @template T - The resolved value type
  * @returns {Deferred<T>} The promise and its `resolve`/`reject` functions
@@ -139,6 +121,7 @@ export function createDeferred<T>(): Deferred<T> {
  * @param {number} ms - Delay in milliseconds (`0` to `2^31 - 1`)
  * @param {SleepOptions} [options] - Optional abort `signal`
  * @returns {Promise<void>} A promise resolving after the delay
+ * @throws {TypeError} (as a rejection) when `ms` is not a number
  * @throws {RangeError} (as a rejection) when `ms` is negative, `NaN` or larger than `2^31 - 1`
  * @example
  * await sleep(10); // resolves after ~10 ms
@@ -185,6 +168,7 @@ export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
  * @param {string} [message] - Message of the `TimeoutError` (defaults to `Operation timed out after <ms> ms`)
  * @returns {Promise<T>} A promise settling like `promise`, or rejecting on timeout
  * @throws {TimeoutError} (as a rejection) when `promise` does not settle within `ms` milliseconds
+ * @throws {TypeError} (as a rejection) when `ms` is not a number
  * @throws {RangeError} (as a rejection) when `ms` is negative, `NaN` or larger than `2^31 - 1`
  * @example
  * await withTimeout(Promise.resolve('data'), 5000); // => 'data'
@@ -220,6 +204,7 @@ export function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, message?
  * @param {RetryOptions} [options] - `retries` (3), `delay` (0), `factor` (2), `maxDelay` (Infinity), `jitter` (false), `shouldRetry`, `onRetry`, `signal`
  * @param {RandomGenerator} [random=Math.random] - Random source used for jitter
  * @returns {Promise<T>} The first successful result
+ * @throws {TypeError} (as a rejection) when `fn`, `shouldRetry` or `onRetry` is not a function, or a numeric option is not a number
  * @throws {RangeError} (as a rejection) when `retries` is not a non-negative integer or `Infinity`, `delay` is not a finite number >= 0,
  * `factor` is not a finite number > 0, or `maxDelay` is negative or `NaN`
  * @throws {unknown} (as a rejection) the last error of `fn`, or the abort reason of `signal`
@@ -232,13 +217,13 @@ export function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, message?
 export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options: RetryOptions = {}, random: RandomGenerator = Math.random): Promise<T> {
 	const { retries = 3, delay = 0, factor = 2, maxDelay = Infinity, jitter = false, shouldRetry, onRetry, signal } = options;
 
-	if (typeof fn !== 'function') throw new TypeError('retry: expected a function');
-	if (!(retries === Infinity || (Number.isInteger(retries) && retries >= 0))) {
-		throw new RangeError(`retry: \`retries\` must be a non-negative integer or Infinity, got ${String(retries)}`);
-	}
-	if (!(Number.isFinite(delay) && delay >= 0)) throw new RangeError(`retry: \`delay\` must be a finite number >= 0, got ${String(delay)}`);
-	if (!(Number.isFinite(factor) && factor > 0)) throw new RangeError(`retry: \`factor\` must be a finite number > 0, got ${String(factor)}`);
-	if (!(maxDelay >= 0)) throw new RangeError(`retry: \`maxDelay\` must be a number >= 0, got ${String(maxDelay)}`);
+	assertFunction('retry', 'fn', fn);
+	assertInteger('retry', 'retries', retries, 0, true);
+	assertNumber('retry', 'delay', delay, delay >= 0 && delay < Infinity, 'a finite number >= 0');
+	assertNumber('retry', 'factor', factor, factor > 0 && factor < Infinity, 'a finite number > 0');
+	assertNumber('retry', 'maxDelay', maxDelay, maxDelay >= 0, 'a number >= 0');
+	if (shouldRetry !== undefined) assertFunction('retry', 'shouldRetry', shouldRetry);
+	if (onRetry !== undefined) assertFunction('retry', 'onRetry', onRetry);
 
 	for (let attempt = 1; ; attempt++) {
 		if (signal?.aborted) throw abortReason(signal);
@@ -270,6 +255,7 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
  * @param {(item: T, index: number) => Promise<R> | R} mapper - The (possibly async) mapping function
  * @param {number} [concurrency=Infinity] - Maximum number of mappers in flight (an integer >= 1, or `Infinity`)
  * @returns {Promise<R[]>} The mapped values, in input order
+ * @throws {TypeError} (as a rejection) when `mapper` is not a function, or `concurrency` is not a number
  * @throws {RangeError} (as a rejection) when `concurrency` is not an integer >= 1 or `Infinity`
  * @throws {unknown} (as a rejection) the first error thrown or rejected by `mapper`
  * @example
@@ -277,10 +263,8 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
  * await mapWithConcurrency(['a', 'bb', 'ccc'], size, 2); // => [1, 2, 3] // in input order, at most 2 running at once
  */
 export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item: T, index: number) => Promise<R> | R, concurrency = Infinity): Promise<R[]> {
-	if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency >= 1))) {
-		throw new RangeError(`mapWithConcurrency: \`concurrency\` must be an integer >= 1 or Infinity, got ${String(concurrency)}`);
-	}
-	if (typeof mapper !== 'function') throw new TypeError('mapWithConcurrency: expected `mapper` to be a function');
+	assertInteger('mapWithConcurrency', 'concurrency', concurrency, 1, true);
+	assertFunction('mapWithConcurrency', 'mapper', mapper);
 
 	const list = Array.from(items);
 	const results = new Array<R>(list.length);
@@ -316,18 +300,6 @@ export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item
 // ---------------------------------------------------------------------------------------------------------------------
 // attemptAsync / createLimiter / pollUntil / promiseAllObject / debounceAsync / sequence
 // ---------------------------------------------------------------------------------------------------------------------
-
-/**
- * Throws a `TypeError` unless `value` is callable.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {unknown} value - The value to validate
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertFunction(caller: string, name: string, value: unknown): asserts value is (...args: never[]) => unknown {
-	if (typeof value !== 'function') throw new TypeError(`${caller}: expected \`${name}\` to be a function, got ${typeof value}`);
-}
 
 /**
  * Awaits a promise (or calls a possibly async function and awaits its result) and captures the outcome as a {@link Result} tuple.
@@ -366,6 +338,7 @@ export interface Limiter {
 	/**
 	 * Runs `fn(...args)` as soon as fewer than `concurrency` tasks are active (immediately and synchronously when a slot is free),
 	 * and settles like its result. Synchronous throws become rejections.
+	 * @throws {TypeError} (as a rejection) when `fn` is not a function
 	 */
 	<A extends unknown[], T>(fn: (...args: A) => PromiseLike<T> | T, ...args: A): Promise<T>;
 	/** Number of tasks currently running. */
@@ -389,6 +362,7 @@ interface LimiterTask {
  * @param {number} concurrency - Maximum number of tasks running at once (an integer >= 1, or `Infinity`)
  * @param {LimiterOptions} [options] - `rejectOnClear` (default `false`)
  * @returns {Limiter} The `limit(fn, ...args)` function, with `activeCount`, `pendingCount` and `clearQueue()`
+ * @throws {TypeError} when `concurrency` is not a number
  * @throws {RangeError} when `concurrency` is not an integer >= 1 or `Infinity`
  * @example
  * const limit = createLimiter(2);
@@ -399,9 +373,7 @@ interface LimiterTask {
  * await results; // => [2, 4, 6]
  */
 export function createLimiter(concurrency: number, options: LimiterOptions = {}): Limiter {
-	if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency >= 1))) {
-		throw new RangeError(`createLimiter: \`concurrency\` must be an integer >= 1 or Infinity, got ${String(concurrency)}`);
-	}
+	assertInteger('createLimiter', 'concurrency', concurrency, 1, true);
 
 	const rejectOnClear = options.rejectOnClear ?? false;
 	let queue: LimiterTask[] = [];
@@ -530,7 +502,7 @@ export interface PollOptions {
  * @returns {Promise<Truthy<Awaited<T>>>} The first truthy value
  * @throws {TimeoutError} (as a rejection) when no truthy value was produced within `timeout` ms
  * @throws {RangeError} (as a rejection) when `interval` is not a number between `0` and `2^31 - 1`, or `timeout` is neither such a number nor `Infinity`
- * @throws {TypeError} (as a rejection) when `check` is not a function
+ * @throws {TypeError} (as a rejection) when `check` is not a function, or `interval` or `timeout` is not a number
  * @throws {unknown} (as a rejection) the error thrown or rejected by `check`, or the abort reason of `signal`
  * @example
  * let status = 'loading';
@@ -544,7 +516,7 @@ export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptio
 
 		assertFunction('pollUntil', 'check', check);
 		assertDelay('pollUntil', 'interval', interval);
-		if (timeout !== Infinity) assertDelay('pollUntil', 'timeout', timeout);
+		assertDelay('pollUntil', 'timeout', timeout, true);
 
 		if (signal?.aborted) {
 			reject(abortReason(signal));
@@ -716,7 +688,7 @@ export interface DebouncedAsync<F extends (...args: never[]) => unknown> {
  * @param {F} fn - The function to debounce
  * @param {number} wait - The quiet period in milliseconds (`0` to `2^31 - 1`)
  * @returns {DebouncedAsync<F>} The debounced function, with `.cancel()` and `.flush()`
- * @throws {TypeError} when `fn` is not a function
+ * @throws {TypeError} when `fn` is not a function, or `wait` is not a number
  * @throws {RangeError} when `wait` is negative, `NaN` or larger than `2^31 - 1`
  * @example
  * const queries: string[] = [];
@@ -799,13 +771,9 @@ export function debounceAsync<F extends (...args: never[]) => unknown>(fn: F, wa
  */
 export async function sequence<T>(tasks: Iterable<() => PromiseLike<T> | T>): Promise<T[]> {
 	const results: T[] = [];
-	let index = 0;
-
 	for (const task of tasks) {
-		if (typeof task !== 'function') throw new TypeError(`sequence: task at index ${index} is not a function`);
-
+		assertFunction('sequence', `tasks[${results.length}]`, task);
 		results.push(await task());
-		index++;
 	}
 
 	return results;

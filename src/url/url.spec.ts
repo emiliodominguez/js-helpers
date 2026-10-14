@@ -244,4 +244,21 @@ describe('URL helpers', function () {
 			expect(helpers.isAbsoluteUrl('')).toBe(false);
 		});
 	});
+
+	describe('argument validation', function () {
+		it('uses the library-wide message format', function () {
+			expect(function () {
+				helpers.buildQueryString({ a: {} as any });
+			}).toThrow(new TypeError('buildQueryString: `params.a` must be a string, number, boolean, bigint or Date, got object'));
+			expect(function () {
+				helpers.buildQueryString({ when: new Date(NaN) });
+			}).toThrow(new RangeError('buildQueryString: `params.when` must be a valid Date, got Invalid Date'));
+			expect(function () {
+				helpers.buildQueryString({}, { arrayFormat: 'x' as any });
+			}).toThrow(new RangeError("buildQueryString: `arrayFormat` must be 'repeat', 'comma' or 'brackets', got x"));
+			expect(function () {
+				helpers.joinUrl('a', null as any);
+			}).toThrow(new TypeError('joinUrl: `parts` must only contain strings, got null'));
+		});
+	});
 });

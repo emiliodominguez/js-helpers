@@ -1,3 +1,4 @@
+import { assertFunction, assertInteger, assertNumber, MAX_TIMEOUT } from '../utils/assert.js';
 import type { AnyFunction } from '../utils/index.js';
 
 /**
@@ -11,13 +12,7 @@ type UnknownFunction = (this: unknown, ...args: unknown[]) => unknown;
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 /**
- * Largest delay accepted by `setTimeout` (2^31 - 1 ms, about 24.8 days). Hosts fire larger delays after ~1 ms, so longer waits are
- * split into several timers.
- */
-const MAX_TIMEOUT = 2 ** 31 - 1;
-
-/**
- * Starts a timer, clamping `delay` to {@link MAX_TIMEOUT}. Callers must re-check the elapsed time when it fires.
+ * Starts a timer, clamping `delay` to `MAX_TIMEOUT` (hosts fire larger delays after ~1 ms). Callers must re-check the elapsed time when it fires.
  * @param {() => void} callback - The timer callback
  * @param {number} delay - The requested delay in milliseconds
  * @returns {TimerHandle} The timer handle
@@ -33,44 +28,29 @@ function startTimer(callback: () => void, delay: number): TimerHandle {
 const SPECIAL_KEY_TOKEN = /^\\*(?:-?\d+n|NaN|-?Infinity|-0|undefined)$/;
 
 /**
- * Throws a `RangeError` unless `value` is a finite number `>= 0`.
+ * Throws unless `value` is a finite number `>= 0` (a wait time in milliseconds; longer waits than `setTimeout` allows are split).
  * @param {string} caller - Name of the public function, used in the error message
  * @param {string} name - Name of the validated parameter
  * @param {number} value - The value to validate
  * @returns {void}
+ * @throws {TypeError} when `value` is not a number
  * @throws {RangeError} when `value` is `NaN`, infinite or negative
  */
 function assertWait(caller: string, name: string, value: number): void {
-	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-		throw new RangeError(`${caller}: \`${name}\` must be a finite number >= 0, got ${String(value)}`);
-	}
+	assertNumber(caller, name, value, value >= 0 && value < Infinity, 'a finite number >= 0');
 }
 
 /**
- * Throws a `RangeError` unless `value` is an integer `>= 0`.
+ * Throws a `TypeError` unless every element of `fns` is a function.
  * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {number} value - The value to validate
+ * @param {ReadonlyArray<unknown>} fns - The values to validate
  * @returns {void}
- * @throws {RangeError} when `value` is not a non-negative integer
+ * @throws {TypeError} when an element is not a function
  */
-function assertCount(caller: string, name: string, value: number): void {
-	if (!Number.isInteger(value) || value < 0) {
-		throw new RangeError(`${caller}: \`${name}\` must be an integer >= 0, got ${String(value)}`);
-	}
-}
-
-/**
- * Throws a `TypeError` unless `value` is callable.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {unknown} value - The value to validate
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertFunction(caller: string, value: unknown): asserts value is AnyFunction {
-	if (typeof value !== 'function') {
-		throw new TypeError(`${caller}: expected a function, got ${typeof value}`);
-	}
+function assertFunctions(caller: string, fns: ReadonlyArray<unknown>): void {
+	fns.forEach(function (fn, index) {
+		assertFunction(caller, `fns[${index}]`, fn);
+	});
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -92,7 +72,7 @@ function assertFunction(caller: string, value: unknown): asserts value is AnyFun
  * bind(greet, user)('Hi'); // => 'Hi, Ada'
  */
 export function bind<T, A extends unknown[], R>(fn: (this: T, ...args: A) => R, thisArg: T): (...args: A) => R {
-	assertFunction('bind', fn);
+	assertFunction('bind', 'fn', fn);
 
 	return function bound(...args: A): R {
 		return fn.apply(thisArg, args);
@@ -113,7 +93,7 @@ export function bind<T, A extends unknown[], R>(fn: (this: T, ...args: A) => R, 
  * partial(add, 1)(2); // => 3
  */
 export function partial<A extends unknown[], B extends unknown[], R>(fn: (...args: [...A, ...B]) => R, ...args: A): (...rest: B) => R {
-	assertFunction('partial', fn);
+	assertFunction('partial', 'fn', fn);
 
 	return function partiallyApplied(this: unknown, ...rest: B): R {
 		return (fn as unknown as (this: unknown, ...all: unknown[]) => R).apply(this, [...args, ...rest]);
@@ -167,7 +147,7 @@ export type Curried<A extends unknown[], R> = number extends A['length']
  * @param {(...args: A) => R} fn - The function to curry
  * @param {number} [arity=fn.length] - Number of arguments to collect before invoking `fn`
  * @returns {Curried<A, R>} The curried function
- * @throws {TypeError} when `fn` is not a function
+ * @throws {TypeError} when `fn` is not a function, or `arity` is not a number
  * @throws {RangeError} when `arity` is negative or not an integer
  * @example
  * const add3 = curry(function (a: number, b: number, c: number): number { return a + b + c; });
@@ -177,8 +157,8 @@ export type Curried<A extends unknown[], R> = number extends A['length']
  * curry<[number, number], number>(sum, 2)(1)(2); // => 3
  */
 export function curry<A extends unknown[], R>(fn: (...args: A) => R, arity: number = fn.length): Curried<A, R> {
-	assertFunction('curry', fn);
-	assertCount('curry', 'arity', arity);
+	assertFunction('curry', 'fn', fn);
+	assertInteger('curry', 'arity', arity);
 
 	const call = fn as unknown as UnknownFunction;
 
@@ -244,6 +224,7 @@ export function compose<R = unknown>(...fns: AnyFunction[]): (...args: unknown[]
  * @returns {(...args: unknown[]) => unknown} The composed function
  */
 export function compose(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
+	assertFunctions('compose', fns);
 	return pipe(...fns.slice().reverse());
 }
 
@@ -289,9 +270,7 @@ export function pipe<R = unknown>(...fns: AnyFunction[]): (...args: unknown[]) =
  * @throws {TypeError} when one of `fns` is not a function
  */
 export function pipe(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
-	fns.forEach(function (fn) {
-		assertFunction('compose/pipe', fn);
-	});
+	assertFunctions('pipe', fns);
 
 	const chain = fns.slice() as unknown as UnknownFunction[];
 
@@ -417,10 +396,10 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, u
 	fn: F,
 	options: MemoizeOptions<F, C> = {}
 ): Memoized<F, C> {
-	assertFunction('memoize', fn);
+	assertFunction('memoize', 'fn', fn);
 
 	const resolver = (options.resolver ?? defaultMemoizeKey) as UnknownFunction;
-	assertFunction('memoize', resolver);
+	assertFunction('memoize', 'options.resolver', resolver);
 
 	// Only `memoize` writes to the cache, so every stored value is a `ReturnType<F>` whatever the cache's declared value type.
 	const cache = (options.cache ?? new Map<unknown, ReturnType<F>>()) as MemoizeCache<unknown, ReturnType<F>>;
@@ -489,8 +468,8 @@ export interface Throttled<F extends AnyFunction> {
  * @param {number} wait - The window length in milliseconds
  * @param {ThrottleOptions} [options] - `leading` (default `true`) and `trailing` (default `false`)
  * @returns {Throttled<F>} The throttled function, with a `.cancel()` method
- * @throws {TypeError} when `fn` is not a function, or when both `leading` and `trailing` are `false`
- * @throws {RangeError} when `wait` is negative, `NaN` or infinite
+ * @throws {TypeError} when `fn` is not a function, or `wait` is not a number
+ * @throws {RangeError} when `wait` is negative, `NaN` or infinite, or when both `leading` and `trailing` are `false`
  * @example
  * import { sleep } from '@emiliodominguez/js-helpers/async';
  * const positions: number[] = [];
@@ -504,13 +483,13 @@ export interface Throttled<F extends AnyFunction> {
  * // In a browser: window.addEventListener('scroll', function () { onScroll(window.scrollY); });
  */
 export function throttle<F extends AnyFunction>(fn: F, wait: number, options: ThrottleOptions = {}): Throttled<F> {
-	assertFunction('throttle', fn);
+	assertFunction('throttle', 'fn', fn);
 	assertWait('throttle', 'wait', wait);
 
 	const leading = options.leading ?? true;
 	const trailing = options.trailing ?? false;
 
-	if (!leading && !trailing) throw new TypeError('throttle: at least one of `leading` or `trailing` must be true');
+	if (!leading && !trailing) throw new RangeError('throttle: at least one of `leading` or `trailing` must be true');
 
 	const call = fn as unknown as UnknownFunction;
 	let windowStart: number | undefined;
@@ -644,8 +623,8 @@ export interface Debounced<F extends AnyFunction> {
  * @param {number} wait - The quiet period in milliseconds
  * @param {DebounceOptions} [options] - `leading` (default `false`), `trailing` (default `true`) and `maxWait`
  * @returns {Debounced<F>} The debounced function, with `.cancel()`, `.flush()` and `.pending()` methods
- * @throws {TypeError} when `fn` is not a function, or when both `leading` and `trailing` are `false`
- * @throws {RangeError} when `wait` or `maxWait` is negative, `NaN` or infinite
+ * @throws {TypeError} when `fn` is not a function, or `wait` or `maxWait` is not a number
+ * @throws {RangeError} when `wait` or `maxWait` is negative, `NaN` or infinite, or when both `leading` and `trailing` are `false`
  * @example
  * import { sleep } from '@emiliodominguez/js-helpers/async';
  * const saved: string[] = [];
@@ -661,7 +640,7 @@ export interface Debounced<F extends AnyFunction> {
  * saved; // => ['hey', 'bye']
  */
 export function debounce<F extends AnyFunction>(fn: F, wait: number, options: DebounceOptions = {}): Debounced<F> {
-	assertFunction('debounce', fn);
+	assertFunction('debounce', 'fn', fn);
 	assertWait('debounce', 'wait', wait);
 
 	const leading = options.leading ?? false;
@@ -669,7 +648,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 	const maxing = options.maxWait !== undefined;
 
 	if (maxing) assertWait('debounce', 'maxWait', options.maxWait as number);
-	if (!leading && !trailing) throw new TypeError('debounce: at least one of `leading` or `trailing` must be true');
+	if (!leading && !trailing) throw new RangeError('debounce: at least one of `leading` or `trailing` must be true');
 
 	const maxWait = Math.max(options.maxWait ?? 0, wait);
 	const call = fn as unknown as UnknownFunction;
@@ -837,7 +816,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
  * runs; // => 1
  */
 export function once<F extends AnyFunction>(fn: F): F {
-	assertFunction('once', fn);
+	assertFunction('once', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
 	let state: { status: 'running' } | { status: 'done'; value: unknown } | { status: 'failed'; error: unknown } | undefined;
@@ -866,15 +845,15 @@ export function once<F extends AnyFunction>(fn: F): F {
  * @param {number} n - The number of calls after which `fn` is no longer invoked (`before(3, fn)` invokes `fn` on the first two calls)
  * @param {F} fn - The function to restrict
  * @returns {(this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined} The restricted function
- * @throws {TypeError} when `fn` is not a function
+ * @throws {TypeError} when `fn` is not a function, or `n` is not a number
  * @throws {RangeError} when `n` is not a non-negative integer
  * @example
  * const f = before(3, function (x: number): number { return x * 2; });
  * [f(1), f(2), f(3)]; // => [2, 4, 4]
  */
 export function before<F extends AnyFunction>(n: number, fn: F): (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined {
-	assertCount('before', 'n', n);
-	assertFunction('before', fn);
+	assertInteger('before', 'n', n);
+	assertFunction('before', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
 	let calls = 0;
@@ -896,7 +875,7 @@ export function before<F extends AnyFunction>(n: number, fn: F): (this: ThisPara
  * @param {number} n - The number of calls before `fn` starts being invoked
  * @param {F} fn - The function to restrict
  * @returns {(this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined} The restricted function
- * @throws {TypeError} when `fn` is not a function
+ * @throws {TypeError} when `fn` is not a function, or `n` is not a number
  * @throws {RangeError} when `n` is not a non-negative integer
  * @example
  * const done = after(2, function (): string { return 'all loaded'; });
@@ -904,8 +883,8 @@ export function before<F extends AnyFunction>(n: number, fn: F): (this: ThisPara
  * done(); // => 'all loaded'
  */
 export function after<F extends AnyFunction>(n: number, fn: F): (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined {
-	assertCount('after', 'n', n);
-	assertFunction('after', fn);
+	assertInteger('after', 'n', n);
+	assertFunction('after', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
 	let calls = 0;
@@ -929,7 +908,7 @@ export function after<F extends AnyFunction>(n: number, fn: F): (this: ThisParam
  * [1, 2, 3].filter(isOdd); // => [1, 3]
  */
 export function negate<A extends unknown[], T = unknown>(predicate: (this: T, ...args: A) => unknown): (this: T, ...args: A) => boolean {
-	assertFunction('negate', predicate);
+	assertFunction('negate', 'predicate', predicate);
 
 	return function negated(this: T, ...args: A): boolean {
 		return !predicate.apply(this, args);
@@ -994,7 +973,7 @@ export type Result<T> = [error: unknown, result: undefined] | [error: undefined,
  */
 export function attempt<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Result<R> {
 	try {
-		assertFunction('attempt', fn);
+		assertFunction('attempt', 'fn', fn);
 
 		return [undefined, fn(...args)];
 	} catch (error) {
@@ -1008,16 +987,15 @@ export function attempt<A extends unknown[], R>(fn: (...args: A) => R, ...args: 
  * @param {number} n - Number of calls (an integer between `0` and `2^32 - 1`)
  * @param {(index: number) => R} fn - Called with each index
  * @returns {R[]} The results, in index order
+ * @throws {TypeError} when `fn` is not a function, or `n` is not a number
  * @throws {RangeError} when `n` is not an integer between `0` and `2^32 - 1`
- * @throws {TypeError} when `fn` is not a function
  * @example
  * times(3, function (i) { return i * i; }); // => [0, 1, 4]
  * times(0, Math.random); // => []
  */
 export function times<R>(n: number, fn: (index: number) => R): R[] {
-	assertCount('times', 'n', n);
-	if (n > 2 ** 32 - 1) throw new RangeError(`times: \`n\` must be at most ${2 ** 32 - 1}, got ${n}`);
-	assertFunction('times', fn);
+	assertNumber('times', 'n', n, Number.isInteger(n) && n >= 0 && n <= 2 ** 32 - 1, `an integer between 0 and ${2 ** 32 - 1}`);
+	assertFunction('times', 'fn', fn);
 
 	const result = new Array<R>(n);
 
@@ -1047,7 +1025,7 @@ export type Reverse<T extends unknown[]> = number extends T['length'] ? T : T ex
  * flip(divide)(2, 10); // => 5
  */
 export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: Reverse<A>) => R {
-	assertFunction('flip', fn);
+	assertFunction('flip', 'fn', fn);
 
 	const call = fn as unknown as UnknownFunction;
 
@@ -1068,7 +1046,7 @@ export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: R
  * ['1', '2', '3'].map(unary(parseInt)); // => [1, 2, 3] // instead of [1, NaN, NaN]
  */
 export function unary<T, R>(fn: (arg: T) => R): (arg: T) => R {
-	assertFunction('unary', fn);
+	assertFunction('unary', 'fn', fn);
 
 	return function unaryWrapper(this: unknown, arg: T): R {
 		return (fn as (this: unknown, arg: T) => R).call(this, arg);
@@ -1144,8 +1122,8 @@ export type MemoizedLast<F extends AnyFunction> = F & {
  * area(3, 3); // => 9 // computed, replaces the cache
  */
 export function memoizeLast<F extends AnyFunction>(fn: F, isEqual: (next: Parameters<F>, previous: Parameters<F>) => boolean = shallowEqualArgs): MemoizedLast<F> {
-	assertFunction('memoizeLast', fn);
-	assertFunction('memoizeLast', isEqual);
+	assertFunction('memoizeLast', 'fn', fn);
+	assertFunction('memoizeLast', 'isEqual', isEqual);
 
 	const call = fn as unknown as UnknownFunction;
 	const equal = isEqual as unknown as (next: unknown[], previous: unknown[]) => boolean;

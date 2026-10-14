@@ -1,3 +1,5 @@
+import { describe } from '../utils/assert.js';
+
 /**
  * A single query-string value. Dates are serialized with `toISOString()`, everything else with `String()`.
  */
@@ -73,14 +75,14 @@ function decodeComponent(value: string): string {
  */
 function serializeValue(key: string, value: unknown): string {
 	if (value instanceof Date) {
-		if (Number.isNaN(value.getTime())) throw new RangeError(`buildQueryString: invalid Date for key "${key}"`);
+		if (Number.isNaN(value.getTime())) throw new RangeError(`buildQueryString: \`params.${key}\` must be a valid Date, got Invalid Date`);
 
 		return value.toISOString();
 	}
 
 	if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
 
-	throw new TypeError(`buildQueryString: unsupported value of type ${typeof value} for key "${key}"`);
+	throw new TypeError(`buildQueryString: \`params.${key}\` must be a string, number, boolean, bigint or Date, got ${describe(value)}`);
 }
 
 /**
@@ -115,7 +117,7 @@ function isValueList(value: unknown): value is ReadonlyArray<unknown> {
 export function buildQueryString(params: QueryParams, options: BuildQueryStringOptions = {}): string {
 	const { arrayFormat = 'repeat', skipNull = true, sort = false } = options;
 
-	if (!ARRAY_FORMATS.has(arrayFormat)) throw new RangeError(`buildQueryString: unknown arrayFormat ${JSON.stringify(arrayFormat)}`);
+	if (!ARRAY_FORMATS.has(arrayFormat)) throw new RangeError(`buildQueryString: \`arrayFormat\` must be 'repeat', 'comma' or 'brackets', got ${String(arrayFormat)}`);
 
 	const keys = Object.keys(params);
 
@@ -265,7 +267,7 @@ export function withQuery(url: string, params: QueryParams, options: BuildQueryS
  */
 export function joinUrl(...parts: string[]): string {
 	const nonEmpty = parts.filter(function (part: unknown): boolean {
-		if (typeof part !== 'string') throw new TypeError(`joinUrl: every part must be a string, received ${typeof part}`);
+		if (typeof part !== 'string') throw new TypeError(`joinUrl: \`parts\` must only contain strings, got ${describe(part)}`);
 
 		return part !== '';
 	});

@@ -385,7 +385,7 @@ describe('Date helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.addMilliseconds(0, '1' as any);
-			}).toThrow(RangeError);
+			}).toThrow(new TypeError('addMilliseconds: `amount` must be a finite number, got string'));
 			expect(function () {
 				helpers.addMilliseconds(8.64e15, 1);
 			}).toThrow('Resulting date is out of range');
@@ -637,7 +637,7 @@ describe('Date helpers', function () {
 		it('rejects reversed ranges and unknown inclusivity', function () {
 			expect(function () {
 				helpers.isBetween(b, c, a);
-			}).toThrow('start must not be after end');
+			}).toThrow(new RangeError('isBetween: `start` must not be after `end`'));
 			expect(function () {
 				helpers.isBetween(b, a, c, '[[' as any);
 			}).toThrow(RangeError);
@@ -1047,7 +1047,7 @@ describe('Date helpers', function () {
 		it('validates its arguments', function () {
 			expect(function () {
 				helpers.eachDayOfInterval(new Date(2024, 0, 2), new Date(2024, 0, 1));
-			}).toThrow(new RangeError('start must not be after end'));
+			}).toThrow(new RangeError('eachDayOfInterval: `start` must not be after `end`'));
 			expect(function () {
 				helpers.eachDayOfInterval(new Date(2024, 0, 1, 12), new Date(2024, 0, 1, 11));
 			}).toThrow(RangeError);
@@ -1156,7 +1156,7 @@ describe('Date helpers', function () {
 		it('rejects a birth date after now', function () {
 			expect(function () {
 				helpers.getAge(new Date(2024, 0, 2), new Date(2024, 0, 1, 23));
-			}).toThrow(new RangeError('birthDate must not be after now'));
+			}).toThrow(new RangeError('getAge: `birthDate` must not be after `now`'));
 		});
 	});
 
@@ -1257,7 +1257,7 @@ describe('Date helpers', function () {
 		it('rejects min > max', function () {
 			expect(function () {
 				helpers.clampDate(min, max, min);
-			}).toThrow(new RangeError('min must not be after max'));
+			}).toThrow(new RangeError('clampDate: `min` must not be after `max`'));
 		});
 	});
 
@@ -1326,7 +1326,7 @@ describe('Date helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.formatDuration(1, { units: ['h', 'w' as any] });
-			}).toThrow('Unknown duration unit: w');
+			}).toThrow(new RangeError('formatDuration: `units` must only contain d, h, m, s, ms, got w'));
 			[0, -1, 1.5, NaN].forEach(function (largest) {
 				expect(function () {
 					helpers.formatDuration(1, { largest });
@@ -1375,6 +1375,29 @@ describe('Date helpers', function () {
 			expect(function () {
 				helpers.parseDuration(`1${'0'.repeat(400)}d`);
 			}).toThrow(RangeError);
+		});
+	});
+
+	describe('argument validation', function () {
+		it('names the public function and the parameter in error messages', function () {
+			expect(function () {
+				helpers.endOfWeek(new Date(2024, 0, 1), 7 as any);
+			}).toThrow(new RangeError('endOfWeek: `weekStartsOn` must be an integer between 0 and 6, got 7'));
+			expect(function () {
+				helpers.addDays(new Date(2024, 0, 1), '1' as any);
+			}).toThrow(new TypeError('addDays: `amount` must be an integer, got string'));
+			expect(function () {
+				helpers.daysInMonth(2024, 12);
+			}).toThrow(new RangeError('daysInMonth: `monthIndex` must be an integer between 0 and 11, got 12'));
+			expect(function () {
+				helpers.isLeapYear(2024.5);
+			}).toThrow(new RangeError('isLeapYear: `yearOrDate` must be an integer or a Date, got 2024.5'));
+			expect(function () {
+				helpers.formatDuration(1, { largest: 0 });
+			}).toThrow(new RangeError('formatDuration: `largest` must be an integer >= 1 or Infinity, got 0'));
+			expect(function () {
+				helpers.parseDuration('10');
+			}).toThrow(new TypeError('parseDuration: `value` must be a valid duration, got "10"'));
 		});
 	});
 });

@@ -1,4 +1,5 @@
 import { createEmitter, type Unsubscribe } from '../emitter/index.js';
+import { assertFunction } from '../utils/assert.js';
 
 export type { Unsubscribe } from '../emitter/index.js';
 
@@ -54,18 +55,6 @@ interface Notifier {
 	subscribe(listener: () => void): Unsubscribe;
 	notify(): void;
 	size(): number;
-}
-
-/**
- * Throws a `TypeError` unless `value` is callable.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {unknown} value - The value to validate
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertFunction(caller: string, name: string, value: unknown): void {
-	if (typeof value !== 'function') throw new TypeError(`${caller}: expected \`${name}\` to be a function, got ${typeof value}`);
 }
 
 /**

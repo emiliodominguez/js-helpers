@@ -1,4 +1,5 @@
 import { clamp, lerp, modulo } from '../math/index.js';
+import { assertNumber, describe } from '../utils/assert.js';
 
 /**
  * An sRGB colour with 8-bit channels (`0`–`255`). Values produced by this module are always integers in that range.
@@ -105,11 +106,10 @@ const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; larg
  * @throws {TypeError} when the value is not a number
  * @throws {RangeError} when the value is `NaN`
  * @example
- * readChannel('toRgba', 'r', 12); // => 12
+ * readChannel('toRgba', 'input.r', 12); // => 12
  */
 function readChannel(name: string, channel: string, value: unknown): number {
-	if (typeof value !== 'number') throw new TypeError(`${name}: channel "${channel}" must be a number, received ${typeof value}`);
-	if (Number.isNaN(value)) throw new RangeError(`${name}: channel "${channel}" must not be NaN`);
+	assertNumber(name, channel, value, !Number.isNaN(value), 'a number other than NaN');
 	return value;
 }
 
@@ -159,9 +159,9 @@ function linearChannel(value: number): number {
  * parseHex('#00000080'); // => { r: 0, g: 0, b: 0, a: 0.5019607843137255 }
  */
 export function parseHex(hex: string): Rgba {
-	if (typeof hex !== 'string') throw new TypeError(`parseHex: expected a string, received ${typeof hex}`);
+	if (typeof hex !== 'string') throw new TypeError(`parseHex: \`hex\` must be a string, got ${describe(hex)}`);
 	const match = HEX_PATTERN.exec(hex);
-	if (match === null) throw new TypeError(`parseHex: invalid hex colour "${hex}"`);
+	if (match === null) throw new TypeError(`parseHex: \`hex\` must be a valid hex colour, got ${JSON.stringify(hex)}`);
 	let digits = match[1];
 	if (digits.length <= 4) {
 		digits = digits
@@ -194,14 +194,13 @@ export function parseHex(hex: string): Rgba {
  */
 export function toRgba(input: ColorInput): Rgba {
 	if (typeof input === 'string') return parseHex(input);
-	if (typeof input !== 'object' || input === null)
-		throw new TypeError(`toRgba: expected a hex string or an { r, g, b } object, received ${input === null ? 'null' : typeof input}`);
+	if (typeof input !== 'object' || input === null) throw new TypeError(`toRgba: \`input\` must be a hex string or an { r, g, b } object, got ${describe(input)}`);
 	const rawAlpha = (input as Partial<Rgba>).a;
-	const alpha = rawAlpha === undefined ? 1 : readChannel('toRgba', 'a', rawAlpha);
+	const alpha = rawAlpha === undefined ? 1 : readChannel('toRgba', 'input.a', rawAlpha);
 	return {
-		r: toByte(readChannel('toRgba', 'r', input.r)),
-		g: toByte(readChannel('toRgba', 'g', input.g)),
-		b: toByte(readChannel('toRgba', 'b', input.b)),
+		r: toByte(readChannel('toRgba', 'input.r', input.r)),
+		g: toByte(readChannel('toRgba', 'input.g', input.g)),
+		b: toByte(readChannel('toRgba', 'input.b', input.b)),
 		a: clamp(alpha, 0, 1) + 0
 	};
 }
@@ -269,12 +268,12 @@ export function rgbToHsl(color: ColorInput): Hsl {
  * hslToRgb({ h: -120, s: 100, l: 50 }); // => { r: 0, g: 0, b: 255 }
  */
 export function hslToRgb(hsl: Hsl): Rgb {
-	if (typeof hsl !== 'object' || hsl === null) throw new TypeError(`hslToRgb: expected an { h, s, l } object, received ${hsl === null ? 'null' : typeof hsl}`);
-	const hue = readChannel('hslToRgb', 'h', hsl.h);
-	if (!Number.isFinite(hue)) throw new RangeError(`hslToRgb: hue must be finite, received ${hue}`);
+	if (typeof hsl !== 'object' || hsl === null) throw new TypeError(`hslToRgb: \`hsl\` must be an { h, s, l } object, got ${describe(hsl)}`);
+	const hue = readChannel('hslToRgb', 'hsl.h', hsl.h);
+	if (!Number.isFinite(hue)) throw new RangeError(`hslToRgb: \`hsl.h\` must be finite, got ${hue}`);
 	const h = modulo(hue, 360);
-	const s = clamp(readChannel('hslToRgb', 's', hsl.s), 0, 100) / 100;
-	const l = clamp(readChannel('hslToRgb', 'l', hsl.l), 0, 100) / 100;
+	const s = clamp(readChannel('hslToRgb', 'hsl.s', hsl.s), 0, 100) / 100;
+	const l = clamp(readChannel('hslToRgb', 'hsl.l', hsl.l), 0, 100) / 100;
 	const chroma = s * Math.min(l, 1 - l);
 
 	/**
@@ -301,6 +300,7 @@ export function hslToRgb(hsl: Hsl): Rgb {
  * @param {number} [weight=0.5] - Proportion of `colorB`, in `[0, 1]`
  * @returns {Rgba} The mixed colour (channels rounded to integers, alpha interpolated)
  * @throws {TypeError} when a colour is invalid (see {@link toRgba})
+ * @throws {TypeError} when `weight` is not a number
  * @throws {RangeError} when `weight` is not in `[0, 1]` or a channel is `NaN`
  * @example
  * mix('#000000', '#ffffff'); // => { r: 128, g: 128, b: 128, a: 1 }
@@ -308,7 +308,7 @@ export function hslToRgb(hsl: Hsl): Rgb {
  * mix({ r: 0, g: 0, b: 0, a: 0 }, '#000', 0.5); // => { r: 0, g: 0, b: 0, a: 0.5 }
  */
 export function mix(colorA: ColorInput, colorB: ColorInput, weight = 0.5): Rgba {
-	if (!(weight >= 0 && weight <= 1)) throw new RangeError(`mix: weight must be in [0, 1], received ${weight}`);
+	assertNumber('mix', 'weight', weight, weight >= 0 && weight <= 1, 'a number in [0, 1]');
 	const a = toRgba(colorA);
 	const b = toRgba(colorB);
 	return {
@@ -341,12 +341,13 @@ function shiftLightness(color: ColorInput, delta: number): Rgba {
  * @param {string} name - Function name for the error message
  * @param {number} amount - The amount to validate
  * @returns {void}
+ * @throws {TypeError} when `amount` is not a number
  * @throws {RangeError} when `amount` is not in `[0, 100]`
  * @example
  * assertAmount('lighten', 10); // ok
  */
 function assertAmount(name: string, amount: number): void {
-	if (!(amount >= 0 && amount <= 100)) throw new RangeError(`${name}: amount must be in [0, 100], received ${amount}`);
+	assertNumber(name, 'amount', amount, amount >= 0 && amount <= 100, 'a number in [0, 100]');
 }
 
 /**
@@ -355,7 +356,7 @@ function assertAmount(name: string, amount: number): void {
  * @param {ColorInput} color - The colour
  * @param {number} amount - Lightness points to add, in `[0, 100]`
  * @returns {Rgba} The lighter colour
- * @throws {TypeError} when `color` is invalid (see {@link toRgba})
+ * @throws {TypeError} when `color` is invalid (see {@link toRgba}), or `amount` is not a number
  * @throws {RangeError} when `amount` is not in `[0, 100]` or a channel is `NaN`
  * @example
  * lighten('#000000', 50); // => { r: 128, g: 128, b: 128, a: 1 }
@@ -373,7 +374,7 @@ export function lighten(color: ColorInput, amount: number): Rgba {
  * @param {ColorInput} color - The colour
  * @param {number} amount - Lightness points to subtract, in `[0, 100]`
  * @returns {Rgba} The darker colour
- * @throws {TypeError} when `color` is invalid (see {@link toRgba})
+ * @throws {TypeError} when `color` is invalid (see {@link toRgba}), or `amount` is not a number
  * @throws {RangeError} when `amount` is not in `[0, 100]` or a channel is `NaN`
  * @example
  * darken('#ffffff', 50); // => { r: 128, g: 128, b: 128, a: 1 }
@@ -389,13 +390,13 @@ export function darken(color: ColorInput, amount: number): Rgba {
  * @param {ColorInput} color - The colour
  * @param {number} alpha - The new alpha, in `[0, 1]`
  * @returns {Rgba} The colour with its alpha replaced
- * @throws {TypeError} when `color` is invalid (see {@link toRgba})
+ * @throws {TypeError} when `color` is invalid (see {@link toRgba}), or `alpha` is not a number
  * @throws {RangeError} when `alpha` is not in `[0, 1]` or a channel is `NaN`
  * @example
  * withAlpha('#ff0000', 0.5); // => { r: 255, g: 0, b: 0, a: 0.5 }
  */
 export function withAlpha(color: ColorInput, alpha: number): Rgba {
-	if (!(alpha >= 0 && alpha <= 1)) throw new RangeError(`withAlpha: alpha must be in [0, 1], received ${alpha}`);
+	assertNumber('withAlpha', 'alpha', alpha, alpha >= 0 && alpha <= 1, 'a number in [0, 1]');
 	const rgba = toRgba(color);
 	return { r: rgba.r, g: rgba.g, b: rgba.b, a: alpha + 0 };
 }
@@ -477,7 +478,7 @@ export function getReadableTextColor<L extends ColorInput = '#ffffff', D extends
  */
 export function meetsContrast(foreground: ColorInput, background: ColorInput, options: MeetsContrastOptions = {}): boolean {
 	const { level = 'AA', largeText = false } = options;
-	if (level !== 'AA' && level !== 'AAA') throw new RangeError(`meetsContrast: level must be 'AA' or 'AAA', received ${String(level)}`);
+	if (level !== 'AA' && level !== 'AAA') throw new RangeError(`meetsContrast: \`level\` must be 'AA' or 'AAA', got ${String(level)}`);
 	const threshold = largeText ? CONTRAST_THRESHOLDS[level].large : CONTRAST_THRESHOLDS[level].normal;
 	return contrastRatio(foreground, background) >= threshold;
 }

@@ -40,7 +40,7 @@ describe('Format helpers', function () {
 		it('should throw a TypeError when the locale is neither a string nor an array', function () {
 			expect(function () {
 				helpers.formatNumber(1, { locale: 42 as any });
-			}).toThrow(new TypeError('format: locale must be a string or an array of strings, received number'));
+			}).toThrow(new TypeError('format: `locale` must be a string or an array of strings, got number'));
 			expect(function () {
 				helpers.formatList(['a'], { locale: null as any });
 			}).toThrow(TypeError);
@@ -145,10 +145,10 @@ describe('Format helpers', function () {
 		it('should reject non-numbers with a TypeError', function () {
 			expect(function () {
 				helpers.formatNumber('12' as any);
-			}).toThrow(new TypeError('formatNumber: value must be a number, received string'));
+			}).toThrow(new TypeError('formatNumber: `value` must be a number, got string'));
 			expect(function () {
 				helpers.formatNumber(null as any);
-			}).toThrow(new TypeError('formatNumber: value must be a number, received null'));
+			}).toThrow(new TypeError('formatNumber: `value` must be a number, got null'));
 			expect(function () {
 				helpers.formatNumber(undefined as any);
 			}).toThrow(TypeError);
@@ -157,7 +157,7 @@ describe('Format helpers', function () {
 		it('should reject NaN and infinities with a RangeError', function () {
 			expect(function () {
 				helpers.formatNumber(NaN);
-			}).toThrow(new RangeError('formatNumber: value must be finite, received NaN'));
+			}).toThrow(new RangeError('formatNumber: `value` must be finite, got NaN'));
 			expect(function () {
 				helpers.formatNumber(Infinity);
 			}).toThrow(RangeError);
@@ -211,7 +211,7 @@ describe('Format helpers', function () {
 			}).toThrow(TypeError);
 			expect(function () {
 				helpers.formatCurrency(1, 840 as any);
-			}).toThrow(new TypeError('formatCurrency: currency must be a string, received number'));
+			}).toThrow(new TypeError('formatCurrency: `currency` must be a string, got number'));
 		});
 	});
 
@@ -246,7 +246,7 @@ describe('Format helpers', function () {
 			for (const decimals of [-1, 1.5, 21, 100, NaN, Infinity]) {
 				expect(function () {
 					helpers.formatPercent(0.5, { decimals });
-				}).toThrow(new RangeError(`formatPercent: decimals must be an integer from 0 to 20, received ${decimals}`));
+				}).toThrow(new RangeError(`formatPercent: \`decimals\` must be an integer from 0 to 20, got ${decimals}`));
 			}
 			expect(helpers.formatPercent(0.5, { decimals: 20 })).toMatch(/^50\.0{20}%$/);
 		});
@@ -309,7 +309,7 @@ describe('Format helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.formatUnit(1, undefined as any);
-			}).toThrow(new TypeError('formatUnit: unit must be a string, received undefined'));
+			}).toThrow(new TypeError('formatUnit: `unit` must be a string, got undefined'));
 		});
 	});
 
@@ -344,7 +344,7 @@ describe('Format helpers', function () {
 		it('should reject strings, non-iterables and non-string items', function () {
 			expect(function () {
 				helpers.formatList('abc');
-			}).toThrow(new TypeError('formatList: items must be an iterable of strings, received string'));
+			}).toThrow(new TypeError('formatList: `items` must be an iterable of strings, got string'));
 			expect(function () {
 				helpers.formatList(5 as any);
 			}).toThrow(TypeError);
@@ -353,7 +353,7 @@ describe('Format helpers', function () {
 			}).toThrow(TypeError);
 			expect(function () {
 				helpers.formatList(['a', 1] as any);
-			}).toThrow(new TypeError('formatList: every item must be a string, received number'));
+			}).toThrow(new TypeError('formatList: every item must be a string, got number'));
 		});
 	});
 
@@ -383,7 +383,7 @@ describe('Format helpers', function () {
 		it('should reject invalid dates and non-dates', function () {
 			expect(function () {
 				helpers.formatDateTime(new Date(NaN));
-			}).toThrow(new RangeError('formatDateTime: Invalid date'));
+			}).toThrow(new RangeError('formatDateTime: `date` must be a valid date, got Invalid Date'));
 			expect(function () {
 				helpers.formatDateTime(Infinity);
 			}).toThrow(RangeError);
@@ -392,7 +392,7 @@ describe('Format helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.formatDateTime('2024-01-15' as any);
-			}).toThrow(new TypeError('formatDateTime: date must be a Date or a number, received string'));
+			}).toThrow(new TypeError('formatDateTime: `date` must be a Date or a number, got string'));
 		});
 
 		it('should let Intl errors for invalid options propagate', function () {
@@ -488,7 +488,7 @@ describe('Format helpers', function () {
 		it('should reject non-integers and non-numbers', function () {
 			expect(function () {
 				helpers.formatOrdinal(1.5);
-			}).toThrow(new RangeError('formatOrdinal: n must be an integer, received 1.5'));
+			}).toThrow(new RangeError('formatOrdinal: `n` must be an integer, got 1.5'));
 			expect(function () {
 				helpers.formatOrdinal(NaN);
 			}).toThrow(RangeError);

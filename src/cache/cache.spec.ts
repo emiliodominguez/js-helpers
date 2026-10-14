@@ -24,10 +24,16 @@ function recorder<K, V>() {
 
 describe('createLRUCache', function () {
 	describe('validation', function () {
-		it.each([0, -1, 1.5, NaN, -Infinity, '2' as any, undefined as any])('throws RangeError for max = %p', function (max) {
+		it.each([0, -1, 1.5, NaN, -Infinity])('throws RangeError for max = %p', function (max) {
 			expect(function () {
 				createLRUCache({ max });
 			}).toThrow(RangeError);
+		});
+
+		it.each(['2' as any, undefined as any])('throws TypeError for a non-number max = %p', function (max) {
+			expect(function () {
+				createLRUCache({ max });
+			}).toThrow(TypeError);
 		});
 
 		it('accepts max = Infinity and integer max >= 1', function () {
@@ -35,10 +41,16 @@ describe('createLRUCache', function () {
 			expect(createLRUCache({ max: 1 }).size).toBe(0);
 		});
 
-		it.each([0, -5, NaN, -Infinity, '10' as any, null as any])('throws RangeError for ttl = %p', function (ttl) {
+		it.each([0, -5, NaN, -Infinity])('throws RangeError for ttl = %p', function (ttl) {
 			expect(function () {
 				createLRUCache({ max: 2, ttl });
 			}).toThrow(RangeError);
+		});
+
+		it.each(['10' as any, null as any])('throws TypeError for a non-number ttl = %p', function (ttl) {
+			expect(function () {
+				createLRUCache({ max: 2, ttl });
+			}).toThrow(TypeError);
 		});
 
 		it('throws RangeError for an invalid per-entry ttl and leaves the cache untouched', function () {
@@ -49,7 +61,7 @@ describe('createLRUCache', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				cache.set('b', 2, { ttl: NaN });
-			}).toThrow(/ttl must be a positive number/);
+			}).toThrow(new RangeError('LRUCache.set: `ttl` must be a number > 0 or Infinity, got NaN'));
 			expect([...cache]).toEqual([['a', 1]]);
 		});
 
@@ -65,7 +77,7 @@ describe('createLRUCache', function () {
 			}).toThrow(TypeError);
 			expect(function () {
 				createLRUCache({ max: 1, onEvict: 'x' as any });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createLRUCache: `onEvict` must be a function, got string'));
 		});
 	});
 

@@ -463,12 +463,12 @@ describe('Objects helpers', function () {
 			}).toThrow(RangeError);
 		});
 
-		it('throws TypeError for unsafe segments without touching the target or Object.prototype', function () {
+		it('throws RangeError for unsafe segments without touching the target or Object.prototype', function () {
 			for (const path of ['__proto__.polluted', 'a.constructor.prototype.polluted', 'prototype', 'a.__proto__']) {
 				const target = {};
 				expect(function () {
 					helpers.setInObjectByKeys(target, path, 1);
-				}).toThrow(TypeError);
+				}).toThrow(RangeError);
 				expect(target).toEqual({});
 			}
 			expect(({} as any).polluted).toBeUndefined();
@@ -477,7 +477,10 @@ describe('Objects helpers', function () {
 		it('throws TypeError when an intermediate is a primitive', function () {
 			expect(function () {
 				helpers.setInObjectByKeys({ a: 1 }, 'a.b', 2);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('setInObjectByKeys: cannot set "a.b": "a" is a number, not an object'));
+			expect(function () {
+				helpers.setInObjectByKeys({}, 'a.__proto__', 2);
+			}).toThrow(new RangeError('setInObjectByKeys: `path` must not contain the unsafe segment "__proto__", got "a.__proto__"'));
 		});
 	});
 
@@ -1232,15 +1235,15 @@ describe('Objects helpers', function () {
 			for (const key of ['__proto__.polluted', 'a.constructor', 'prototype']) {
 				expect(function () {
 					helpers.unflattenObject({ [key]: 1 });
-				}).toThrow(TypeError);
+				}).toThrow(RangeError);
 			}
 			expect(function () {
 				helpers.unflattenObject(JSON.parse('{"__proto__": {"polluted": true}}'));
-			}).toThrow(TypeError);
+			}).toThrow(RangeError);
 			expect(({} as any).polluted).toBeUndefined();
 			expect(function () {
 				helpers.unflattenObject({ 'a..b': 1 });
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('unflattenObject: `record` keys must not contain empty segments, got "a..b"'));
 			expect(function () {
 				helpers.unflattenObject({ '': 1 });
 			}).toThrow(RangeError);
@@ -1371,6 +1374,38 @@ describe('Objects helpers', function () {
 			expect(function () {
 				helpers.diff({ x: 1 }, b);
 			}).not.toThrow();
+		});
+	});
+
+	describe('argument validation', function () {
+		it('rejects non-function callbacks with a TypeError, even for empty objects', function () {
+			expect(function () {
+				helpers.mapValues({}, undefined as any);
+			}).toThrow(new TypeError('mapValues: `fn` must be a function, got undefined'));
+			expect(function () {
+				helpers.mapKeys({}, null as any);
+			}).toThrow(new TypeError('mapKeys: `fn` must be a function, got null'));
+			expect(function () {
+				helpers.pickBy({}, 'x' as any);
+			}).toThrow(new TypeError('pickBy: `predicate` must be a function, got string'));
+			expect(function () {
+				helpers.omitBy({}, 1 as any);
+			}).toThrow(new TypeError('omitBy: `predicate` must be a function, got number'));
+		});
+
+		it('names the offending argument', function () {
+			expect(function () {
+				helpers.deepMerge({}, { a: 1 }, [] as any);
+			}).toThrow(new TypeError('deepMerge: `sources[1]` must be a plain object, got object'));
+			expect(function () {
+				helpers.deepMerge(null as any);
+			}).toThrow(new TypeError('deepMerge: `target` must be a plain object, got null'));
+			expect(function () {
+				helpers.flattenObject('x' as any);
+			}).toThrow(new TypeError('flattenObject: `object` must be a plain object or an array, got string'));
+			expect(function () {
+				helpers.invert({ a: true } as any);
+			}).toThrow(new TypeError('invert: `object.a` must be a string, number or symbol, got boolean'));
 		});
 	});
 });

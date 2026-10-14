@@ -1,5 +1,6 @@
 import { sample, shuffle } from '../arrays/index.js';
 import { randomBetween } from '../math/index.js';
+import { assertNumber, describe, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -21,16 +22,19 @@ export interface SeededRandom {
 	(): number;
 	/**
 	 * Returns an unbiased random integer in `[ceil(min), floor(max)]` (both inclusive).
+	 * @throws {TypeError} when a bound is not a number
 	 * @throws {RangeError} when a bound is not finite, no integer lies in the range, a bound is not a safe integer, or the range spans more than `2 ** 53` values
 	 */
 	int(min: number, max: number): number;
 	/**
 	 * Returns a random float in `[min, max)` (`min` when both bounds are equal).
+	 * @throws {TypeError} when a bound is not a number
 	 * @throws {RangeError} when a bound is not finite or `min > max`
 	 */
 	float(min: number, max: number): number;
 	/**
 	 * Returns `true` with the given probability.
+	 * @throws {TypeError} when `probability` is not a number
 	 * @throws {RangeError} when `probability` is outside `[0, 1]` or NaN
 	 */
 	bool(probability?: number): boolean;
@@ -97,21 +101,6 @@ function cyrb128(text: string): [number, number, number, number] {
 }
 
 /**
- * Throws a `RangeError` unless `random()` returned a number in `[0, 1)`, and returns it.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {RandomGenerator} random - The generator to draw from
- * @returns {number} The drawn value
- * @throws {RangeError} when the drawn value is outside `[0, 1)` or NaN
- */
-function draw(caller: string, random: RandomGenerator): number {
-	const value = random();
-	if (!(value >= 0 && value < 1)) {
-		throw new RangeError(`${caller}: \`random()\` must return a number in [0, 1), got ${String(value)}`);
-	}
-	return value;
-}
-
-/**
  * Builds a seeded generator around a mutable sfc32 state.
  * @param {number[]} seedState - Four 32-bit integers used as the initial state (copied)
  * @returns {SeededRandom} The generator
@@ -171,9 +160,8 @@ function fromState(seedState: SeededRandomState): SeededRandom {
 	return Object.freeze(
 		Object.assign(generator, {
 			int: function int(min: number, max: number): number {
-				if (!Number.isFinite(min) || !Number.isFinite(max)) {
-					throw new RangeError(`SeededRandom.int: bounds must be finite, received ${min} and ${max}`);
-				}
+				assertNumber('SeededRandom.int', 'min', min, Number.isFinite(min), 'a finite number');
+				assertNumber('SeededRandom.int', 'max', max, Number.isFinite(max), 'a finite number');
 				const low = Math.ceil(min);
 				const high = Math.floor(max);
 				if (low > high) throw new RangeError(`SeededRandom.int: no integer exists in [${min}, ${max}]`);
@@ -242,9 +230,9 @@ function fromState(seedState: SeededRandomState): SeededRandom {
  */
 export function createRandom(seed: number | string): SeededRandom {
 	if (typeof seed === 'number') {
-		if (!Number.isFinite(seed)) throw new RangeError(`createRandom: numeric seed must be finite, got ${String(seed)}`);
+		if (!Number.isFinite(seed)) throw new RangeError(`createRandom: \`seed\` must be a finite number or a string, got ${seed}`);
 	} else if (typeof seed !== 'string') {
-		throw new TypeError(`createRandom: seed must be a number or a string, got ${typeof seed}`);
+		throw new TypeError(`createRandom: \`seed\` must be a finite number or a string, got ${describe(seed)}`);
 	}
 	return fromState(cyrb128(String(seed)));
 }
@@ -268,6 +256,7 @@ function getCrypto(caller: string): CryptoLike {
  * Requests larger than 65,536 bytes (the WebCrypto per-call limit) are filled in chunks.
  * @param {number} length - Number of bytes to generate (a non-negative safe integer)
  * @returns {Uint8Array} A fresh array of `length` random bytes
+ * @throws {TypeError} when `length` is not a number
  * @throws {RangeError} when `length` is not a non-negative safe integer
  * @throws {Error} when no cryptographically secure random source is available
  * @example
@@ -275,9 +264,7 @@ function getCrypto(caller: string): CryptoLike {
  * randomBytes(16).length; // => 16
  */
 export function randomBytes(length: number): Uint8Array {
-	if (!Number.isSafeInteger(length) || length < 0) {
-		throw new RangeError(`randomBytes: \`length\` must be a non-negative safe integer, got ${String(length)}`);
-	}
+	assertNumber('randomBytes', 'length', length, Number.isSafeInteger(length) && length >= 0, 'a safe integer >= 0');
 	const crypto = getCrypto('randomBytes');
 	const bytes = new Uint8Array(length);
 	for (let offset = 0; offset < length; offset += MAX_RANDOM_VALUES_BYTES) {
@@ -322,6 +309,7 @@ export function randomUUID(): string {
  * @param {number} [size=21] - Number of characters to generate (a non-negative safe integer)
  * @param {string} [alphabet=URL_ALPHABET] - Between 2 and 256 distinct characters to draw from
  * @returns {string} A random string of `size` characters from `alphabet`
+ * @throws {TypeError} when `size` is not a number
  * @throws {RangeError} when `size` is not a non-negative safe integer, or `alphabet` has fewer than 2 or more than 256 characters or contains duplicates
  * @throws {Error} when no cryptographically secure random source is available
  * @example
@@ -330,9 +318,7 @@ export function randomUUID(): string {
  * randomId().length; // => 21
  */
 export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): string {
-	if (!Number.isSafeInteger(size) || size < 0) {
-		throw new RangeError(`randomId: \`size\` must be a non-negative safe integer, got ${String(size)}`);
-	}
+	assertNumber('randomId', 'size', size, Number.isSafeInteger(size) && size >= 0, 'a safe integer >= 0');
 	const characters = Array.from(alphabet);
 	const length = characters.length;
 	if (length < 2 || length > 256) {
@@ -370,6 +356,7 @@ export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): st
  * @param {ReadonlyArray<number>} weights - One finite, non-negative weight per item (they need not sum to 1)
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`, injectable for deterministic results
  * @returns {T} The chosen item
+ * @throws {TypeError} when `random` is not a function, or a weight is a non-number that does not coerce to a valid weight
  * @throws {RangeError} when the arrays differ in length, a weight is negative, NaN or infinite, the total weight is zero or not finite, or `random()` returns a value outside `[0, 1)`
  * @example
  * weightedRandom(['common', 'rare'], [9, 1]); // 'common' ~90% of the time
@@ -383,9 +370,7 @@ export function weightedRandom<T>(items: ReadonlyArray<T>, weights: ReadonlyArra
 	let lastPositive = -1;
 	for (let i = 0; i < weights.length; i++) {
 		const weight = weights[i];
-		if (!(weight >= 0 && weight < Infinity)) {
-			throw new RangeError(`weightedRandom: weights must be finite non-negative numbers, got ${String(weight)}`);
-		}
+		if (!(weight >= 0 && weight < Infinity)) assertNumber('weightedRandom', `weights[${i}]`, weight, false, 'a finite number >= 0');
 		total += weight;
 		if (weight > 0) lastPositive = i;
 	}
@@ -411,16 +396,15 @@ export function weightedRandom<T>(items: ReadonlyArray<T>, weights: ReadonlyArra
  * @param {number} [stdDev=1] - Standard deviation (finite, non-negative; `0` always returns `mean`)
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`, called twice per draw
  * @returns {number} A sample from `N(mean, stdDev²)`
+ * @throws {TypeError} when `mean` or `stdDev` is not a number, or `random` is not a function
  * @throws {RangeError} when `mean` is not finite, `stdDev` is negative or not finite, or `random()` returns a value outside `[0, 1)`
  * @example
  * randomGaussian(); // e.g. -0.4271…
  * randomGaussian(100, 15); // e.g. 112.3…
  */
 export function randomGaussian(mean: number = 0, stdDev: number = 1, random: RandomGenerator = Math.random): number {
-	if (!Number.isFinite(mean)) throw new RangeError(`randomGaussian: \`mean\` must be finite, got ${String(mean)}`);
-	if (!(stdDev >= 0 && stdDev < Infinity)) {
-		throw new RangeError(`randomGaussian: \`stdDev\` must be a finite non-negative number, got ${String(stdDev)}`);
-	}
+	assertNumber('randomGaussian', 'mean', mean, Number.isFinite(mean), 'a finite number');
+	assertNumber('randomGaussian', 'stdDev', stdDev, stdDev >= 0 && stdDev < Infinity, 'a finite number >= 0');
 	const u1 = 1 - draw('randomGaussian', random);
 	const u2 = draw('randomGaussian', random);
 	return mean + stdDev * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
@@ -432,14 +416,13 @@ export function randomGaussian(mean: number = 0, stdDev: number = 1, random: Ran
  * @param {number} [probability=0.5] - Chance of `true`, in `[0, 1]`
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`, injectable for deterministic results
  * @returns {boolean} A random boolean
+ * @throws {TypeError} when `probability` is not a number, or `random` is not a function
  * @throws {RangeError} when `probability` is outside `[0, 1]` or NaN, or `random()` returns a value outside `[0, 1)`
  * @example
  * randomBoolean(); // true or false
  * randomBoolean(0.9); // true ~90% of the time
  */
 export function randomBoolean(probability: number = 0.5, random: RandomGenerator = Math.random): boolean {
-	if (!(probability >= 0 && probability <= 1)) {
-		throw new RangeError(`randomBoolean: \`probability\` must be a number in [0, 1], got ${String(probability)}`);
-	}
+	assertNumber('randomBoolean', 'probability', probability, probability >= 0 && probability <= 1, 'a number in [0, 1]');
 	return draw('randomBoolean', random) < probability;
 }

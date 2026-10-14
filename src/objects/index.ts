@@ -1,4 +1,5 @@
 import { isDate, isError, isFunction, isMap, isObject, isPlainObject, isPromise, isRegExp, isSet, isWeakMap, isWeakSet } from '../guards/index.js';
+import { assertFunction, describe } from '../utils/assert.js';
 import type { AnyFunction, DeepReadonly, NestedKeyOf, PathValue, Primitive, UnionToIntersection } from '../utils/index.js';
 
 // Backward compatibility: these type guards MOVED to the `guards` module (where they are real type predicates).
@@ -479,10 +480,12 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
  * @param {T} object - The source object
  * @param {(value: T[keyof T], key: keyof T, object: T) => R} fn - Maps each value (receives the value, its key and the object)
  * @returns {{ [K in keyof T]: R }} A new object with mapped values
+ * @throws {TypeError} when `fn` is not a function
  * @example
  * mapValues({ a: 1, b: 2 }, function (n) { return n * 10; }); // => { a: 10, b: 20 }
  */
 export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => R): { [K in keyof T]: R } {
+	assertFunction('mapValues', 'fn', fn);
 	// For array types the mapped return type is an array type, so the runtime result must be an array too.
 	const result = (Array.isArray(object) ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
 	for (const key of ownEnumerableKeys(object)) {
@@ -498,10 +501,12 @@ export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T]
  * @param {T} object - The source object
  * @param {(value: T[keyof T], key: keyof T, object: T) => K} fn - Computes the new key (receives the value, its key and the object)
  * @returns {Record<K, T[keyof T]>} A new object with mapped keys
+ * @throws {TypeError} when `fn` is not a function
  * @example
  * mapKeys({ a: 1, b: 2 }, function (_v, k) { return String(k).toUpperCase(); }); // => { A: 1, B: 2 }
  */
 export function mapKeys<T extends object, K extends PropertyKey>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => K): Record<K, T[keyof T]> {
+	assertFunction('mapKeys', 'fn', fn);
 	const result = {} as Record<K, T[keyof T]>;
 	for (const key of ownEnumerableKeys(object)) {
 		const value = read(object, key) as T[keyof T];
@@ -525,7 +530,7 @@ export function invert<T extends Record<PropertyKey, PropertyKey>>(object: T): I
 	for (const key of Object.keys(object)) {
 		const value: unknown = object[key];
 		if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'symbol') {
-			throw new TypeError(`invert: value of key "${key}" must be a string, number or symbol, got ${typeof value}`);
+			throw new TypeError(`invert: \`object.${key}\` must be a string, number or symbol, got ${describe(value)}`);
 		}
 		defineValue(result, value, key);
 	}
@@ -554,17 +559,19 @@ function isArrayIndex(segment: string): boolean {
 
 /**
  * Splits a path on `separator` and validates its segments for writing.
+ * @param {string} caller - Name of the public function, used in error messages
+ * @param {string} label - What the path is, used in error messages (e.g. ``'`path`'``)
  * @param {string} path - The path, e.g. `'a.b.0.c'`
  * @param {string} separator - The segment separator
  * @returns {string[]} The segments
- * @throws {RangeError} when a segment is empty (e.g. `''`, `'a..b'`, `'a.'`)
- * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype`
+ * @throws {RangeError} when a segment is empty (e.g. `''`, `'a..b'`, `'a.'`), or is `__proto__`, `constructor` or `prototype`
  */
-function parseWritablePath(path: string, separator: string): string[] {
+function parseWritablePath(caller: string, label: string, path: string, separator: string): string[] {
 	const segments = path.split(separator);
 	for (const segment of segments) {
-		if (segment === '') throw new RangeError(`Invalid path "${path}": empty path segment`);
-		if (UNSAFE_KEYS.has(segment)) throw new TypeError(`Invalid path "${path}": unsafe path segment "${segment}"`);
+		if (segment === '' || UNSAFE_KEYS.has(segment)) {
+			throw new RangeError(`${caller}: ${label} must not contain ${segment === '' ? 'empty segments' : `the unsafe segment "${segment}"`}, got ${JSON.stringify(path)}`);
+		}
 	}
 	return segments;
 }
@@ -579,6 +586,7 @@ function parseWritablePath(path: string, separator: string): string[] {
  * @param {unknown} value - The value to store
  * @param {string} path - The original path, for error messages
  * @param {string} separator - The separator, for error messages
+ * @param {string} caller - Name of the public function, for error messages
  * @param {WeakSet<object>} [owned] - Strict mode used by {@link unflattenObject}: the containers created so far. When given, every
  * created container is added to it, only those containers may be traversed, and an existing property is never overwritten
  * (any of these is a conflict between two keys)
@@ -586,7 +594,7 @@ function parseWritablePath(path: string, separator: string): string[] {
  * @throws {TypeError} when an existing intermediate value is a primitive
  * @throws {TypeError} in strict mode, when the path conflicts with a previously written one
  */
-function assignPath(target: object, segments: ReadonlyArray<string>, value: unknown, path: string, separator: string, owned?: WeakSet<object>): void {
+function assignPath(target: object, segments: ReadonlyArray<string>, value: unknown, path: string, separator: string, caller: string, owned?: WeakSet<object>): void {
 	let current = target as Record<string, unknown>;
 	const last = segments.length - 1;
 
@@ -596,7 +604,7 @@ function assignPath(target: object, segments: ReadonlyArray<string>, value: unkn
 		let next = exists ? current[segment] : undefined;
 
 		if (owned !== undefined && exists && !owned.has(next as object)) {
-			throw new TypeError(`Cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is already set by another key`);
+			throw new TypeError(`${caller}: cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is already set by another key`);
 		}
 		if (next == null) {
 			const container: object = isArrayIndex(segments[index + 1]) ? [] : {};
@@ -604,14 +612,14 @@ function assignPath(target: object, segments: ReadonlyArray<string>, value: unkn
 			owned?.add(container);
 			next = container;
 		} else if (!isObject(next) && !isFunction(next)) {
-			throw new TypeError(`Cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is a ${typeof next}, not an object`);
+			throw new TypeError(`${caller}: cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is a ${typeof next}, not an object`);
 		}
 
 		current = next as Record<string, unknown>;
 	}
 
 	if (owned !== undefined && hasOwn(current, segments[last])) {
-		throw new TypeError(`Cannot set "${path}": "${segments.join(separator)}" already holds values set by other keys`);
+		throw new TypeError(`${caller}: cannot set "${path}": "${segments.join(separator)}" already holds values set by other keys`);
 	}
 	current[segments[last]] = value;
 }
@@ -671,13 +679,13 @@ export function getFromObjectByKeys(target: object, keys: string, defaultValue?:
  * @param {unknown} value - The value to store
  * @returns {T} `target`
  * @throws {RangeError} when the path has an empty segment (`''`, `'a..b'`, `'a.'`)
- * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
+ * @throws {RangeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
  * @throws {TypeError} when an existing intermediate value is a primitive (it would have to be overwritten)
  * @example
  * setInObjectByKeys({}, 'a.list.0.id', 7); // => { a: { list: [{ id: 7 }] } }
  */
 export function setInObjectByKeys<T extends object>(target: T, path: string, value: unknown): T {
-	assignPath(target, parseWritablePath(path, '.'), value, path, '.');
+	assignPath(target, parseWritablePath('setInObjectByKeys', '`path`', path, '.'), value, path, '.', 'setInObjectByKeys');
 	return target;
 }
 
@@ -808,16 +816,16 @@ function deepMergeInto(result: object, source: object, ancestors: Set<object>): 
  * deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }); // => { a: { x: 1, y: 3 }, list: [9] }
  */
 export function deepMerge<T extends object, S extends object[]>(target: T, ...sources: S): DeepMergeAll<T, S> {
-	if (!isPlainObject(target)) throw new TypeError('deepMerge: target must be a plain object');
+	if (!isPlainObject(target)) throw new TypeError(`deepMerge: \`target\` must be a plain object, got ${describe(target)}`);
 
 	const ancestors = new Set<object>();
 	const result = deepMergeInto(Object.create(Object.getPrototypeOf(target)), target, ancestors);
 
-	for (const source of sources) {
-		if (source == null) continue;
-		if (!isPlainObject(source)) throw new TypeError('deepMerge: every source must be a plain object');
+	sources.forEach(function (source, index) {
+		if (source == null) return;
+		if (!isPlainObject(source)) throw new TypeError(`deepMerge: \`sources[${index}]\` must be a plain object, got ${describe(source)}`);
 		deepMergeInto(result, source, ancestors);
-	}
+	});
 
 	return result as DeepMergeAll<T, S>;
 }
@@ -1133,10 +1141,12 @@ export function typedFromEntries<E extends readonly [PropertyKey, unknown]>(entr
  * @param {T} object - The source object
  * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is kept
  * @returns {Partial<T>} A new object with the selected properties
+ * @throws {TypeError} when `predicate` is not a function
  * @example
  * pickBy({ a: 1, b: null, c: 3 }, function (value) { return value !== null; }); // => { a: 1, c: 3 }
  */
 export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
+	assertFunction('pickBy', 'predicate', predicate);
 	const result: Partial<T> = {};
 	for (const key of ownEnumerableKeys(object)) {
 		const value = read(object, key) as T[keyof T];
@@ -1152,10 +1162,12 @@ export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T
  * @param {T} object - The source object
  * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is dropped
  * @returns {Partial<T>} A new object with the remaining properties
+ * @throws {TypeError} when `predicate` is not a function
  * @example
  * omitBy({ a: 1, _b: 2 }, function (_value, key) { return String(key).startsWith('_'); }); // => { a: 1 }
  */
 export function omitBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
+	assertFunction('omitBy', 'predicate', predicate);
 	return pickBy(object, function (value, key, source) {
 		return !predicate(value, key, source);
 	});
@@ -1207,7 +1219,7 @@ export interface FlattenOptions {
  */
 function readSeparator(caller: string, options: FlattenOptions): string {
 	const separator = options.separator ?? '.';
-	if (typeof separator !== 'string') throw new TypeError(`${caller}: \`separator\` must be a string, got ${typeof separator}`);
+	if (typeof separator !== 'string') throw new TypeError(`${caller}: \`separator\` must be a string, got ${describe(separator)}`);
 	if (separator === '') throw new RangeError(`${caller}: \`separator\` must not be empty`);
 	return separator;
 }
@@ -1266,7 +1278,7 @@ function flattenInto(source: object, prefix: string, separator: string, result: 
  */
 export function flattenObject(object: object, options: FlattenOptions = {}): Record<string, unknown> {
 	const separator = readSeparator('flattenObject', options);
-	if (!isContainer(object)) throw new TypeError('flattenObject: the input must be a plain object or an array');
+	if (!isContainer(object)) throw new TypeError(`flattenObject: \`object\` must be a plain object or an array, got ${describe(object)}`);
 	const result: Record<string, unknown> = {};
 	flattenInto(object, '', separator, result, new Set());
 	return result;
@@ -1281,7 +1293,7 @@ export function flattenObject(object: object, options: FlattenOptions = {}): Rec
  * @param {Readonly<Record<string, unknown>>} record - The flat record
  * @param {FlattenOptions} [options={}] - `separator` (default `'.'`)
  * @returns {Record<string, unknown>} A new nested object
- * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
+ * @throws {RangeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
  * @throws {RangeError} when a key has an empty segment (`''`, `'a..b'`)
  * @throws {TypeError} when two keys conflict (`{ a: 1, 'a.b': 2 }`)
  * @throws {TypeError} when `separator` is not a string
@@ -1295,7 +1307,7 @@ export function unflattenObject(record: Readonly<Record<string, unknown>>, optio
 	const result: Record<string, unknown> = {};
 	const owned = new WeakSet<object>([result]);
 	for (const key of Object.keys(record)) {
-		assignPath(result, parseWritablePath(key, separator), record[key], key, separator, owned);
+		assignPath(result, parseWritablePath('unflattenObject', '`record` keys', key, separator), record[key], key, separator, 'unflattenObject', owned);
 	}
 	return result;
 }
@@ -1427,7 +1439,7 @@ function diffWalk(a: object, b: object, prefix: string, missing: string[], chang
  */
 export function diff(a: object, b: object): ObjectDiff {
 	if (!((Array.isArray(a) && Array.isArray(b)) || (isPlainObject(a) && isPlainObject(b)))) {
-		throw new TypeError('diff: both arguments must be plain objects, or both must be arrays');
+		throw new TypeError('diff: `a` and `b` must both be plain objects or both be arrays');
 	}
 	const result: ObjectDiff = { added: [], removed: [], changed: [] };
 	if (a !== b) {

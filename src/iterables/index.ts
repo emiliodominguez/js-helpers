@@ -1,4 +1,5 @@
-import { isAsyncIterable, isFunction, isIterable } from '../guards/index.js';
+import { isAsyncIterable, isIterable } from '../guards/index.js';
+import { assertFunction, assertInteger, assertNumber, describe } from '../utils/assert.js';
 
 /**
  * The tuple of item types produced by {@link zip} for a tuple of input iterables.
@@ -12,15 +13,6 @@ export type ZippedValues<T extends ReadonlyArray<Iterable<unknown>>> = { -readon
  * (they are awaited one by one, as with `for await` and `Array.fromAsync`).
  */
 export type AwaitableIterable<T> = AsyncIterable<T> | Iterable<T | PromiseLike<T>>;
-
-/**
- * Describes a value's type for error messages.
- * @param {unknown} value - The offending value
- * @returns {string} `'null'` or the `typeof` of the value
- */
-function describe(value: unknown): string {
-	return value === null ? 'null' : typeof value;
-}
 
 /**
  * Throws a `TypeError` unless `value` is a (sync) iterable.
@@ -43,34 +35,6 @@ function assertIterable(caller: string, value: unknown, name = 'iterable'): void
  */
 function assertAwaitableIterable(caller: string, value: unknown): void {
 	if (!isAsyncIterable(value)) assertIterable(caller, value);
-}
-
-/**
- * Throws a `TypeError` unless `value` is a function.
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {unknown} value - The value to validate
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertFunction(caller: string, name: string, value: unknown): void {
-	if (!isFunction(value)) throw new TypeError(`${caller}: \`${name}\` must be a function, got ${describe(value)}`);
-}
-
-/**
- * Throws a `RangeError` unless `value` is an integer `>= min` (or `Infinity`, when allowed).
- * @param {string} caller - Name of the public function, used in the error message
- * @param {string} name - Name of the validated parameter
- * @param {number} value - The value to validate
- * @param {number} min - Smallest accepted value
- * @param {boolean} [allowInfinity=false] - Whether `Infinity` is accepted
- * @returns {void}
- * @throws {RangeError} when `value` is not an accepted count
- */
-function assertCount(caller: string, name: string, value: number, min: number, allowInfinity = false): void {
-	if (!(Number.isInteger(value) && value >= min) && !(allowInfinity && value === Infinity)) {
-		throw new RangeError(`${caller}: \`${name}\` must be an integer >= ${min}${allowInfinity ? ' or Infinity' : ''}, got ${String(value)}`);
-	}
 }
 
 /**
@@ -100,14 +64,14 @@ function awaitItems<T>(iterable: AwaitableIterable<T>): AsyncIterable<T> {
  * @param {number} [step=1] - The increment between values (may be negative or 0)
  * @returns {IterableIterator<number>} An infinite iterator of numbers
  * @throws {RangeError} when `start` or `step` is not a finite number
+ * @throws {TypeError} when `start` or `step` is not a number
  * @example
  * toArray(take(count(), 3)); // => [0, 1, 2]
  * toArray(take(count(10, -5), 3)); // => [10, 5, 0]
  */
 export function count(start = 0, step = 1): IterableIterator<number> {
-	if (!Number.isFinite(start) || !Number.isFinite(step)) {
-		throw new RangeError(`count: arguments must be finite numbers, got (${String(start)}, ${String(step)})`);
-	}
+	assertNumber('count', 'start', start, Number.isFinite(start), 'a finite number');
+	assertNumber('count', 'step', step, Number.isFinite(step), 'a finite number');
 	return (function* (): Generator<number, void, undefined> {
 		for (let i = 0; ; i++) yield start + i * step;
 	})();
@@ -120,12 +84,13 @@ export function count(start = 0, step = 1): IterableIterator<number> {
  * @param {number} [times=Infinity] - How many times to yield it (a non-negative integer or `Infinity`)
  * @returns {IterableIterator<T>} An iterator yielding `value` `times` times
  * @throws {RangeError} when `times` is negative, `NaN` or a non-integer finite number
+ * @throws {TypeError} when `times` is not a number
  * @example
  * toArray(repeatValue('a', 3)); // => ['a', 'a', 'a']
  * toArray(take(repeatValue(0), 2)); // => [0, 0]
  */
 export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> {
-	assertCount('repeatValue', 'times', times, 0, true);
+	assertInteger('repeatValue', 'times', times, 0, true);
 	return (function* (): Generator<T, void, undefined> {
 		for (let i = 0; i < times; i++) yield value;
 	})();
@@ -276,12 +241,13 @@ export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: numbe
  * @returns {IterableIterator<T>} An iterator of at most `n` items
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `n` is negative, `NaN` or a non-integer finite number
+ * @throws {TypeError} when `n` is not a number
  * @example
  * toArray(take(count(), 3)); // => [0, 1, 2]
  */
 export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('take', iterable);
-	assertCount('take', 'n', n, 0, true);
+	assertInteger('take', 'n', n, 0, true);
 	return (function* (): Generator<T, void, undefined> {
 		if (n === 0) return;
 		let taken = 0;
@@ -300,12 +266,13 @@ export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
  * @returns {IterableIterator<T>} An iterator of the remaining items
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `n` is negative or not an integer
+ * @throws {TypeError} when `n` is not a number
  * @example
  * toArray(drop([1, 2, 3], 2)); // => [3]
  */
 export function drop<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('drop', iterable);
-	assertCount('drop', 'n', n, 0);
+	assertInteger('drop', 'n', n, 0);
 	return (function* (): Generator<T, void, undefined> {
 		let skipped = 0;
 		for (const value of iterable) {
@@ -371,12 +338,13 @@ export function dropWhile<T>(iterable: Iterable<T>, predicate: (value: T, index:
  * @returns {IterableIterator<T[]>} An iterator of chunks (empty when the source is empty)
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `size` is not a positive integer
+ * @throws {TypeError} when `size` is not a number
  * @example
  * toArray(chunk([1, 2, 3, 4, 5], 2)); // => [[1, 2], [3, 4], [5]]
  */
 export function chunk<T>(iterable: Iterable<T>, size: number): IterableIterator<T[]> {
 	assertIterable('chunk', iterable);
-	assertCount('chunk', 'size', size, 1);
+	assertInteger('chunk', 'size', size, 1);
 	return (function* (): Generator<T[], void, undefined> {
 		let buffer: T[] = [];
 		for (const value of iterable) {
@@ -402,14 +370,15 @@ export function chunk<T>(iterable: Iterable<T>, size: number): IterableIterator<
  * @returns {IterableIterator<T[]>} An iterator of windows
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `size` or `step` is not a positive integer
+ * @throws {TypeError} when `size` or `step` is not a number
  * @example
  * toArray(windowed([1, 2, 3, 4], 2)); // => [[1, 2], [2, 3], [3, 4]]
  * toArray(windowed([1, 2, 3, 4, 5], 2, 2)); // => [[1, 2], [3, 4]]
  */
 export function windowed<T>(iterable: Iterable<T>, size: number, step = 1): IterableIterator<T[]> {
 	assertIterable('windowed', iterable);
-	assertCount('windowed', 'size', size, 1);
-	assertCount('windowed', 'step', step, 1);
+	assertInteger('windowed', 'size', size, 1);
+	assertInteger('windowed', 'step', step, 1);
 	return (function* (): Generator<T[], void, undefined> {
 		let buffer: T[] = [];
 		let skip = 0;
@@ -880,12 +849,13 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
  * @returns {AsyncIterableIterator<T>} An async iterator of at most `n` items
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable
  * @throws {RangeError} when `n` is negative, `NaN` or a non-integer finite number
+ * @throws {TypeError} when `n` is not a number
  * @example
  * await toArrayAsync(takeAsync(count(), 2)); // => [0, 1]
  */
 export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIterableIterator<T> {
 	assertAwaitableIterable('takeAsync', iterable);
-	assertCount('takeAsync', 'n', n, 0, true);
+	assertInteger('takeAsync', 'n', n, 0, true);
 	return (async function* (): AsyncGenerator<T, void, undefined> {
 		if (n === 0) return;
 		let taken = 0;
@@ -904,12 +874,13 @@ export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIt
  * @returns {AsyncIterableIterator<T[]>} An async iterator of fresh chunk arrays
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable
  * @throws {RangeError} when `size` is not a positive integer
+ * @throws {TypeError} when `size` is not a number
  * @example
  * await toArrayAsync(chunkAsync([1, 2, 3], 2)); // => [[1, 2], [3]]
  */
 export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): AsyncIterableIterator<T[]> {
 	assertAwaitableIterable('chunkAsync', iterable);
-	assertCount('chunkAsync', 'size', size, 1);
+	assertInteger('chunkAsync', 'size', size, 1);
 	return (async function* (): AsyncGenerator<T[], void, undefined> {
 		let buffer: T[] = [];
 		for await (const value of awaitItems(iterable)) {

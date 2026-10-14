@@ -509,7 +509,7 @@ describe('guards', function () {
 		it('throws TypeError for a nullish object', function () {
 			expect(function () {
 				guards.isKeyOf(null as any, 'a');
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isKeyOf: `object` must not be null or undefined, got null'));
 			expect(function () {
 				guards.isKeyOf(undefined as any, 'a');
 			}).toThrow(TypeError);
@@ -546,7 +546,7 @@ describe('guards', function () {
 		it('throws TypeError for non-array lists', function () {
 			expect(function () {
 				guards.isOneOf('abc' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isOneOf: `values` must be an array, got string'));
 			expect(function () {
 				guards.isOneOf(new Set([1]) as any);
 			}).toThrow(TypeError);
@@ -603,7 +603,7 @@ describe('guards', function () {
 
 			expect(function () {
 				guards.isInstanceOf(arrowLike as any);
-			}).toThrow('constructor is not a valid instanceof target');
+			}).toThrow(new TypeError('isInstanceOf: `constructor` must be a valid instanceof target, got a function without a prototype'));
 		});
 	});
 
@@ -643,7 +643,7 @@ describe('guards', function () {
 			expect(guards.isArrayOf(guards.isArrayOf(guards.isInteger))([[1], [2.5]])).toBe(false);
 			expect(function () {
 				guards.isArrayOf('isString' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isArrayOf: `guard` must be a function, got string'));
 		});
 	});
 

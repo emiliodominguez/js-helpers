@@ -316,4 +316,24 @@ describe('Color helpers', function () {
 			}).toThrow(RangeError);
 		});
 	});
+
+	describe('argument validation', function () {
+		it('uses the library-wide message format', function () {
+			expect(function () {
+				helpers.parseHex('#zz');
+			}).toThrow(new TypeError('parseHex: `hex` must be a valid hex colour, got "#zz"'));
+			expect(function () {
+				helpers.toRgba({ r: 0, g: 'x' as any, b: 0 });
+			}).toThrow(new TypeError('toRgba: `input.g` must be a number other than NaN, got string'));
+			expect(function () {
+				helpers.toRgba({ r: NaN, g: 0, b: 0 });
+			}).toThrow(new RangeError('toRgba: `input.r` must be a number other than NaN, got NaN'));
+			expect(function () {
+				helpers.lighten('#000', 101);
+			}).toThrow(new RangeError('lighten: `amount` must be a number in [0, 100], got 101'));
+			expect(function () {
+				helpers.mix('#000', '#fff', '0.5' as any);
+			}).toThrow(new TypeError('mix: `weight` must be a number in [0, 1], got string'));
+		});
+	});
 });

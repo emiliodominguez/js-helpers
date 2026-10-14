@@ -665,7 +665,7 @@ describe('Functions helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.throttle(helpers.noop, 10, { leading: false });
-			}).toThrow(TypeError);
+			}).toThrow(new RangeError('throttle: at least one of `leading` or `trailing` must be true'));
 			expect(function () {
 				helpers.throttle(undefined as any, 10);
 			}).toThrow(TypeError);
@@ -907,7 +907,7 @@ describe('Functions helpers', function () {
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.debounce(helpers.noop, 5, { trailing: false });
-			}).toThrow(TypeError);
+			}).toThrow(new RangeError('debounce: at least one of `leading` or `trailing` must be true'));
 			expect(function () {
 				helpers.debounce('x' as any, 5);
 			}).toThrow(TypeError);
@@ -1303,6 +1303,32 @@ describe('Functions helpers (round 2)', function () {
 			expect(function () {
 				helpers.memoizeLast(helpers.identity, 'x' as any);
 			}).toThrow(TypeError);
+		});
+	});
+
+	describe('argument validation', function () {
+		it('names the offending parameter in TypeErrors', function () {
+			expect(function () {
+				helpers.pipe(helpers.identity, 1 as any);
+			}).toThrow(new TypeError('pipe: `fns[1]` must be a function, got number'));
+			expect(function () {
+				helpers.compose(null as any, helpers.identity);
+			}).toThrow(new TypeError('compose: `fns[0]` must be a function, got null'));
+			expect(function () {
+				helpers.memoize(helpers.identity, { resolver: 'x' as any });
+			}).toThrow(new TypeError('memoize: `options.resolver` must be a function, got string'));
+		});
+
+		it('throws a TypeError for non-number counts and waits, and a RangeError for invalid numbers', function () {
+			expect(function () {
+				helpers.debounce(helpers.noop, '5' as any);
+			}).toThrow(new TypeError('debounce: `wait` must be a finite number >= 0, got string'));
+			expect(function () {
+				helpers.before('2' as any, helpers.noop);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.times(2 ** 32, helpers.identity);
+			}).toThrow(new RangeError('times: `n` must be an integer between 0 and 4294967295, got 4294967296'));
 		});
 	});
 });

@@ -1,3 +1,4 @@
+import { assertInteger, describe, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -264,13 +265,14 @@ export function replace(string: string, searchValue: string, replaceValue: strin
  * @param {string} [suffix='...'] - The suffix appended when the string is truncated
  * @returns {string} The truncated string, or the original one when it has at most `length` graphemes
  * @throws {RangeError} when `length` is negative or not an integer
+ * @throws {TypeError} when `length` is not a number
  * @example
  * truncate('hello world', 5); // => 'hello...'
  * truncate('hello world', 5, '!'); // => 'hello!'
  * truncate('👍🏽👍🏽👍🏽', 1); // => '👍🏽...'
  */
 export function truncate(string: string, length: number, suffix: string = '...'): string {
-	if (!Number.isInteger(length) || length < 0) throw new RangeError(`truncate: length must be a non-negative integer, received ${String(length)}`);
+	assertInteger('truncate', 'length', length);
 
 	// A string never has more graphemes than UTF-16 code units.
 	if (string.length <= length) return string;
@@ -294,12 +296,13 @@ export function truncate(string: string, length: number, suffix: string = '...')
  * @param {number} times - How many times to repeat the string (non-negative integer)
  * @returns {string} The repeated string
  * @throws {RangeError} when `times` is negative, not an integer, `NaN` or infinite
+ * @throws {TypeError} when `times` is not a number
  * @example
  * repeat('ab', 3); // => 'ababab'
  * repeat('ab', 0); // => ''
  */
 export function repeat(string: string, times: number): string {
-	if (!Number.isInteger(times) || times < 0) throw new RangeError(`repeat: times must be a non-negative integer, received ${String(times)}`);
+	assertInteger('repeat', 'times', times);
 
 	return string.repeat(times);
 }
@@ -925,7 +928,7 @@ export function dedent(strings: TemplateStringsArray, ...values: unknown[]): str
 export function dedent(input: string | TemplateStringsArray, ...values: unknown[]): string {
 	if (typeof input === 'string') return dedentParts([input])[0];
 
-	if (!Array.isArray(input)) throw new TypeError(`dedent: expected a string or a template strings array, received ${typeof input}`);
+	if (!Array.isArray(input)) throw new TypeError(`dedent: \`input\` must be a string or a template strings array, got ${describe(input)}`);
 
 	const literals = input.map(function (cooked: string | undefined, index: number): string {
 		return cooked ?? input.raw[index];
@@ -974,13 +977,14 @@ export interface WordWrapOptions {
  * @param {WordWrapOptions} [options={}] - `breakLongWords` (default `false`) and `newline` (default `'\n'`)
  * @returns {string} The wrapped text
  * @throws {RangeError} when `width` is less than 1, `NaN` or a non-integer finite number
+ * @throws {TypeError} when `width` is not a number
  * @example
  * wordWrap('The quick brown fox jumps', 10); // => 'The quick\nbrown fox\njumps'
  * wordWrap('abcdefghij xy', 4, { breakLongWords: true }); // => 'abcd\nefgh\nij\nxy'
  * wordWrap('a b c', 3, { newline: '<br>' }); // => 'a b<br>c'
  */
 export function wordWrap(string: string, width: number, options: WordWrapOptions = {}): string {
-	if (!(width >= 1) || (!Number.isInteger(width) && width !== Infinity)) throw new RangeError(`wordWrap: width must be a positive integer, received ${String(width)}`);
+	assertInteger('wordWrap', 'width', width, 1, true);
 
 	const { breakLongWords = false, newline = '\n' } = options;
 	const output: string[] = [];
@@ -1045,6 +1049,7 @@ export interface MaskOptions {
  * @param {MaskOptions} [options={}] - `visibleStart` (default `0`), `visibleEnd` (default `4`) and `char` (default `'*'`)
  * @returns {string} The masked string
  * @throws {RangeError} when `visibleStart` or `visibleEnd` is not a non-negative integer, or `char` is not exactly one grapheme
+ * @throws {TypeError} when `visibleStart` or `visibleEnd` is not a number
  * @example
  * mask('4111111111111111'); // => '************1111'
  * mask('john.doe@mail.com', { visibleStart: 2, visibleEnd: 9, char: '•' }); // => 'jo••••••@mail.com'
@@ -1053,11 +1058,10 @@ export interface MaskOptions {
 export function mask(string: string, options: MaskOptions = {}): string {
 	const { visibleStart = 0, visibleEnd = 4, char = '*' } = options;
 
-	if (!Number.isInteger(visibleStart) || visibleStart < 0) throw new RangeError(`mask: visibleStart must be a non-negative integer, received ${String(visibleStart)}`);
+	assertInteger('mask', 'visibleStart', visibleStart);
+	assertInteger('mask', 'visibleEnd', visibleEnd);
 
-	if (!Number.isInteger(visibleEnd) || visibleEnd < 0) throw new RangeError(`mask: visibleEnd must be a non-negative integer, received ${String(visibleEnd)}`);
-
-	if (graphemeLength(char) !== 1) throw new RangeError(`mask: char must be exactly one grapheme, received ${JSON.stringify(char)}`);
+	if (graphemeLength(char) !== 1) throw new RangeError(`mask: \`char\` must be exactly one grapheme, got ${JSON.stringify(char)}`);
 
 	const graphemes = splitGraphemes(string);
 	const hidden = graphemes.length - visibleStart - visibleEnd;
@@ -1085,26 +1089,23 @@ const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`, injectable for deterministic results
  * @returns {string} The random string
  * @throws {RangeError} when `length` is not a non-negative integer, `alphabet` is empty, or `random()` returns a value outside `[0, 1)`
+ * @throws {TypeError} when `length` is not a number, or `random` is not a function
  * @example
  * randomString(8); // e.g. 'aZ3kP0qx'
  * randomString(6, '0123456789'); // e.g. '402913'
  * randomString(3, 'ab', function () { return 0; }); // => 'aaa'
  */
 export function randomString(length: number, alphabet: string = ALPHANUMERIC, random: RandomGenerator = Math.random): string {
-	if (!Number.isInteger(length) || length < 0) throw new RangeError(`randomString: length must be a non-negative integer, received ${String(length)}`);
+	assertInteger('randomString', 'length', length);
 
 	const characters = Array.from(new Set(alphabet));
 
-	if (characters.length === 0) throw new RangeError('randomString: alphabet must not be empty');
+	if (characters.length === 0) throw new RangeError('randomString: `alphabet` must not be empty');
 
 	let result = '';
 
 	for (let index = 0; index < length; index++) {
-		const value = random();
-
-		if (!(value >= 0 && value < 1)) throw new RangeError(`randomString: \`random()\` must return a number in [0, 1), got ${String(value)}`);
-
-		result += characters[Math.floor(value * characters.length)];
+		result += characters[Math.floor(draw('randomString', random) * characters.length)];
 	}
 
 	return result;

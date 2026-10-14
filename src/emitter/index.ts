@@ -1,10 +1,6 @@
 import { AbortError, TimeoutError } from '../async/index.js';
+import { assertDelay, assertFunction } from '../utils/assert.js';
 import type { AbortSignalLike, AnyFunction } from '../utils/index.js';
-
-/**
- * Largest delay accepted by `setTimeout` (2^31 - 1 ms).
- */
-const MAX_TIMEOUT = 2 ** 31 - 1;
 
 /**
  * The reserved event name used to listen to every event.
@@ -95,17 +91,6 @@ interface Registration {
 }
 
 /**
- * Throws a `TypeError` unless `value` is callable.
- * @param {string} caller - Name of the public method, used in the error message
- * @param {unknown} value - The value to validate
- * @returns {void}
- * @throws {TypeError} when `value` is not a function
- */
-function assertHandler(caller: string, value: unknown): asserts value is AnyFunction {
-	if (typeof value !== 'function') throw new TypeError(`${caller}: expected the handler to be a function, got ${typeof value}`);
-}
-
-/**
  * Creates a strictly typed, synchronous event emitter.
  *
  * Semantics:
@@ -122,9 +107,10 @@ function assertHandler(caller: string, value: unknown): asserts value is AnyFunc
  * - `'*'` is reserved for wildcard listeners and cannot be emitted.
  * @template Events - Maps each event name to its payload type (`void` payloads can be emitted without argument)
  * @returns {Emitter<Events>} A new emitter
- * @throws {TypeError} from `on`/`once`/`off` when the handler is not a function, from `emit` when the event is `'*'`, and (as a rejection)
- *   from `waitFor` when the event is `'*'` or `filter` is not a function
- * @throws {RangeError} (as a rejection) from `waitFor` when `timeout` is neither a number between `0` and `2^31 - 1` nor `Infinity`
+ * @throws {TypeError} from `on`/`once`/`off` when the handler is not a function, and (as a rejection) from `waitFor` when `filter` is not
+ *   a function or `timeout` is not a number
+ * @throws {RangeError} from `emit` when the event is `'*'`, and (as a rejection) from `waitFor` when the event is `'*'` or `timeout` is
+ *   neither a number between `0` and `2^31 - 1` nor `Infinity`
  * @example
  * const events = createEmitter<{ ready: void; message: { text: string } }>();
  * const received: string[] = [];
@@ -150,7 +136,7 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	 * @throws {TypeError} when `handler` is not a function
 	 */
 	function add(caller: string, event: PropertyKey, handler: unknown, once: boolean): Unsubscribe {
-		assertHandler(caller, handler);
+		assertFunction(caller, 'handler', handler);
 
 		const registration: Registration = { handler: handler as (...args: unknown[]) => unknown, once, active: true };
 
@@ -213,14 +199,14 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	}
 
 	/**
-	 * Throws a `TypeError` when `event` is the reserved wildcard name.
+	 * Throws a `RangeError` when `event` is the reserved wildcard name.
 	 * @param {string} caller - Name of the public method, used in the error message
 	 * @param {PropertyKey} event - The event name
 	 * @returns {void}
-	 * @throws {TypeError} when `event` is `'*'`
+	 * @throws {RangeError} when `event` is `'*'`
 	 */
 	function assertNotWildcard(caller: string, event: PropertyKey): void {
-		if (event === WILDCARD) throw new TypeError(`${caller}: '*' is reserved for wildcard listeners and cannot be used as an event name here`);
+		if (event === WILDCARD) throw new RangeError(`${caller}: \`event\` must not be '*' (reserved for wildcard listeners), got '*'`);
 	}
 
 	const emitter: Emitter<Events> = {
@@ -233,7 +219,7 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		},
 
 		off(event: PropertyKey, handler: AnyFunction): boolean {
-			assertHandler('off', handler);
+			assertFunction('off', 'handler', handler);
 
 			return remove(event, function (registration) {
 				return registration.handler === handler;
@@ -279,10 +265,8 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 				const { signal, timeout = Infinity, filter } = options;
 
 				assertNotWildcard('waitFor', event);
-				if (timeout !== Infinity && (typeof timeout !== 'number' || !(timeout >= 0 && timeout <= MAX_TIMEOUT))) {
-					throw new RangeError(`waitFor: \`timeout\` must be Infinity or a number between 0 and ${MAX_TIMEOUT}, got ${String(timeout)}`);
-				}
-				if (filter !== undefined) assertHandler('waitFor', filter);
+				assertDelay('waitFor', 'timeout', timeout, true);
+				if (filter !== undefined) assertFunction('waitFor', 'filter', filter);
 
 				if (signal?.aborted) {
 					reject(signal.reason ?? new AbortError());

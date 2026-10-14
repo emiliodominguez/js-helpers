@@ -1,3 +1,4 @@
+import { assertInteger, assertNumber, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
 /**
@@ -56,20 +57,17 @@ function compareAscending(a: number, b: number): number {
 }
 
 /**
- * Throws a `RangeError` unless every given value is an integer.
- * @param {string} name - Name of the calling function, used in the error message
+ * Throws unless both arguments `a` and `b` are integers.
+ * @param {string} caller - Name of the calling function, used in the error message
  * @param {number} a - First value to check
  * @param {number} b - Second value to check
  * @returns {void}
+ * @throws {TypeError} when `a` or `b` is not a number
  * @throws {RangeError} when `a` or `b` is not an integer
- * @example
- * assertIntegers('gcd', 4, 6); // ok
- * assertIntegers('gcd', 4, 1.5); // throws RangeError
  */
-function assertIntegers(name: string, a: number, b: number): void {
-	if (!Number.isInteger(a) || !Number.isInteger(b)) {
-		throw new RangeError(`${name}: arguments must be integers, received ${a} and ${b}`);
-	}
+function assertIntegers(caller: string, a: number, b: number): void {
+	assertNumber(caller, 'a', a, Number.isInteger(a), 'an integer');
+	assertNumber(caller, 'b', b, Number.isInteger(b), 'an integer');
 }
 
 /**
@@ -114,6 +112,7 @@ export function sum(numbers: ReadonlyArray<number>): number {
  * @param {number} [decimals=0] - The number of decimal places to keep (integer, may be negative)
  * @returns {number} The rounded number
  * @throws {RangeError} when `decimals` is not an integer
+ * @throws {TypeError} when `decimals` is not a number
  * @example
  * round(1.2345, 2); // => 1.23
  * round(1.005, 2); // => 1.01
@@ -122,9 +121,7 @@ export function sum(numbers: ReadonlyArray<number>): number {
  * round(1e-7, 2); // => 0
  */
 export function round(number: number, decimals = 0): number {
-	if (!Number.isInteger(decimals)) {
-		throw new RangeError(`round: decimals must be an integer, received ${decimals}`);
-	}
+	assertNumber('round', 'decimals', decimals, Number.isInteger(decimals), 'an integer');
 	if (!Number.isFinite(number)) return number;
 
 	const negative = number < 0 || Object.is(number, -0);
@@ -155,15 +152,14 @@ export function average(numbers: ReadonlyArray<number>): number {
  * @param {number} number - A non-negative integer
  * @returns {number} `number!` (`Infinity` when `number > 170`)
  * @throws {RangeError} when `number` is negative or not an integer
+ * @throws {TypeError} when `number` is not a number
  * @example
  * factorial(0); // => 1
  * factorial(5); // => 120
  * factorial(171); // => Infinity
  */
 export function factorial(number: number): number {
-	if (!Number.isInteger(number) || number < 0) {
-		throw new RangeError(`factorial: argument must be a non-negative integer, received ${number}`);
-	}
+	assertInteger('factorial', 'number', number);
 	if (number > 170) return Infinity;
 	let result = 1;
 	for (let i = 2; i <= number; i++) result *= i;
@@ -330,19 +326,19 @@ export function remainder(dividend: number, divisor: number): number {
  * @param {number} maximum - Exclusive upper bound
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`
  * @returns {number} A random number `n` with `minimum <= n < maximum`
- * @throws {RangeError} when a bound is not finite or `minimum > maximum`
+ * @throws {TypeError} when a bound is not a number, or `random` is not a function
+ * @throws {RangeError} when a bound is not finite, `minimum > maximum`, or `random()` returns a value outside `[0, 1)`
  * @example
  * randomBetween(1, 10); // e.g. 4.7181…
  * randomBetween(0, 10, function () { return 0.5; }); // => 5
  */
 export function randomBetween(minimum: number, maximum: number, random: RandomGenerator = Math.random): number {
-	if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
-		throw new RangeError(`randomBetween: bounds must be finite, received ${minimum} and ${maximum}`);
-	}
-	if (minimum > maximum) throw new RangeError(`randomBetween: minimum (${minimum}) must not be greater than maximum (${maximum})`);
+	assertNumber('randomBetween', 'minimum', minimum, Number.isFinite(minimum), 'a finite number');
+	assertNumber('randomBetween', 'maximum', maximum, Number.isFinite(maximum), 'a finite number');
+	if (minimum > maximum) throw new RangeError(`randomBetween: \`minimum\` must not be greater than \`maximum\`, got ${minimum} and ${maximum}`);
 	if (minimum === maximum) return minimum;
 
-	const r = random();
+	const r = draw('randomBetween', random);
 	const span = maximum - minimum;
 	const value = Number.isFinite(span) ? minimum + r * span : minimum * (1 - r) + maximum * r;
 	// Floating-point rounding can land exactly on `maximum`; keep the range half-open.
@@ -356,19 +352,19 @@ export function randomBetween(minimum: number, maximum: number, random: RandomGe
  * @param {number} maximum - Inclusive upper bound
  * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`
  * @returns {number} A random integer `n` with `ceil(minimum) <= n <= floor(maximum)`
- * @throws {RangeError} when a bound is not finite, or no integer lies in `[minimum, maximum]` (including `minimum > maximum`)
+ * @throws {TypeError} when a bound is not a number, or `random` is not a function
+ * @throws {RangeError} when a bound is not finite, no integer lies in `[minimum, maximum]` (including `minimum > maximum`), or `random()` returns a value outside `[0, 1)`
  * @example
  * randomIntBetween(1, 6); // e.g. 4
  * randomIntBetween(1.2, 3.8); // 2 or 3: only the integers inside the range
  */
 export function randomIntBetween(minimum: number, maximum: number, random: RandomGenerator = Math.random): number {
-	if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
-		throw new RangeError(`randomIntBetween: bounds must be finite, received ${minimum} and ${maximum}`);
-	}
+	assertNumber('randomIntBetween', 'minimum', minimum, Number.isFinite(minimum), 'a finite number');
+	assertNumber('randomIntBetween', 'maximum', maximum, Number.isFinite(maximum), 'a finite number');
 	const low = Math.ceil(minimum);
 	const high = Math.floor(maximum);
 	if (low > high) throw new RangeError(`randomIntBetween: no integer exists in [${minimum}, ${maximum}]`);
-	return Math.min(high, low + Math.floor(random() * (high - low + 1))) + 0;
+	return Math.min(high, low + Math.floor(draw('randomIntBetween', random) * (high - low + 1))) + 0;
 }
 
 /**
@@ -406,7 +402,7 @@ export function toDegrees(radians: number): number {
  * clamp(5, 0, 10); // => 5
  */
 export function clamp(value: number, minimum: number, maximum: number): number {
-	if (!(minimum <= maximum)) throw new RangeError(`clamp: minimum (${minimum}) must not be greater than maximum (${maximum})`);
+	if (!(minimum <= maximum)) throw new RangeError(`clamp: \`minimum\` must not be greater than \`maximum\`, got ${minimum} and ${maximum}`);
 	return Math.min(Math.max(value, minimum), maximum);
 }
 
@@ -599,6 +595,7 @@ export function standardDeviation(numbers: ReadonlyArray<number>, options: Varia
  * @param {number} b - Second integer
  * @returns {number} The greatest common divisor of `a` and `b`
  * @throws {RangeError} when `a` or `b` is not an integer
+ * @throws {TypeError} when `a` or `b` is not a number
  * @example
  * gcd(12, 18); // => 6
  * gcd(-4, 6); // => 2
@@ -622,6 +619,7 @@ export function gcd(a: number, b: number): number {
  * @param {number} b - Second integer
  * @returns {number} The least common multiple of `a` and `b`
  * @throws {RangeError} when `a` or `b` is not an integer
+ * @throws {TypeError} when `a` or `b` is not a number
  * @example
  * lcm(4, 6); // => 12
  * lcm(-3, 5); // => 15
@@ -768,6 +766,7 @@ function decimalPlaces(value: number): number {
  * @param {number} q - The quantile to compute, in `[0, 1]` (`0` gives the minimum, `0.5` the median, `1` the maximum)
  * @returns {number} The quantile, or `NaN` if the array is empty or contains `NaN`
  * @throws {RangeError} when `q` is not in `[0, 1]` (including `NaN`)
+ * @throws {TypeError} when `q` is not a number
  * @example
  * quantile([1, 2, 3, 4], 0.5); // => 2.5
  * quantile([1, 2, 3, 4], 0.25); // => 1.75
@@ -775,7 +774,7 @@ function decimalPlaces(value: number): number {
  * quantile([], 0.5); // => NaN
  */
 export function quantile(numbers: ReadonlyArray<number>, q: number): number {
-	if (!(q >= 0 && q <= 1)) throw new RangeError(`quantile: q must be in [0, 1], received ${q}`);
+	assertNumber('quantile', 'q', q, q >= 0 && q <= 1, 'a number in [0, 1]');
 	const length = numbers.length;
 	if (length === 0) return NaN;
 	const sorted = Array.from(numbers).sort(compareAscending);
@@ -793,12 +792,13 @@ export function quantile(numbers: ReadonlyArray<number>, q: number): number {
  * @param {number} p - The percentile to compute, in `[0, 100]`
  * @returns {number} The percentile, or `NaN` if the array is empty or contains `NaN`
  * @throws {RangeError} when `p` is not in `[0, 100]` (including `NaN`)
+ * @throws {TypeError} when `p` is not a number
  * @example
  * percentile([1, 2, 3, 4], 50); // => 2.5
  * percentile([15, 20, 35, 40, 50], 40); // => 29
  */
 export function percentile(numbers: ReadonlyArray<number>, p: number): number {
-	if (!(p >= 0 && p <= 100)) throw new RangeError(`percentile: p must be in [0, 100], received ${p}`);
+	assertNumber('percentile', 'p', p, p >= 0 && p <= 100, 'a number in [0, 100]');
 	return quantile(numbers, p / 100);
 }
 
@@ -839,6 +839,7 @@ export function cumulativeSum(numbers: Iterable<number>): number[] {
  * @param {ApproximatelyEqualOptions} [options={}] - `relative` (default `1e-9`) and `absolute` (default `0`) tolerances
  * @returns {boolean} `true` if the numbers are within tolerance of each other
  * @throws {RangeError} when a tolerance is negative or `NaN`
+ * @throws {TypeError} when a tolerance is not a number
  * @example
  * approximatelyEqual(0.1 + 0.2, 0.3); // => true
  * approximatelyEqual(1, 1.1); // => false
@@ -848,9 +849,8 @@ export function cumulativeSum(numbers: Iterable<number>): number[] {
  */
 export function approximatelyEqual(a: number, b: number, options: ApproximatelyEqualOptions = {}): boolean {
 	const { relative = 1e-9, absolute = 0 } = options;
-	if (!(relative >= 0) || !(absolute >= 0)) {
-		throw new RangeError(`approximatelyEqual: tolerances must be non-negative, received relative ${relative} and absolute ${absolute}`);
-	}
+	assertNumber('approximatelyEqual', 'relative', relative, relative >= 0, 'a number >= 0');
+	assertNumber('approximatelyEqual', 'absolute', absolute, absolute >= 0, 'a number >= 0');
 	if (a === b) return true;
 	if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
 	const difference = Math.abs(a - b);
@@ -863,6 +863,7 @@ export function approximatelyEqual(a: number, b: number, options: ApproximatelyE
  * @param {ReadonlyArray<number>} values - The values to average
  * @param {ReadonlyArray<number>} weights - One finite, non-negative weight per value
  * @returns {number} The weighted mean, or `NaN` when the total weight is `0` (including empty arrays)
+ * @throws {TypeError} when a weight is a non-number that does not coerce to a valid weight
  * @throws {RangeError} when `values` and `weights` have different lengths, or a weight is negative, `NaN` or infinite
  * @example
  * weightedAverage([80, 90], [1, 3]); // => 87.5
@@ -871,12 +872,12 @@ export function approximatelyEqual(a: number, b: number, options: ApproximatelyE
  */
 export function weightedAverage(values: ReadonlyArray<number>, weights: ReadonlyArray<number>): number {
 	if (values.length !== weights.length) {
-		throw new RangeError(`weightedAverage: values and weights must have the same length, received ${values.length} and ${weights.length}`);
+		throw new RangeError(`weightedAverage: \`values\` and \`weights\` must have the same length, got ${values.length} and ${weights.length}`);
 	}
 	let largestWeight = 0;
 	for (let i = 0; i < weights.length; i++) {
 		const weight = weights[i];
-		if (!(weight >= 0 && weight < Infinity)) throw new RangeError(`weightedAverage: weights must be finite and non-negative, received ${weight} at index ${i}`);
+		if (!(weight >= 0 && weight < Infinity)) assertNumber('weightedAverage', `weights[${i}]`, weight, false, 'a finite number >= 0');
 		if (weight > largestWeight) largestWeight = weight;
 	}
 	if (largestWeight === 0) return NaN;
@@ -897,14 +898,15 @@ export function weightedAverage(values: ReadonlyArray<number>, weights: Readonly
  * @param {ReadonlyArray<number>} numbers - The finite numbers to rescale
  * @returns {number[]} A new array of the same length with values in `[0, 1]`
  * @throws {RangeError} when an element is not finite (`NaN` or `±Infinity`)
+ * @throws {TypeError} when an element is not a number
  * @example
  * normalize([10, 20, 15]); // => [0, 1, 0.5]
  * normalize([5, 5]); // => [0, 0]
  * normalize([]); // => []
  */
 export function normalize(numbers: ReadonlyArray<number>): number[] {
-	for (const value of numbers) {
-		if (!Number.isFinite(value)) throw new RangeError(`normalize: elements must be finite, received ${value}`);
+	for (let i = 0; i < numbers.length; i++) {
+		if (!Number.isFinite(numbers[i])) assertNumber('normalize', `numbers[${i}]`, numbers[i], false, 'a finite number');
 	}
 	const low = min(numbers);
 	const high = max(numbers);
@@ -931,6 +933,7 @@ export function normalize(numbers: ReadonlyArray<number>): number[] {
  * @param {FormatBytesOptions} [options={}] - `decimals` (default `1`) and `base` (`1000` (default) or `1024`)
  * @returns {string} The formatted size, e.g. `'1.5 kB'`
  * @throws {RangeError} when `bytes` is not finite, `decimals` is not a non-negative integer, or `base` is not `1000` or `1024`
+ * @throws {TypeError} when `bytes` or `decimals` is not a number
  * @example
  * formatBytes(0); // => '0 B'
  * formatBytes(1500); // => '1.5 kB'
@@ -940,9 +943,9 @@ export function normalize(numbers: ReadonlyArray<number>): number[] {
  */
 export function formatBytes(bytes: number, options: FormatBytesOptions = {}): string {
 	const { decimals = 1, base = 1000 } = options;
-	if (!Number.isFinite(bytes)) throw new RangeError(`formatBytes: bytes must be finite, received ${bytes}`);
-	if (!Number.isInteger(decimals) || decimals < 0) throw new RangeError(`formatBytes: decimals must be a non-negative integer, received ${decimals}`);
-	if (base !== 1000 && base !== 1024) throw new RangeError(`formatBytes: base must be 1000 or 1024, received ${base}`);
+	assertNumber('formatBytes', 'bytes', bytes, Number.isFinite(bytes), 'a finite number');
+	assertInteger('formatBytes', 'decimals', decimals);
+	if (base !== 1000 && base !== 1024) throw new RangeError(`formatBytes: \`base\` must be 1000 or 1024, got ${base}`);
 
 	const units = base === 1024 ? IEC_BYTE_UNITS : SI_BYTE_UNITS;
 	const magnitude = Math.abs(bytes);
@@ -964,6 +967,7 @@ export function formatBytes(bytes: number, options: FormatBytesOptions = {}): st
  * @param {number} n - An integer
  * @returns {string} The number followed by its ordinal suffix
  * @throws {RangeError} when `n` is not an integer (including `NaN` and `±Infinity`)
+ * @throws {TypeError} when `n` is not a number
  * @example
  * ordinal(1); // => '1st'
  * ordinal(22); // => '22nd'
@@ -972,7 +976,7 @@ export function formatBytes(bytes: number, options: FormatBytesOptions = {}): st
  * ordinal(-3); // => '-3rd'
  */
 export function ordinal(n: number): string {
-	if (!Number.isInteger(n)) throw new RangeError(`ordinal: argument must be an integer, received ${n}`);
+	assertNumber('ordinal', 'n', n, Number.isInteger(n), 'an integer');
 	const digits = BigInt(n).toString();
 	const lastTwo = Number(digits.slice(-2).replace('-', ''));
 	const last = lastTwo % 10;
@@ -993,6 +997,7 @@ export function ordinal(n: number): string {
  * @param {number} n - The degree of the root, a positive integer
  * @returns {number} The real `n`-th root of `value`, or `NaN` when it does not exist
  * @throws {RangeError} when `n` is not a positive integer
+ * @throws {TypeError} when `n` is not a number
  * @example
  * nthRoot(27, 3); // => 3
  * nthRoot(-32, 5); // => -2
@@ -1000,7 +1005,7 @@ export function ordinal(n: number): string {
  * nthRoot(-16, 4); // => NaN
  */
 export function nthRoot(value: number, n: number): number {
-	if (!Number.isInteger(n) || n < 1) throw new RangeError(`nthRoot: n must be a positive integer, received ${n}`);
+	assertInteger('nthRoot', 'n', n, 1);
 	if (n === 1) return value;
 	if (n === 2) return Math.sqrt(value);
 	if (n === 3) return Math.cbrt(value);
@@ -1023,6 +1028,7 @@ export function nthRoot(value: number, n: number): number {
  * @param {number} step - The positive, finite step size
  * @returns {number} The multiple of `step` nearest to `value`
  * @throws {RangeError} when `step` is not a finite number greater than `0`
+ * @throws {TypeError} when `step` is not a number
  * @example
  * roundToStep(1.13, 0.25); // => 1.25
  * roundToStep(7, 5); // => 5
@@ -1030,7 +1036,7 @@ export function nthRoot(value: number, n: number): number {
  * roundToStep(0.3, 0.1); // => 0.3
  */
 export function roundToStep(value: number, step: number): number {
-	if (!(step > 0 && step < Infinity)) throw new RangeError(`roundToStep: step must be a finite number greater than 0, received ${step}`);
+	assertNumber('roundToStep', 'step', step, step > 0 && step < Infinity, 'a finite number > 0');
 	if (!Number.isFinite(value)) return value;
 	// Work on the magnitude and restore the sign at the end, exactly like `round` (ties away from zero, `-0` preserved).
 	const negative = value < 0 || Object.is(value, -0);

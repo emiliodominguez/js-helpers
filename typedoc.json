@@ -3,7 +3,7 @@
 	"name": "js-helpers",
 	"entryPoints": ["src/arrays", "src/async", "src/cache", "src/color", "src/date", "src/decorators", "src/emitter", "src/format", "src/functions", "src/guards", "src/iterables", "src/math", "src/objects", "src/random", "src/store", "src/strings", "src/url", "src/validate", "src/utils"],
 	"entryPointStrategy": "expand",
-	"exclude": ["**/*.spec.ts"],
+	"exclude": ["**/*.spec.ts", "src/utils/assert.ts"],
 	"tsconfig": "tsconfig.build.json",
 	"out": "docs/reference",
 	"readme": "README.md",
