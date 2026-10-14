@@ -1,7 +1,7 @@
 {
 	"$schema": "https://typedoc.org/schema.json",
 	"name": "js-helpers",
-	"entryPoints": ["src/arrays", "src/async", "src/color", "src/date", "src/decorators", "src/functions", "src/guards", "src/math", "src/objects", "src/strings", "src/url", "src/utils"],
+	"entryPoints": ["src/arrays", "src/async", "src/cache", "src/color", "src/date", "src/decorators", "src/emitter", "src/functions", "src/guards", "src/iterables", "src/math", "src/objects", "src/random", "src/store", "src/strings", "src/url", "src/utils"],
 	"entryPointStrategy": "expand",
 	"exclude": ["**/*.spec.ts"],
 	"tsconfig": "tsconfig.build.json",

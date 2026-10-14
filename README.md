@@ -8,13 +8,13 @@
 
 Strictly-typed, zero-dependency TypeScript utilities, verified with property-based tests.
 
-**300+ functions** across 11 modules: `arrays`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `color`, `url` and `decorators`.
+**350+ functions** across 16 modules: `arrays`, `iterables`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `color`, `url`, `cache`, `emitter`, `store`, `random` and `decorators`.
 
 - **Correct first.** Unicode-aware strings, DST-safe dates, compensated summation, injection-safe string replacement, a deep merge that blocks prototype pollution, and deep clone/equality that handle circular references.
 - **Typed for real.** Type predicates that narrow, path-aware getters (`'user.posts.0.title'` resolves to `string | undefined`), tuple-typed `zip`, typed `curry`/`compose`/`pipe`, and a left-to-right `Merge` type.
-- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 1,500+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
+- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 1,850+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
 - **Pure and predictable.** Nothing mutates its input unless the name says so. Bad arguments throw a descriptive `RangeError`/`TypeError` instead of returning garbage, looping forever or overflowing the stack.
-- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 23 kB gzipped; a typical module is 1.5–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
+- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 28 kB gzipped; a typical module is 1–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
 
 ## Install
 
@@ -62,6 +62,11 @@ objects.isEqual(new Map([[1, { a: [1] }]]), new Map([[1, { a: [1] }]])); // true
 | [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`addBusinessDays`, ISO weeks, quarters, `getAge`, `formatDate`, `formatDuration`/`parseDuration`  |
 | [`color`](./docs/API.md#color)           | hex/RGB/HSL conversion, `mix`, `lighten`/`darken`, WCAG `contrastRatio`, `getReadableTextColor`, `meetsContrast`                 |
 | [`url`](./docs/API.md#url)               | `buildQueryString`/`parseQueryString` (pollution-safe), `withQuery`, `joinUrl`, `getQueryParam`                                  |
+| [`iterables`](./docs/API.md#iterables)   | lazy `map`/`filter`/`take`/`chunk`/`zip`/`windowed` over any (async) iterable, infinite sources, exact pull counts               |
+| [`cache`](./docs/API.md#cache)           | O(1) `createLRUCache` with TTL, eviction reasons and an injectable clock; drop-in cache for `memoize`                            |
+| [`emitter`](./docs/API.md#emitter)       | typed `createEmitter` with wildcard listeners, `once`, `waitFor` (timeout/abort) and error isolation                             |
+| [`store`](./docs/API.md#store)           | `createStore` for `useSyncExternalStore`, with equality-gated updates and cached `select()` stores                               |
+| [`random`](./docs/API.md#random)         | seeded `createRandom` (cross-platform deterministic), secure `randomId`/`randomUUID`/`randomBytes`, `weightedRandom`             |
 | [`decorators`](./docs/API.md#decorators) | `@memoize`/`@once` (per instance), `@bound`, `@debounced`, `@throttled`, `@retryable`, `@timeout`, `@readonly`, `@deprecated`    |
 
 📖 **[Full API reference →](./docs/API.md)**. Every export is listed there with its summary. The JSDoc on each function documents its parameters, return value, thrown errors and examples, so your editor shows them on hover. Run `yarn docs` to get a browsable TypeDoc site.
@@ -107,6 +112,50 @@ getReadableTextColor('#1e3a8a'); // '#ffffff'
 withQuery('/search?page=2#results', { q: 'café', page: 3 }); // '/search?q=caf%C3%A9&page=3#results'
 ```
 
+### Building blocks
+
+```ts
+import { createLRUCache } from '@emiliodominguez/js-helpers/cache';
+import { createEmitter } from '@emiliodominguez/js-helpers/emitter';
+import { memoize } from '@emiliodominguez/js-helpers/functions';
+import { count, filter, map, take, toArray } from '@emiliodominguez/js-helpers/iterables';
+import { createRandom } from '@emiliodominguez/js-helpers/random';
+import { createStore } from '@emiliodominguez/js-helpers/store';
+
+// Bounded, expiring memoization.
+const getUser = memoize(fetchUser, { cache: createLRUCache({ max: 500, ttl: 60_000 }) });
+
+// React-ready state: useSyncExternalStore(counter.subscribe, counter.getState)
+const counter = createStore({ count: 0 });
+counter.setState(function (state) {
+	return { count: state.count + 1 };
+});
+
+// Typed events: payloads are checked, `void` events take no argument.
+const events = createEmitter<{ login: { userId: string }; logout: void }>();
+events.on('login', function ({ userId }) {
+	console.log(userId);
+});
+events.emit('logout');
+
+// Lazy pipelines over infinite sources: only 6 items are ever pulled.
+const squares = map(count(1), function (n) {
+	return n * n;
+});
+toArray(
+	take(
+		filter(squares, function (n) {
+			return n % 2 === 0;
+		}),
+		3
+	)
+); // [4, 16, 36]
+
+// Reproducible randomness (tests, simulations, procedural content).
+const rng = createRandom('docs');
+[rng.int(1, 6), rng.int(1, 6), rng.int(1, 6)]; // [3, 3, 5] on every platform
+```
+
 ### Decorators
 
 The decorators detect at runtime which decorator style they were applied with. They work with all three:
@@ -142,17 +191,22 @@ Zero dependencies. Sizes are for the minified ESM build; bundlers only include t
 | ------------ | -------: | ------: |
 | `arrays`     |   7.1 kB |  2.6 kB |
 | `async`      |   5.7 kB |  2.2 kB |
+| `cache`      |   2.1 kB |  0.9 kB |
 | `color`      |   3.5 kB |  1.6 kB |
 | `date`       |  10.1 kB |  3.5 kB |
 | `decorators` |   4.7 kB |  1.5 kB |
+| `emitter`    |   2.1 kB |  1.0 kB |
 | `functions`  |   5.4 kB |  2.1 kB |
 | `guards`     |   4.3 kB |  1.5 kB |
+| `iterables`  |   5.4 kB |  1.8 kB |
 | `math`       |   8.3 kB |  2.9 kB |
 | `objects`    |  10.8 kB |  3.7 kB |
+| `random`     |   5.0 kB |  2.1 kB |
+| `store`      |   1.5 kB |  0.7 kB |
 | `strings`    |   9.0 kB |  3.6 kB |
 | `url`        |   2.8 kB |  1.3 kB |
 
-All modules together are about 23 kB gzipped. CI enforces the total with `yarn check:size`.
+All modules together are about 28 kB gzipped. CI enforces the total with `yarn check:size`.
 
 ## Testing philosophy
 

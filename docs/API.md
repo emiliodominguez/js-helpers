@@ -4,7 +4,7 @@
 > Every function documents its parameters, return value, thrown errors and examples in its JSDoc, so your editor shows the full details on hover.
 > For a browsable HTML version run `yarn docs` (TypeDoc, output in `docs/reference`).
 
-[`arrays`](#arrays) · [`objects`](#objects) · [`guards`](#guards) · [`strings`](#strings) · [`url`](#url) · [`math`](#math) · [`functions`](#functions) · [`async`](#async) · [`color`](#color) · [`date`](#date) · [`decorators`](#decorators)
+[`arrays`](#arrays) · [`objects`](#objects) · [`guards`](#guards) · [`strings`](#strings) · [`url`](#url) · [`math`](#math) · [`functions`](#functions) · [`async`](#async) · [`color`](#color) · [`date`](#date) · [`iterables`](#iterables) · [`cache`](#cache) · [`emitter`](#emitter) · [`store`](#store) · [`random`](#random) · [`decorators`](#decorators)
 
 ## arrays
 
@@ -422,6 +422,103 @@ import { … } from '@emiliodominguez/js-helpers/date';
 | `clampDate`          | Clamps a date into the closed range `[min, max]`.                                                                                                                                                                                                                                                                                                                        |
 | `formatDuration`     | Formats a millisecond duration as a compact string such as `'1d 2h 3m'`.                                                                                                                                                                                                                                                                                                 |
 | `parseDuration`      | Parses a duration string made of `<number><unit>` tokens (units `d`, `h`, `m`, `s`, `ms`, lowercase; whitespace between and inside tokens is optional; decimals such as `'1.5h'` or `'.5s'` are allowed) into milliseconds, e.g. `'1h 30m'` → `5_400_000`.                                                                                                               |
+
+## iterables
+
+Lazy, generator-based pipelines over any (async) iterable, with exact pull counts and early-exit cleanup.
+
+```ts
+import { … } from '@emiliodominguez/js-helpers/iterables';
+```
+
+| Export         | Description                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `count`        | Lazily count from `start` by `step`, forever: `start, start + step, start + 2 * step, ...`.                                                                                                                                     |
+| `repeatValue`  | Lazily yield the same value `times` times (forever by default).                                                                                                                                                                 |
+| `cycle`        | Lazily repeat the items of an iterable forever.                                                                                                                                                                                 |
+| `iterate`      | Lazily unfold a sequence from a seed: `seed, next(seed), next(next(seed)), ...`, forever.                                                                                                                                       |
+| `map`          | Lazily transform each item of an iterable (the lazy counterpart of `Array.prototype.map`).                                                                                                                                      |
+| `filter`       | Lazily keep the items matching a type guard, narrowing the item type.                                                                                                                                                           |
+| `flatMap`      | Lazily map each item to an iterable and flatten the results one level.                                                                                                                                                          |
+| `take`         | Lazily yield the first `n` items of an iterable (or all of them when it is shorter).                                                                                                                                            |
+| `drop`         | Lazily skip the first `n` items of an iterable and yield the rest.                                                                                                                                                              |
+| `takeWhile`    | Lazily yield items while `predicate` holds, stopping (and closing the source) at the first item that fails it.                                                                                                                  |
+| `dropWhile`    | Lazily skip items while `predicate` holds, then yield the first failing item and everything after it (`predicate` is no longer called once it has failed).                                                                      |
+| `chunk`        | Lazily split an iterable into consecutive chunks of `size` items; only the last chunk may be shorter.                                                                                                                           |
+| `windowed`     | Lazily yield the sliding windows of `size` consecutive items, starting every `step` items.                                                                                                                                      |
+| `zip`          | Lazily combine iterables item-wise into tuples, stopping at the end of the SHORTEST one (which may be infinite as long as another one is finite).                                                                               |
+| `enumerate`    | Lazily pair each item with its zero-based index.                                                                                                                                                                                |
+| `unique`       | Lazily drop items whose key (the item itself, or the result of `keyFn`) was already seen, keeping first occurrences.                                                                                                            |
+| `scan`         | Lazily yield the running accumulation of an iterable: the accumulator after each item (the initial value itself is NOT yielded, so the output has as many items as the input, and its last item is what `reduce` would return). |
+| `concat`       | Lazily yield the items of each iterable in turn.                                                                                                                                                                                |
+| `tap`          | Lazily call `fn` on each item as it passes through, yielding the items unchanged (for logging or debugging).                                                                                                                    |
+| `toArray`      | Collect the items of an iterable into a new array.                                                                                                                                                                              |
+| `reduce`       | Reduce the items of an iterable to a single value, starting from `initial`.                                                                                                                                                     |
+| `first`        | Return the first item of an iterable, pulling only that item (the source is then closed).                                                                                                                                       |
+| `last`         | Return the last item of an iterable (consuming all of it; never returns for an infinite iterable).                                                                                                                              |
+| `find`         | Return the first item matching a type guard, narrowing its type; stops pulling (and closes the source) once found.                                                                                                              |
+| `some`         | Tell whether at least one item matches a predicate; stops at (and closes the source on) the first match.                                                                                                                        |
+| `every`        | Tell whether every item matches a predicate; stops at (and closes the source on) the first mismatch.                                                                                                                            |
+| `countItems`   | Count the items of an iterable (consuming all of it), or only those matching `predicate` when given.                                                                                                                            |
+| `mapAsync`     | Lazily transform each item of an async (or sync) iterable with a possibly async function, one item at a time.                                                                                                                   |
+| `filterAsync`  | Lazily keep the items of an async (or sync) iterable matching a (sync) type guard, narrowing the item type.                                                                                                                     |
+| `takeAsync`    | Lazily yield the first `n` items of an async (or sync) iterable; exactly `n` items are pulled, then the source is closed.                                                                                                       |
+| `chunkAsync`   | Lazily split an async (or sync) iterable into consecutive chunks of `size` items; only the last chunk may be shorter.                                                                                                           |
+| `toArrayAsync` | Collect the items of an async (or sync) iterable into a new array, awaiting each item in turn (like `Array.fromAsync`).                                                                                                         |
+
+## cache
+
+O(1) LRU cache with optional TTL, eviction callbacks and an injectable clock; plugs into memoize.
+
+```ts
+import { … } from '@emiliodominguez/js-helpers/cache';
+```
+
+| Export           | Description                                                                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createLRUCache` | Creates a least-recently-used cache backed by a single `Map` (whose insertion order tracks recency), so `get`, `set`, `peek`, `has` and `delete` are O(1). |
+
+## emitter
+
+Typed event emitter with wildcard listeners, waitFor and error isolation.
+
+```ts
+import { … } from '@emiliodominguez/js-helpers/emitter';
+```
+
+| Export          | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `createEmitter` | Creates a strictly typed, synchronous event emitter. |
+
+## store
+
+Tiny state store compatible with React useSyncExternalStore, with derived selectors.
+
+```ts
+import { … } from '@emiliodominguez/js-helpers/store';
+```
+
+| Export        | Description                                                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createStore` | Creates a tiny synchronous state container, usable from React 18+ without any React dependency: `const state = useSyncExternalStore(store.subscribe, store.getState);` (methods can be passed unbound). |
+
+## random
+
+Seeded deterministic PRNG plus cryptographically secure ids, UUIDs and bytes.
+
+```ts
+import { … } from '@emiliodominguez/js-helpers/random';
+```
+
+| Export           | Description                                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `createRandom`   | Creates a deterministic, seedable pseudo-random generator (sfc32, seeded through the cyrb128 string hash). |
+| `randomBytes`    | Generates cryptographically secure random bytes using `globalThis.crypto.getRandomValues`.                 |
+| `randomUUID`     | Generates a random RFC 4122 / RFC 9562 version 4 UUID (e.g. `'3b241101-e2bb-4255-8caf-4136c566a962'`).     |
+| `randomId`       | Generates a cryptographically secure random identifier (nanoid-style).                                     |
+| `weightedRandom` | Picks a random item, with each item's chance proportional to its weight.                                   |
+| `randomGaussian` | Draws a normally distributed (Gaussian) random number using the Box–Muller transform.                      |
+| `randomBoolean`  | Returns `true` with the given probability.                                                                 |
 
 ## decorators
 

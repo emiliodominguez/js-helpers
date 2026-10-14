@@ -6,8 +6,8 @@ Full review and rewrite: every module is strictly typed, documented with complet
 
 ### Added
 
-- **New modules:** `guards`, `async`, `date`, `color` and `url`. The `date` module replaces an empty stub.
-- **~250 new utilities.** See [docs/API.md](./docs/API.md).
+- **New modules:** `guards`, `async`, `date`, `color`, `url`, `iterables`, `cache`, `emitter`, `store` and `random`. The `date` module replaces an empty stub.
+- **~300 new utilities.** See [docs/API.md](./docs/API.md).
 - **Packaging:**
     - ESM-only, minified, unbundled build (one file per module), with JSDoc kept in the declarations;
     - `exports` map with per-module deep imports;
@@ -77,6 +77,8 @@ Full review and rewrite: every module is strictly typed, documented with complet
     - `debounce` and `throttle` ignored waits above 2^31−1 ms;
     - `once` ran twice on re-entrant calls.
 - **async:** `retry` reported a retry after it had been aborted.
+- **functions:** `memoize` could return `undefined` when an expiring cache dropped an entry between its `has` and `get` lookups.
+- **arrays:** `removeDuplicates`, `union` and `symmetricDifference` turned `-0` into `0`.
 - **decorators:** `@bound` threw on frozen instances.
 - **date:**
     - a zero-amount add could shift the time by an hour during the repeated DST hour;

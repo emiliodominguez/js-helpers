@@ -1,18 +1,40 @@
 import * as root from '.';
 import { chunk } from './arrays/index.js';
+import { createLRUCache } from './cache/index.js';
 import { retry, withTimeout, mapWithConcurrency } from './async/index.js';
 import { getReadableTextColor } from './color/index.js';
 import { addMonths, formatDate } from './date/index.js';
 import { bound, memoize, readonly } from './decorators/index.js';
-import { debounce } from './functions/index.js';
+import { createEmitter } from './emitter/index.js';
+import { debounce, memoize as memoizeFn } from './functions/index.js';
 import { isDefined } from './guards/index.js';
+import { count, filter, map, take, toArray } from './iterables/index.js';
 import { deepMerge, getFromObjectByKeys } from './objects/index.js';
+import { createRandom } from './random/index.js';
+import { createStore } from './store/index.js';
 import { toKebabCase, toSlug } from './strings/index.js';
 import { withQuery } from './url/index.js';
 
 describe('root entry', function () {
 	it('should expose every module as a namespace', function () {
-		expect(Object.keys(root).sort()).toEqual(['arrays', 'async', 'color', 'date', 'decorators', 'functions', 'guards', 'math', 'objects', 'strings', 'url']);
+		expect(Object.keys(root).sort()).toEqual([
+			'arrays',
+			'async',
+			'cache',
+			'color',
+			'date',
+			'decorators',
+			'emitter',
+			'functions',
+			'guards',
+			'iterables',
+			'math',
+			'objects',
+			'random',
+			'store',
+			'strings',
+			'url'
+		]);
 		expect(root.strings.isEmpty).not.toBe(root.objects.isEmpty);
 		expect(root.objects.isString).toBe(root.guards.isString);
 	});
@@ -71,6 +93,46 @@ describe('README examples', function () {
 		expect(formatDate(addMonths(new Date(2024, 0, 31), 1), 'YYYY-MM-DD')).toBe('2024-02-29');
 		expect(getReadableTextColor('#1e3a8a')).toBe('#ffffff');
 		expect(withQuery('/search?page=2#results', { q: 'café', page: 3 })).toBe('/search?q=caf%C3%A9&page=3#results');
+	});
+
+	it('should match the "Building blocks" section', function () {
+		const fetchUser = jest.fn(function (id: number) {
+			return { id, name: `user-${id}` };
+		});
+		const getUser = memoizeFn(fetchUser, { cache: createLRUCache({ max: 500, ttl: 60_000 }) });
+		getUser(1);
+		getUser(1);
+		expect(fetchUser).toHaveBeenCalledTimes(1);
+
+		const counter = createStore({ count: 0 });
+		const seen: number[] = [];
+		counter.subscribe(function () {
+			seen.push(counter.getState().count);
+		});
+		counter.setState(function (state) {
+			return { count: state.count + 1 };
+		});
+		expect(seen).toEqual([1]);
+
+		const events = createEmitter<{ login: { userId: string }; logout: void }>();
+		const log: string[] = [];
+		events.on('login', function (payload) {
+			log.push(payload.userId);
+		});
+		events.emit('login', { userId: 'ada' });
+		events.emit('logout');
+		expect(log).toEqual(['ada']);
+
+		const squares = map(count(1), function (n) {
+			return n * n;
+		});
+		const evens = filter(squares, function (n) {
+			return n % 2 === 0;
+		});
+		expect(toArray(take(evens, 3))).toEqual([4, 16, 36]);
+
+		const rng = createRandom('docs');
+		expect([rng.int(1, 6), rng.int(1, 6), rng.int(1, 6)]).toEqual([3, 3, 5]);
 	});
 
 	it('should match the decorators section', function () {

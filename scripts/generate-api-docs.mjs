@@ -14,6 +14,11 @@ const MODULES = [
 	['async', 'Promise utilities: retries, timeouts, polling, limiters, keyed Promise.all and async debounce.'],
 	['color', 'Hex/RGB/HSL conversion, mixing, lightening and WCAG contrast checks.'],
 	['date', 'DST-safe, non-mutating local-time date arithmetic, formatting and parsing.'],
+	['iterables', 'Lazy, generator-based pipelines over any (async) iterable, with exact pull counts and early-exit cleanup.'],
+	['cache', 'O(1) LRU cache with optional TTL, eviction callbacks and an injectable clock; plugs into memoize.'],
+	['emitter', 'Typed event emitter with wildcard listeners, waitFor and error isolation.'],
+	['store', 'Tiny state store compatible with React useSyncExternalStore, with derived selectors.'],
+	['random', 'Seeded deterministic PRNG plus cryptographically secure ids, UUIDs and bytes.'],
 	['decorators', 'Class decorators for TypeScript (legacy and TC39 standard) and Babel.']
 ];
 
