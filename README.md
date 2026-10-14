@@ -1,5 +1,7 @@
 # js-helpers
 
+![js-helpers: Small utilities. Solid foundations. Yellow, graphite and aluminum code-shaped building blocks.](https://raw.githubusercontent.com/emiliodominguez/js-helpers/main/docs/assets/js-helpers-banner.jpg)
+
 [![CI](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml/badge.svg)](https://github.com/emiliodominguez/js-helpers/actions/workflows/tests.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
