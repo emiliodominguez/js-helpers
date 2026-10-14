@@ -178,6 +178,8 @@ describe('guards', function () {
 	describe('isPromise', function () {
 		it('accepts native promises (incl. cross-realm) and thenables', function () {
 			expect(guards.isPromise(Promise.resolve())).toBe(true);
+			// Any native promise counts, even one whose `then` was shadowed.
+			expect(guards.isPromise(Object.defineProperty(Promise.resolve(), 'then', { value: undefined }))).toBe(true);
 			expect(guards.isPromise(foreign.promise)).toBe(true);
 			expect(guards.isPromise({ then: noop })).toBe(true);
 			const thenableFunction = Object.assign(function () {}, { then: noop });
@@ -275,6 +277,60 @@ describe('guards', function () {
 			expect(guards.isWeakSet(new Set())).toBe(false);
 			expect(guards.isWeakSet({ [Symbol.toStringTag]: 'WeakSet' })).toBe(false);
 			expect(guards.isWeakSet(0)).toBe(false);
+		});
+
+		it('reject objects of this realm outside the prototype chain without a brand check, but check null-prototype objects', function () {
+			const brands: Array<[(value: unknown) => boolean, () => object]> = [
+				[
+					guards.isDate,
+					function () {
+						return new Date(0);
+					}
+				],
+				[
+					guards.isRegExp,
+					function () {
+						return /a/;
+					}
+				],
+				[
+					guards.isMap,
+					function () {
+						return new Map();
+					}
+				],
+				[
+					guards.isSet,
+					function () {
+						return new Set();
+					}
+				],
+				[
+					guards.isWeakMap,
+					function () {
+						return new WeakMap();
+					}
+				],
+				[
+					guards.isWeakSet,
+					function () {
+						return new WeakSet();
+					}
+				]
+			];
+			const revoked = Proxy.revocable({}, {});
+			revoked.revoke();
+
+			brands.forEach(function ([guard, create]) {
+				// A genuine instance re-parented to an unrelated prototype of this realm is rejected by the `instanceof` fast path...
+				expect(guard(Object.setPrototypeOf(create(), Object.prototype))).toBe(false);
+				// ...while one with a null prototype still gets the brand check.
+				expect(guard(Object.setPrototypeOf(create(), null))).toBe(true);
+				expect(guard(revoked.proxy)).toBe(false);
+				expect(guard(Object.create(Object.getPrototypeOf(create())))).toBe(false);
+			});
+			expect(guards.isArrayBuffer(revoked.proxy)).toBe(false);
+			expect(guards.isArrayBuffer(Object.setPrototypeOf(new ArrayBuffer(1), Object.prototype))).toBe(true);
 		});
 	});
 
@@ -512,7 +568,7 @@ describe('guards', function () {
 			}).toThrow(new TypeError('isKeyOf: `object` must not be null or undefined, got null'));
 			expect(function () {
 				guards.isKeyOf(undefined as any, 'a');
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isKeyOf: `object` must not be null or undefined, got undefined'));
 		});
 	});
 
@@ -591,7 +647,7 @@ describe('guards', function () {
 		it('throws TypeError for invalid constructors', function () {
 			expect(function () {
 				guards.isInstanceOf({} as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isInstanceOf: `constructor` must be a function, got object'));
 			expect(function () {
 				guards.isInstanceOf(
 					function () {
@@ -694,7 +750,7 @@ describe('guards', function () {
 			}
 			expect(function () {
 				guards.isRecordOf(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('isRecordOf: `guard` must be a function, got null'));
 		});
 	});
 
@@ -857,7 +913,7 @@ describe('guards', function () {
 			});
 			expect(function () {
 				guards.assertNever(noop as never);
-			}).toThrow(guards.AssertionError);
+			}).toThrow(new guards.AssertionError(`Unexpected value: ${String(noop)}`));
 		});
 	});
 });

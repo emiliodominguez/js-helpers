@@ -225,7 +225,8 @@ export function compose<R = unknown>(...fns: AnyFunction[]): (...args: unknown[]
  */
 export function compose(...fns: AnyFunction[]): (...args: unknown[]) => unknown {
 	assertFunctions('compose', fns);
-	return pipe(...fns.slice().reverse());
+	// `fns` is a fresh rest array, so it can be reversed in place.
+	return pipe(...fns.reverse());
 }
 
 /**
@@ -349,8 +350,18 @@ export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, unkn
  * defaultMemoizeKey(NaN, 2); // => '["NaN",2]'
  */
 export function defaultMemoizeKey(...args: unknown[]): unknown {
+	return memoizeKey(args);
+}
+
+/**
+ * Computes the {@link defaultMemoizeKey} of an argument list.
+ * @param {unknown[]} args - The call arguments
+ * @returns {unknown} The cache key
+ * @throws {TypeError} when the arguments contain a circular structure
+ */
+function memoizeKey(args: unknown[]): unknown {
 	if (args.length === 1) {
-		const [value] = args;
+		const value = args[0];
 		const isPrimitive = value === null || (typeof value !== 'object' && typeof value !== 'function');
 
 		// Strings starting with '[' could clash with a serialised argument list, so they go through the serialiser too;
@@ -358,22 +369,46 @@ export function defaultMemoizeKey(...args: unknown[]): unknown {
 		if (isPrimitive && !(typeof value === 'string' && value.startsWith('[')) && !Object.is(value, -0)) return value;
 	}
 
-	return JSON.stringify(args, function (this: unknown, _key: string, value: unknown): unknown {
-		switch (typeof value) {
-			case 'bigint':
-				return `${value.toString()}n`;
-			case 'number':
-				if (Object.is(value, -0)) return '-0';
-				return Number.isFinite(value) ? value : String(value);
-			case 'string':
-				return SPECIAL_KEY_TOKEN.test(value) ? `\\${value}` : value;
-			case 'undefined':
-				// Only top-level arguments: nested `undefined` keeps JSON semantics (dropped from objects, `null` in arrays).
-				return this === args ? 'undefined' : value;
-			default:
-				return value;
+	// Fast path: a list of strings and finite numbers is serialised by hand, exactly as `JSON.stringify` with the replacer below would
+	// (`String` formats finite numbers like JSON does). Any other argument falls back to the general serialiser.
+	let key = '[';
+
+	for (let i = 0; i < args.length; i++) {
+		const value = args[i];
+		let part: string;
+
+		if (typeof value === 'string') part = JSON.stringify(encodeKeyValue(value));
+		else if (Number.isFinite(value) && !Object.is(value, -0)) part = String(value);
+		else {
+			return JSON.stringify(args, function (this: unknown, _key: string, nested: unknown): unknown {
+				// Only top-level arguments are marked: nested `undefined` keeps JSON semantics (dropped from objects, `null` in arrays).
+				return nested === undefined ? (this === args ? 'undefined' : nested) : encodeKeyValue(nested);
+			});
 		}
-	});
+
+		key += i === 0 ? part : `,${part}`;
+	}
+
+	return `${key}]`;
+}
+
+/**
+ * Replaces the values JSON cannot represent with their key markers (see {@link defaultMemoizeKey}).
+ * @param {unknown} value - A value met by the serialiser
+ * @returns {unknown} The value to serialise instead
+ */
+function encodeKeyValue(value: unknown): unknown {
+	switch (typeof value) {
+		case 'bigint':
+			return `${value.toString()}n`;
+		case 'number':
+			if (Object.is(value, -0)) return '-0';
+			return Number.isFinite(value) ? value : String(value);
+		case 'string':
+			return SPECIAL_KEY_TOKEN.test(value) ? `\\${value}` : value;
+		default:
+			return value;
+	}
 }
 
 /**
@@ -400,6 +435,8 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, u
 
 	const resolver = (options.resolver ?? defaultMemoizeKey) as UnknownFunction;
 	assertFunction('memoize', 'options.resolver', resolver);
+	// The default resolver ignores `this`, so it can be applied to the argument list directly.
+	const defaultKey = resolver === defaultMemoizeKey;
 
 	// Only `memoize` writes to the cache, so every stored value is a `ReturnType<F>` whatever the cache's declared value type.
 	const cache = (options.cache ?? new Map<unknown, ReturnType<F>>()) as MemoizeCache<unknown, ReturnType<F>>;
@@ -411,7 +448,7 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, u
 	 * @returns {unknown} The cached or freshly computed result
 	 */
 	function memoized(this: unknown, ...args: unknown[]): unknown {
-		const key = resolver.apply(this, args);
+		const key = defaultKey ? memoizeKey(args) : resolver.apply(this, args);
 
 		// Read once, then fall back to `has` only for a cached `undefined`: an expiring cache (e.g. an LRU with a TTL) could
 		// otherwise drop the entry between a `has` and a `get` and make the wrapper return `undefined`.
@@ -492,11 +529,21 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	if (!leading && !trailing) throw new RangeError('throttle: at least one of `leading` or `trailing` must be true');
 
 	const call = fn as unknown as UnknownFunction;
-	let windowStart: number | undefined;
+	// Start of the current window (`NaN`, which fails every comparison, when there is none).
+	let windowStart = NaN;
 	let timer: TimerHandle | undefined;
 	let pendingThis: unknown;
-	let pendingArgs: unknown[] = [];
+	let pendingArgs: unknown[] | undefined;
 	let result: unknown;
+
+	/**
+	 * Whether `now` falls inside the current window (a clock that went backwards ends it).
+	 * @param {number} now - The current timestamp
+	 * @returns {boolean} `true` inside the window
+	 */
+	function inWindow(now: number): boolean {
+		return now >= windowStart && now - windowStart < wait;
+	}
 
 	/**
 	 * Invokes `fn` and starts a new window at `time`.
@@ -508,7 +555,7 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	function invoke(thisArg: unknown, args: unknown[], time: number): unknown {
 		windowStart = time;
 		pendingThis = undefined;
-		pendingArgs = [];
+		pendingArgs = undefined;
 		result = call.apply(thisArg, args);
 
 		return result;
@@ -523,15 +570,14 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 		timer = undefined;
 
 		const now = Date.now();
-		const remaining = (windowStart as number) + wait - now;
 
-		// A long window is covered by several clamped timers; re-arm until it really ends (unless the clock went backwards).
-		if (remaining > 0 && remaining <= wait) {
-			schedule(remaining);
+		// A long window is covered by several clamped timers; re-arm until it really ends.
+		if (inWindow(now)) {
+			schedule(windowStart + wait - now);
 			return;
 		}
 
-		invoke(pendingThis, pendingArgs, now);
+		invoke(pendingThis, pendingArgs as unknown[], now);
 	}
 
 	/**
@@ -550,14 +596,11 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	 */
 	function throttled(this: unknown, ...args: unknown[]): unknown {
 		const now = Date.now();
-		const inWindow = windowStart !== undefined && now >= windowStart && now - windowStart < wait;
 
-		if (!inWindow) {
-			if (timer !== undefined) {
-				// A late timer: the newer call supersedes the pending one.
-				clearTimeout(timer);
-				timer = undefined;
-			}
+		if (!inWindow(now)) {
+			// A late timer, if any: the newer call supersedes the pending one.
+			clearTimeout(timer);
+			timer = undefined;
 
 			if (leading) return invoke(this, args, now);
 
@@ -568,7 +611,7 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 			// eslint-disable-next-line @typescript-eslint/no-this-alias -- the trailing invocation needs the latest call's `this`
 			pendingThis = this;
 			pendingArgs = args;
-			schedule((windowStart as number) + wait - now);
+			schedule(windowStart + wait - now);
 		}
 
 		return result;
@@ -576,11 +619,11 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 
 	Object.defineProperty(throttled, 'cancel', {
 		value: function cancel(): void {
-			if (timer !== undefined) clearTimeout(timer);
+			clearTimeout(timer);
 			timer = undefined;
-			windowStart = undefined;
+			windowStart = NaN;
 			pendingThis = undefined;
-			pendingArgs = [];
+			pendingArgs = undefined;
 		}
 	});
 
@@ -769,7 +812,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 	Object.defineProperties(debounced, {
 		cancel: {
 			value: function cancel(): void {
-				if (timer !== undefined) clearTimeout(timer);
+				clearTimeout(timer);
 				timer = undefined;
 				lastArgs = undefined;
 				lastThis = undefined;
@@ -779,8 +822,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 		},
 		flush: {
 			value: function flush(): unknown {
-				if (timer === undefined) return result;
-
+				// Without a timer nothing is pending, and `trailingEdge` just returns the latest result.
 				clearTimeout(timer);
 
 				return trailingEdge(Date.now());
@@ -788,7 +830,8 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 		},
 		pending: {
 			value: function pending(): boolean {
-				return timer !== undefined && trailing && lastArgs !== undefined;
+				// Pending arguments always come with a running timer.
+				return trailing && lastArgs !== undefined;
 			}
 		}
 	});
@@ -997,9 +1040,9 @@ export function times<R>(n: number, fn: (index: number) => R): R[] {
 	assertNumber('times', 'n', n, Number.isInteger(n) && n >= 0 && n <= 2 ** 32 - 1, `an integer between 0 and ${2 ** 32 - 1}`);
 	assertFunction('times', 'fn', fn);
 
-	const result = new Array<R>(n);
+	const result: R[] = [];
 
-	for (let i = 0; i < n; i++) result[i] = fn(i);
+	for (let i = 0; i < n; i++) result.push(fn(i));
 
 	return result;
 }

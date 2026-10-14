@@ -267,7 +267,7 @@ export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item
 	assertFunction('mapWithConcurrency', 'mapper', mapper);
 
 	const list = Array.from(items);
-	const results = new Array<R>(list.length);
+	const results: R[] = [];
 	let next = 0;
 	let failed = false;
 
@@ -288,11 +288,7 @@ export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item
 		}
 	}
 
-	const workers: Array<Promise<void>> = [];
-
-	for (let i = 0; i < Math.min(concurrency, list.length); i++) workers.push(worker());
-
-	await Promise.all(workers);
+	await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
 
 	return results;
 }
@@ -355,6 +351,8 @@ export interface Limiter {
 interface LimiterTask {
 	readonly run: () => void;
 	readonly reject: (reason: unknown) => void;
+	/** The task queued after this one. */
+	next?: LimiterTask;
 }
 
 /**
@@ -376,8 +374,10 @@ export function createLimiter(concurrency: number, options: LimiterOptions = {})
 	assertInteger('createLimiter', 'concurrency', concurrency, 1, true);
 
 	const rejectOnClear = options.rejectOnClear ?? false;
-	let queue: LimiterTask[] = [];
-	let head = 0;
+	// The waiting tasks form a linked FIFO queue (O(1) enqueue and dequeue, no array to compact).
+	let first: LimiterTask | undefined;
+	let last: LimiterTask | undefined;
+	let pending = 0;
 	let active = 0;
 
 	/**
@@ -385,16 +385,10 @@ export function createLimiter(concurrency: number, options: LimiterOptions = {})
 	 * @returns {void}
 	 */
 	function startNext(): void {
-		while (active < concurrency && head < queue.length) {
-			const task = queue[head];
-			head++;
-
-			// Compact the queue once the consumed prefix dominates, keeping dequeues O(1) amortised.
-			if (head > 1024 && head * 2 > queue.length) {
-				queue = queue.slice(head);
-				head = 0;
-			}
-
+		while (active < concurrency && first !== undefined) {
+			const task = first;
+			first = task.next;
+			pending--;
 			task.run();
 		}
 	}
@@ -432,9 +426,15 @@ export function createLimiter(concurrency: number, options: LimiterOptions = {})
 
 			if (active < concurrency) {
 				run();
-			} else {
-				queue.push({ run, reject });
+				return;
 			}
+
+			const task: LimiterTask = { run, reject };
+			// `last` is stale once the queue has drained, so it is only followed while `first` is set.
+			if (first === undefined) first = task;
+			else (last as LimiterTask).next = task;
+			last = task;
+			pending++;
 		});
 	}
 
@@ -446,20 +446,18 @@ export function createLimiter(concurrency: number, options: LimiterOptions = {})
 		},
 		pendingCount: {
 			get: function (): number {
-				return queue.length - head;
+				return pending;
 			}
 		},
 		clearQueue: {
 			value: function clearQueue(): void {
-				const discarded = queue.slice(head);
+				let task = first;
 
-				queue = [];
-				head = 0;
+				first = undefined;
+				pending = 0;
 
-				if (rejectOnClear) {
-					discarded.forEach(function (task) {
-						task.reject(new AbortError('The task was removed from the limiter queue.'));
-					});
+				for (; rejectOnClear && task !== undefined; task = task.next) {
+					task.reject(new AbortError('The task was removed from the limiter queue.'));
 				}
 			}
 		}
@@ -539,8 +537,7 @@ export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptio
 		 * @returns {void}
 		 */
 		function finish(settle: (value: never) => void, value: unknown): void {
-			if (settled) return;
-
+			// Idempotent: everything below is a no-op the second time.
 			settled = true;
 			clearTimeout(pollTimer);
 			clearTimeout(deadlineTimer);
@@ -586,7 +583,8 @@ export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptio
 			);
 		}
 
-		signal?.addEventListener('abort', onAbort, { once: true });
+		// `finish` removes it, so it never runs twice.
+		signal?.addEventListener('abort', onAbort);
 		poll();
 	});
 }
@@ -916,7 +914,8 @@ export function anySignal(signals: Iterable<AbortSignalLike | null | undefined>)
 			};
 		});
 		inputs.forEach(function (input, i) {
-			input.addEventListener('abort', listeners[i], { once: true });
+			// The first abort removes every listener, so none runs twice.
+			input.addEventListener('abort', listeners[i]);
 		});
 	}
 

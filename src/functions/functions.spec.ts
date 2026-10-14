@@ -34,7 +34,7 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.bind(42 as any, {});
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('bind: `fn` must be a function, got number'));
 		});
 	});
 
@@ -75,7 +75,7 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.partial(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('partial: `fn` must be a function, got null'));
 		});
 	});
 
@@ -150,19 +150,19 @@ describe('Functions helpers', function () {
 		it('should throw a RangeError for invalid arity', function () {
 			expect(function () {
 				helpers.curry(add3, -1);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('curry: `arity` must be an integer >= 0, got -1'));
 			expect(function () {
 				helpers.curry(add3, 1.5);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('curry: `arity` must be an integer >= 0, got 1.5'));
 			expect(function () {
 				helpers.curry(add3, NaN);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('curry: `arity` must be an integer >= 0, got NaN'));
 		});
 
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.curry('nope' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('curry: `fn` must be a function, got string'));
 		});
 	});
 
@@ -228,7 +228,7 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-function arguments', function () {
 			expect(function () {
 				helpers.compose(square, 1 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('compose: `fns[1]` must be a function, got number'));
 		});
 	});
 
@@ -273,6 +273,39 @@ describe('Functions helpers', function () {
 	});
 
 	describe('memoize', function () {
+		it('should use the value read with get without asking has (an expiring cache may drop it in between)', function () {
+			const store = new Map<unknown, unknown>();
+			const forgetfulHas = {
+				has: function (): boolean {
+					return false;
+				},
+				get: function (key: unknown): unknown {
+					return store.get(key);
+				},
+				set: function (key: unknown, value: unknown): void {
+					store.set(key, value);
+				},
+				delete: function (key: unknown): boolean {
+					return store.delete(key);
+				},
+				clear: function (): void {
+					store.clear();
+				}
+			};
+			const square = jest.fn(function (n: number): number {
+				return n * n;
+			});
+			const memo = helpers.memoize(square, { cache: forgetfulHas });
+			expect([memo(3), memo(3)]).toEqual([9, 9]);
+			expect(square).toHaveBeenCalledTimes(1);
+		});
+
+		it('should expose its cache as an enumerable property and clear() as a hidden one', function () {
+			const memo = helpers.memoize(helpers.identity);
+			expect(Object.keys(memo)).toEqual(['cache']);
+			expect(typeof memo.clear).toBe('function');
+		});
+
 		it('should recompute instead of returning undefined when a cache entry expires between lookups', function () {
 			// A cache whose entry is still visible to `has` but already gone for `get` (as an expiring cache can be).
 			const store = new Map<unknown, unknown>([[2, 4]]);
@@ -413,10 +446,10 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.memoize({} as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('memoize: `fn` must be a function, got object'));
 			expect(function () {
 				helpers.memoize(helpers.identity, { resolver: 1 as any });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('memoize: `options.resolver` must be a function, got number'));
 		});
 	});
 
@@ -487,6 +520,12 @@ describe('Functions helpers', function () {
 			expect(helpers.defaultMemoizeKey({ a: 1 })).toBe('[{"a":1}]');
 			expect(helpers.defaultMemoizeKey('[x')).toBe('["[x"]');
 			expect(helpers.defaultMemoizeKey(1n, 2)).toBe('["1n",2]');
+			// A function is not a primitive: like nested functions, it serialises as null (supply a resolver for such arguments).
+			expect(helpers.defaultMemoizeKey(helpers.noop)).toBe('[null]');
+			// Only whole strings shaped like a marker are escaped.
+			expect(helpers.defaultMemoizeKey('aNaN', 'NaNa', '1n2', 1)).toBe('["aNaN","NaNa","1n2",1]');
+			// Top-level `undefined` arguments get a marker even next to objects; nested ones keep JSON semantics.
+			expect(helpers.defaultMemoizeKey(undefined, { a: 1, b: undefined })).toBe('["undefined",{"a":1}]');
 		});
 
 		it('should throw a TypeError on circular structures', function () {
@@ -546,16 +585,22 @@ describe('Functions helpers', function () {
 		it('should invoke on the trailing edge with the latest args', function () {
 			jest.useFakeTimers();
 
+			const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
 			const fn = jest.fn();
 			const throttled = helpers.throttle(fn, 100, { trailing: true });
 
 			throttled(1);
+			jest.advanceTimersByTime(30);
 			throttled(2);
 			throttled(3);
 			expect(fn.mock.calls).toEqual([[1]]);
 
-			jest.advanceTimersByTime(100);
+			jest.advanceTimersByTime(69);
+			expect(fn.mock.calls).toEqual([[1]]);
+			jest.advanceTimersByTime(1);
 			expect(fn.mock.calls).toEqual([[1], [3]]);
+			// One timer for the whole window: no early wake-ups.
+			expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
 
 			// A new window started with the trailing call.
 			throttled(4);
@@ -629,7 +674,10 @@ describe('Functions helpers', function () {
 			expect(fn.mock.calls).toEqual([[1]]);
 			jest.advanceTimersByTime(2 ** 31 - 1);
 			expect(fn.mock.calls).toEqual([[1]]);
-			jest.advanceTimersByTime(wait);
+			// The window ends exactly `wait` ms after the first call.
+			jest.advanceTimersByTime(wait - 10 - (2 ** 31 - 1) - 1);
+			expect(fn.mock.calls).toEqual([[1]]);
+			jest.advanceTimersByTime(1);
 			expect(fn.mock.calls).toEqual([[1], [2]]);
 		});
 
@@ -645,6 +693,17 @@ describe('Functions helpers', function () {
 			expect(fn.mock.calls).toEqual([[1], [2]]);
 		});
 
+		it('should start a new window when a call comes before the window start (clock went backwards)', function () {
+			jest.useFakeTimers({ now: 10_000 });
+
+			const fn = jest.fn();
+			const throttled = helpers.throttle(fn, 100);
+			throttled(1);
+			jest.setSystemTime(5_000);
+			throttled(2);
+			expect(fn.mock.calls).toEqual([[1], [2]]);
+		});
+
 		it('should always invoke with a zero wait', function () {
 			const fn = jest.fn();
 			const throttled = helpers.throttle(fn, 0);
@@ -656,19 +715,19 @@ describe('Functions helpers', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.throttle(helpers.noop, -1);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('throttle: `wait` must be a finite number >= 0, got -1'));
 			expect(function () {
 				helpers.throttle(helpers.noop, NaN);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('throttle: `wait` must be a finite number >= 0, got NaN'));
 			expect(function () {
 				helpers.throttle(helpers.noop, Infinity);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('throttle: `wait` must be a finite number >= 0, got Infinity'));
 			expect(function () {
 				helpers.throttle(helpers.noop, 10, { leading: false });
 			}).toThrow(new RangeError('throttle: at least one of `leading` or `trailing` must be true'));
 			expect(function () {
 				helpers.throttle(undefined as any, 10);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('throttle: `fn` must be a function, got undefined'));
 		});
 	});
 
@@ -886,6 +945,107 @@ describe('Functions helpers', function () {
 			expect(fn.mock.calls).toEqual([[1]]);
 		});
 
+		it('should re-arm for the remaining quiet period when called again before the timer fires', function () {
+			jest.useFakeTimers();
+
+			const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100);
+			debounced(1);
+			jest.advanceTimersByTime(50);
+			debounced(2);
+			jest.advanceTimersByTime(99);
+			expect(fn).not.toHaveBeenCalled();
+			expect(jest.getTimerCount()).toBe(1);
+			jest.advanceTimersByTime(1);
+			expect(fn.mock.calls).toEqual([[2]]);
+			expect(jest.getTimerCount()).toBe(0);
+			// The initial timer and a single re-arm for the remaining 50 ms (no busy polling).
+			expect(
+				setTimeoutSpy.mock.calls.map(function (call) {
+					return call[1];
+				})
+			).toEqual([100, 50]);
+		});
+
+		it('should invoke exactly maxWait ms after the first call of a continuous burst', function () {
+			jest.useFakeTimers();
+
+			const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100, { maxWait: 150 });
+			debounced(1);
+			jest.advanceTimersByTime(90);
+			debounced(2);
+			jest.advanceTimersByTime(59);
+			expect(fn).not.toHaveBeenCalled();
+			jest.advanceTimersByTime(1);
+			expect(fn.mock.calls).toEqual([[2]]);
+			// Re-armed once, for the 50 ms left before maxWait.
+			expect(
+				setTimeoutSpy.mock.calls.map(function (call) {
+					return call[1];
+				})
+			).toEqual([100, 50]);
+		});
+
+		it('should not let calls made within the same millisecond trigger maxWait', function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100, { maxWait: 100 });
+			debounced(1);
+			debounced(2);
+			debounced(3);
+			expect(fn).not.toHaveBeenCalled();
+			expect(jest.getTimerCount()).toBe(1);
+			jest.advanceTimersByTime(100);
+			expect(fn.mock.calls).toEqual([[3]]);
+		});
+
+		it('should restart (not duplicate) its timer when a call is forced by maxWait', function () {
+			jest.useFakeTimers({ now: 0 });
+
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100, { maxWait: 150 });
+			debounced(1);
+			// The clock moves on without the timer firing (e.g. a busy event loop): the next call is overdue.
+			jest.setSystemTime(150);
+			debounced(2);
+			expect(fn.mock.calls).toEqual([[2]]);
+			expect(jest.getTimerCount()).toBe(1);
+			debounced.cancel();
+			expect(jest.getTimerCount()).toBe(0);
+			jest.advanceTimersByTime(1000);
+			expect(fn.mock.calls).toEqual([[2]]);
+		});
+
+		it('should not postpone the trailing call when the clock went backwards', function () {
+			jest.useFakeTimers({ now: 10_000 });
+
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100);
+			debounced(1);
+			jest.setSystemTime(0);
+			jest.advanceTimersByTime(100);
+			expect(fn.mock.calls).toEqual([[1]]);
+		});
+
+		it('should clear its timer on flush', function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn(function (n: number) {
+				return n * 2;
+			});
+			const debounced = helpers.debounce(fn, 100);
+			expect(debounced.flush()).toBeUndefined();
+			debounced(1);
+			expect(debounced.flush()).toBe(2);
+			expect(jest.getTimerCount()).toBe(0);
+			expect(debounced.flush()).toBe(2);
+			expect(fn).toHaveBeenCalledTimes(1);
+		});
+
 		it('should honour a maxWait longer than 2^31 - 1 ms', function () {
 			jest.useFakeTimers();
 
@@ -901,16 +1061,16 @@ describe('Functions helpers', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.debounce(helpers.noop, -5);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounce: `wait` must be a finite number >= 0, got -5'));
 			expect(function () {
 				helpers.debounce(helpers.noop, 5, { maxWait: NaN });
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounce: `maxWait` must be a finite number >= 0, got NaN'));
 			expect(function () {
 				helpers.debounce(helpers.noop, 5, { trailing: false });
 			}).toThrow(new RangeError('debounce: at least one of `leading` or `trailing` must be true'));
 			expect(function () {
 				helpers.debounce('x' as any, 5);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('debounce: `fn` must be a function, got string'));
 		});
 	});
 
@@ -962,7 +1122,7 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.once(1 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('once: `fn` must be a function, got number'));
 		});
 	});
 
@@ -986,10 +1146,10 @@ describe('Functions helpers', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.before(-1, helpers.noop);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('before: `n` must be an integer >= 0, got -1'));
 			expect(function () {
 				helpers.before(1, null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('before: `fn` must be a function, got null'));
 		});
 	});
 
@@ -1018,10 +1178,10 @@ describe('Functions helpers', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.after(1.5, helpers.noop);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('after: `n` must be an integer >= 0, got 1.5'));
 			expect(function () {
 				helpers.after(1, {} as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('after: `fn` must be a function, got object'));
 		});
 	});
 
@@ -1047,7 +1207,7 @@ describe('Functions helpers', function () {
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.negate(true as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('negate: `predicate` must be a function, got boolean'));
 		});
 	});
 
@@ -1113,7 +1273,7 @@ describe('Functions helpers (round 2)', function () {
 
 		it('should return a TypeError instead of throwing for non-functions', function () {
 			const [error] = helpers.attempt(42 as any);
-			expect(error).toBeInstanceOf(TypeError);
+			expect(error).toEqual(new TypeError('attempt: `fn` must be a function, got number'));
 		});
 
 		it('should return promises as plain success values', function () {
@@ -1139,13 +1299,21 @@ describe('Functions helpers (round 2)', function () {
 		it.each([-1, 1.5, NaN, Infinity, 2 ** 32])('should throw a RangeError for n = %p', function (n) {
 			expect(function () {
 				helpers.times(n, helpers.identity);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError(`times: \`n\` must be an integer between 0 and 4294967295, got ${n}`));
 		});
 
 		it('should throw a TypeError for non-functions', function () {
 			expect(function () {
 				helpers.times(1, 'x' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('times: `fn` must be a function, got string'));
+		});
+
+		it('should accept the largest array length, 2^32 - 1', function () {
+			expect(function () {
+				helpers.times(2 ** 32 - 1, function (): never {
+					throw new Error('called');
+				});
+			}).toThrow('called');
 		});
 	});
 
@@ -1173,7 +1341,7 @@ describe('Functions helpers (round 2)', function () {
 			expect(obj.show('1', '2')).toBe('>21');
 			expect(function () {
 				helpers.flip(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('flip: `fn` must be a function, got null'));
 		});
 	});
 
@@ -1195,7 +1363,7 @@ describe('Functions helpers (round 2)', function () {
 			expect(obj.mul(4)).toBe(8);
 			expect(function () {
 				helpers.unary({} as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('unary: `fn` must be a function, got object'));
 		});
 	});
 
@@ -1299,10 +1467,10 @@ describe('Functions helpers (round 2)', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.memoizeLast(1 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('memoizeLast: `fn` must be a function, got number'));
 			expect(function () {
 				helpers.memoizeLast(helpers.identity, 'x' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('memoizeLast: `isEqual` must be a function, got string'));
 		});
 	});
 
@@ -1325,7 +1493,7 @@ describe('Functions helpers (round 2)', function () {
 			}).toThrow(new TypeError('debounce: `wait` must be a finite number >= 0, got string'));
 			expect(function () {
 				helpers.before('2' as any, helpers.noop);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('before: `n` must be an integer >= 0, got string'));
 			expect(function () {
 				helpers.times(2 ** 32, helpers.identity);
 			}).toThrow(new RangeError('times: `n` must be an integer between 0 and 4294967295, got 4294967296'));

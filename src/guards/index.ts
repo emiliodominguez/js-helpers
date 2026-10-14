@@ -15,14 +15,23 @@ function getTag(value: unknown): string {
  * internal slot. Unlike `instanceof` (or `Object.prototype.toString` tags) it cannot be fooled by
  * `Object.create(Map.prototype)`, proxies or a fake `Symbol.toStringTag`, and it recognises instances from other realms
  * (iframes, `vm` contexts) as well as subclass instances.
+ *
+ * Fast path, when `constructor` is given: an object of this realm (`instanceof Object`) that does not inherit from
+ * `constructor.prototype` is rejected without the brand check, whose exception costs microseconds. Only objects of other
+ * realms, objects with a `null` prototype and objects inheriting from `constructor.prototype` pay for the brand check; the
+ * price is that a genuine instance whose prototype was swapped for an unrelated one of this realm
+ * (`Object.setPrototypeOf(new Map(), Object.prototype)`) is rejected too.
  * @param {unknown} value - The value to check
  * @param {(target: object) => void} brandCheck - A function that throws when `target` is not a real instance
+ * @param {abstract new (...args: never[]) => unknown} [constructor] - The built-in constructor whose instances are looked for
  * @returns {boolean} Whether the value is a genuine (possibly cross-realm) instance
  */
-function hasBrand(value: unknown, brandCheck: (target: object) => void): boolean {
+function hasBrand(value: unknown, brandCheck: (target: object) => void, constructor?: abstract new (...args: never[]) => unknown): boolean {
 	if (typeof value !== 'object' || value === null) return false;
 
 	try {
+		// `instanceof` throws for a revoked proxy, hence inside the `try`.
+		if (constructor !== undefined && value instanceof Object && !(value instanceof constructor)) return false;
 		brandCheck(value);
 		return true;
 	} catch {
@@ -47,8 +56,8 @@ function checkDate(target: object): void {
  * @returns {void}
  */
 function checkRegExp(target: object): void {
-	// The `source` getter special-cases `RegExp.prototype` itself (returns '(?:)') instead of throwing.
-	if (target === RegExp.prototype) throw new TypeError('RegExp.prototype is not a regular expression');
+	// The `source` getter returns '(?:)' for `RegExp.prototype` itself instead of throwing, but `hasBrand` rejects it before (it is an
+	// object of this realm that does not inherit from itself).
 	regExpSourceGetter.call(target as RegExp);
 }
 
@@ -235,6 +244,7 @@ export function isPromise(value: unknown): value is PromiseLike<unknown> {
  * Checks whether a value is a genuine `RegExp` (it has the internal regexp slots).
  * Uses a brand check, so regexps from other realms (iframes, `vm` contexts) and subclass instances are recognised,
  * while objects that only inherit from `RegExp.prototype`, proxies, or objects faking `Symbol.toStringTag` are rejected.
+ * Non-regexps of this realm are rejected by a cheap `instanceof` test (so a regexp whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a regular expression
  * @example
@@ -242,7 +252,7 @@ export function isPromise(value: unknown): value is PromiseLike<unknown> {
  * isRegExp('/a/'); // => false
  */
 export function isRegExp(value: unknown): value is RegExp {
-	return hasBrand(value, checkRegExp);
+	return hasBrand(value, checkRegExp, RegExp);
 }
 
 /**
@@ -263,7 +273,8 @@ export function isError(value: unknown): value is Error {
  * Checks whether a value is a `Date` instance. It does NOT check validity: `new Date('nope')` is still a `Date`
  * (check `Number.isNaN(date.getTime())` for that).
  * Uses a brand check: cross-realm dates and subclass instances are recognised; objects that merely inherit from
- * `Date.prototype` (whose methods would throw) and proxies are rejected.
+ * `Date.prototype` (whose methods would throw) and proxies are rejected. Non-dates of this realm are rejected by a cheap `instanceof`
+ * test (so a date whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Date
  * @example
@@ -272,12 +283,13 @@ export function isError(value: unknown): value is Error {
  * isDate(Date.now()); // => false
  */
 export function isDate(value: unknown): value is Date {
-	return hasBrand(value, checkDate);
+	return hasBrand(value, checkDate, Date);
 }
 
 /**
  * Checks whether a value is a genuine `Map` (brand check: cross-realm and subclass instances pass; objects that merely
  * inherit from `Map.prototype`, and proxies, fail).
+ * Non-instances of this realm are rejected by a cheap `instanceof` test (so an instance whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Map
  * @example
@@ -285,12 +297,13 @@ export function isDate(value: unknown): value is Date {
  * isMap(new WeakMap()); // => false
  */
 export function isMap(value: unknown): value is Map<unknown, unknown> {
-	return hasBrand(value, checkMap);
+	return hasBrand(value, checkMap, Map);
 }
 
 /**
  * Checks whether a value is a genuine `Set` (brand check: cross-realm and subclass instances pass; objects that merely
  * inherit from `Set.prototype`, and proxies, fail).
+ * Non-instances of this realm are rejected by a cheap `instanceof` test (so an instance whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Set
  * @example
@@ -298,12 +311,13 @@ export function isMap(value: unknown): value is Map<unknown, unknown> {
  * isSet([]); // => false
  */
 export function isSet(value: unknown): value is Set<unknown> {
-	return hasBrand(value, checkSet);
+	return hasBrand(value, checkSet, Set);
 }
 
 /**
  * Checks whether a value is a genuine `WeakMap` (brand check: cross-realm and subclass instances pass; objects that
  * merely inherit from `WeakMap.prototype`, and proxies, fail).
+ * Non-instances of this realm are rejected by a cheap `instanceof` test (so an instance whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a WeakMap
  * @example
@@ -311,12 +325,13 @@ export function isSet(value: unknown): value is Set<unknown> {
  * isWeakMap(new Map()); // => false
  */
 export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
-	return hasBrand(value, checkWeakMap);
+	return hasBrand(value, checkWeakMap, WeakMap);
 }
 
 /**
  * Checks whether a value is a genuine `WeakSet` (brand check: cross-realm and subclass instances pass; objects that
  * merely inherit from `WeakSet.prototype`, and proxies, fail).
+ * Non-instances of this realm are rejected by a cheap `instanceof` test (so an instance whose prototype was swapped for an unrelated one is too).
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a WeakSet
  * @example
@@ -324,7 +339,7 @@ export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
  * isWeakSet(new Set()); // => false
  */
 export function isWeakSet(value: unknown): value is WeakSet<object> {
-	return hasBrand(value, checkWeakSet);
+	return hasBrand(value, checkWeakSet, WeakSet);
 }
 
 /**
@@ -450,7 +465,7 @@ export type TypedArray =
  */
 export type Guard<T> = (value: unknown) => value is T;
 
-const TYPED_ARRAY_NAMES: ReadonlySet<string> = new Set([
+const TYPED_ARRAY_NAMES: ReadonlySet<unknown> = new Set([
 	'Int8Array',
 	'Uint8Array',
 	'Uint8ClampedArray',
@@ -491,7 +506,8 @@ function checkArrayBuffer(target: object): void {
 function describe(value: unknown): string {
 	if (typeof value === 'string') return JSON.stringify(value);
 	if (typeof value === 'bigint') return `${value}n`;
-	if (typeof value === 'symbol' || typeof value === 'function' || value === null || typeof value !== 'object') return String(value);
+	// Symbols, functions and the other primitives; `null` is left to `JSON.stringify` (which gives 'null' too).
+	if (typeof value !== 'object') return String(value);
 
 	try {
 		return JSON.stringify(value) ?? getTag(value);
@@ -618,25 +634,16 @@ export function isOneOf<const T extends ReadonlyArray<unknown>>(values: T): (val
  */
 export function isInstanceOf<T>(constructor: abstract new (...args: never[]) => T): (value: unknown) => value is T {
 	assertFunction('isInstanceOf', 'constructor', constructor);
-	if (!isInstanceofTarget(constructor)) throw new TypeError('isInstanceOf: `constructor` must be a valid instanceof target, got a function without a prototype');
+	try {
+		// Arrow functions and methods have no `prototype` object, which makes every `instanceof` against them throw.
+		void ({} instanceof constructor);
+	} catch {
+		throw new TypeError('isInstanceOf: `constructor` must be a valid instanceof target, got a function without a prototype');
+	}
 
 	return function isInstance(value: unknown): value is T {
 		return value instanceof constructor;
 	};
-}
-
-/**
- * Checks whether a function can be used on the right-hand side of `instanceof` without throwing (arrow functions and
- * methods have no `prototype` object and make `instanceof` throw).
- * @param {unknown} candidate - The function to check
- * @returns {boolean} Whether `x instanceof candidate` is safe to evaluate
- */
-function isInstanceofTarget(candidate: unknown): boolean {
-	try {
-		return typeof ({} instanceof (candidate as unknown as abstract new () => unknown)) === 'boolean';
-	} catch {
-		return false;
-	}
 }
 
 /**
@@ -706,9 +713,7 @@ export function isRecordOf<T>(guard: Guard<T>): (value: unknown) => value is Rec
  * isTypedArray([1, 2]); // => false
  */
 export function isTypedArray(value: unknown): value is TypedArray {
-	const name = typedArrayTagGetter.call(value);
-
-	return name !== undefined && TYPED_ARRAY_NAMES.has(name);
+	return TYPED_ARRAY_NAMES.has(typedArrayTagGetter.call(value));
 }
 
 /**
@@ -722,6 +727,7 @@ export function isTypedArray(value: unknown): value is TypedArray {
  * isArrayBuffer(new Uint8Array(8).buffer); // => true
  */
 export function isArrayBuffer(value: unknown): value is ArrayBuffer {
+	// No `instanceof` fast path: some hosts (e.g. Jest's node environment) expose another realm's `ArrayBuffer` as the global one.
 	return hasBrand(value, checkArrayBuffer);
 }
 

@@ -160,6 +160,18 @@ describe('Decorators', function () {
 			expect((Test.prototype as any).testProp).toBeUndefined();
 		});
 
+		it('should keep its prototype accessor out of enumeration and redefinable', function () {
+			class Plain {
+				declare value: number;
+			}
+			decorators.readonly(Plain.prototype, 'value');
+			const keys: string[] = [];
+			for (const key in new Plain()) keys.push(key);
+			expect(keys).toEqual([]);
+			Object.defineProperty(Plain.prototype, 'value', { value: 0 });
+			expect(new Plain().value).toBe(0);
+		});
+
 		it('should make an already initialised static field non-writable', function () {
 			expect(Test.staticProp).toBe('static');
 			expect(function () {
@@ -190,12 +202,15 @@ describe('Decorators', function () {
 
 		it('should reject legacy accessors', function () {
 			expect(function () {
+				decorators.readonly({}, 'setterOnly', { set: function () {} });
+			}).toThrow(new TypeError('@readonly cannot decorate the accessor setterOnly'));
+			expect(function () {
 				decorators.readonly({}, 'acc', {
 					get: function () {
 						return 1;
 					}
 				});
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@readonly cannot decorate the accessor acc'));
 		});
 
 		it('should lock the field via an initializer with standard decorators', function () {
@@ -217,15 +232,15 @@ describe('Decorators', function () {
 		});
 
 		it.each([
-			['method', {}],
-			['accessor', {}],
-			['field', { private: true }],
-			['field', { addInitializer: undefined }]
-		])('should reject standard %s contexts %p', function (kind, extra) {
+			['method', {}, 'methods'],
+			['accessor', {}, 'accessors'],
+			['field', { private: true }, 'private fields'],
+			['field', { addInitializer: undefined }, 'fields']
+		])('should reject standard %s contexts %p', function (kind, extra, what) {
 			const { context } = fakeContext(kind, 'x', extra);
 			expect(function () {
 				decorators.readonly(undefined, context);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError(`@readonly can only decorate public fields when used as a standard decorator, not ${what}`));
 		});
 	});
 
@@ -265,6 +280,16 @@ describe('Decorators', function () {
 			expect(logSpy).toHaveBeenCalledWith('testThrowingLogMethod method threw:', new Error('sync failure'));
 		});
 
+		it('should log non-thenable object results as returned values', function () {
+			const { context } = fakeContext('method', 'make');
+			const result = { value: 1 };
+			const wrapped = decorators.log(function () {
+				return result;
+			}, context);
+			expect(wrapped()).toBe(result);
+			expect(logSpy).toHaveBeenCalledWith('make method returned:', result);
+		});
+
 		it('should work as a standard decorator and preserve this', function () {
 			const { context } = fakeContext('method', 'sum');
 			const wrapped = decorators.log(function (this: { base: number }, a: number) {
@@ -278,9 +303,18 @@ describe('Decorators', function () {
 		it('should reject non-methods', function () {
 			expect(function () {
 				(decorators.log as any)({}, 'prop', undefined);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@log can only decorate methods (prop is not a method)'));
 			expect(function () {
 				(decorators.log as any)(undefined, fakeContext('field', 'x').context);
+			}).toThrow(new TypeError('@log can only decorate methods, not fields'));
+			expect(function () {
+				(decorators.log as any)(function () {}, fakeContext('getter', 'x').context);
+			}).toThrow(new TypeError('@log can only decorate methods, not getters'));
+			expect(function () {
+				(decorators.log as any)({}, undefined, undefined);
+			}).toThrow(new TypeError('@log can only decorate methods (undefined is not a method)'));
+			expect(function () {
+				(decorators.log as any)(undefined, fakeContext('method', 'x').context);
 			}).toThrow(TypeError);
 		});
 	});
@@ -315,6 +349,8 @@ describe('Decorators', function () {
 			expect(detached.call(undefined, 4)).toBe(16);
 			expect(detached.call(undefined, 4)).toBe(16);
 			expect(staticCalls).toBe(2);
+			expect(detached.call(null as any, 4)).toBe(16);
+			expect(staticCalls).toBe(2); // a null `this` shares the state of other non-object receivers
 		});
 
 		it('should work as a standard decorator', function () {
@@ -360,11 +396,13 @@ describe('Decorators', function () {
 			expect(Object.getOwnPropertyDescriptor(Test.prototype, 'getId')?.get).toBeDefined();
 		});
 
-		it('should allow reassignment on an instance', function () {
-			test.getId = function () {
+		it('should allow reassignment on an instance, like a plain assignment', function () {
+			function replacement(): number {
 				return 99;
-			};
+			}
+			test.getId = replacement;
 			expect(test.getId()).toBe(99);
+			expect(Object.getOwnPropertyDescriptor(test, 'getId')).toEqual({ value: replacement, writable: true, enumerable: true, configurable: true });
 		});
 
 		it('should bind static methods to the class', function () {
@@ -398,6 +436,13 @@ describe('Decorators', function () {
 			expect(Object.prototype.hasOwnProperty.call(unrelated, 'getId')).toBe(false);
 		});
 
+		it('should treat objects whose own constructor does not point back to them as instances', function () {
+			const instance = new Test(13);
+			Object.defineProperty(instance, 'constructor', { value: Test });
+			const { getId } = instance;
+			expect(getId()).toBe(13);
+		});
+
 		it('should treat objects with a non-function own constructor as instances', function () {
 			const descriptor = Object.getOwnPropertyDescriptor(Test.prototype, 'getId') as PropertyDescriptor;
 			const fake = Object.create(Test.prototype, { constructor: { value: 'not a function' }, id: { value: 12 } });
@@ -418,7 +463,7 @@ describe('Decorators', function () {
 			runInitializers(instance);
 			const { getValue: extracted } = instance;
 			expect(extracted()).toBe(5);
-			expect(Object.getOwnPropertyDescriptor(instance, 'getValue')).toMatchObject({ enumerable: false, writable: true });
+			expect(Object.getOwnPropertyDescriptor(instance, 'getValue')).toMatchObject({ enumerable: false, writable: true, configurable: true });
 
 			const overridden = Object.create(
 				{
@@ -435,15 +480,24 @@ describe('Decorators', function () {
 		it('should reject non-methods and private methods', function () {
 			expect(function () {
 				(decorators.bound as any)({}, 'x', { get: function () {} });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@bound can only decorate methods (x is not a method)'));
 			expect(function () {
 				(decorators.bound as any)({}, 'x');
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@bound can only decorate methods (x is not a method)'));
 			expect(function () {
 				decorators.bound(function () {}, fakeContext('method', '#x', { private: true }).context);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@bound can only decorate public methods, not private methods'));
 			expect(function () {
 				(decorators.bound as any)(undefined, fakeContext('field', 'x').context);
+			}).toThrow(new TypeError('@bound can only decorate public methods, not fields'));
+			expect(function () {
+				(decorators.bound as any)(function () {}, fakeContext('getter', 'x').context);
+			}).toThrow(new TypeError('@bound can only decorate public methods, not getters'));
+			expect(function () {
+				(decorators.bound as any)(function () {}, fakeContext('method', 'x', { addInitializer: undefined }).context);
+			}).toThrow(new TypeError('@bound can only decorate public methods, not methods'));
+			expect(function () {
+				(decorators.bound as any)(undefined, fakeContext('method', 'x').context);
 			}).toThrow(TypeError);
 		});
 	});
@@ -468,10 +522,10 @@ describe('Decorators', function () {
 		it('should validate its arguments eagerly', function () {
 			expect(function () {
 				decorators.debounced(-1);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounce: `wait` must be a finite number >= 0, got -1'));
 			expect(function () {
 				decorators.debounced(10, { leading: false, trailing: false });
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounce: at least one of `leading` or `trailing` must be true'));
 		});
 
 		it('should work as a standard decorator', function () {
@@ -508,13 +562,13 @@ describe('Decorators', function () {
 		it('should validate its arguments eagerly', function () {
 			expect(function () {
 				decorators.throttled(NaN);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('throttle: `wait` must be a finite number >= 0, got NaN'));
 		});
 
 		it('should reject non-methods', function () {
 			expect(function () {
 				(decorators.throttled(10) as any)({}, 'field', undefined);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@throttled can only decorate methods (field is not a method)'));
 		});
 	});
 
@@ -625,10 +679,10 @@ describe('Decorators (round 2)', function () {
 			expect(spy).toHaveBeenCalledTimes(2);
 			expect(function () {
 				(decorators.once as any)({}, 'getter', { get: function () {} });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@once can only decorate methods (getter is not a method)'));
 			expect(function () {
 				(decorators.once as any)(undefined, fakeContext('getter', 'g').context);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@once can only decorate methods, not getters'));
 		});
 	});
 
@@ -699,7 +753,7 @@ describe('Decorators (round 2)', function () {
 			expect(method).toHaveBeenCalledTimes(1);
 
 			const invalid = decorators.retryable({ retries: -1 })(method, fakeContext('method', 'm').context);
-			await expect(invalid()).rejects.toThrow(RangeError);
+			await expect(invalid()).rejects.toThrow(new RangeError('retry: `retries` must be an integer >= 0 or Infinity, got -1'));
 		});
 
 		it('should turn synchronous throws into rejections and reject non-methods', async function () {
@@ -709,7 +763,7 @@ describe('Decorators (round 2)', function () {
 			await expect(wrapped()).rejects.toThrow('sync');
 			expect(function () {
 				(decorators.retryable() as any)({}, 'field', undefined);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('@retryable can only decorate methods (field is not a method)'));
 		});
 	});
 
@@ -770,7 +824,7 @@ describe('Decorators (round 2)', function () {
 		it.each([-1, NaN, 2 ** 31])('should throw a RangeError eagerly for ms = %p', function (ms) {
 			expect(function () {
 				decorators.timeout(ms);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError(`@timeout: \`ms\` must be a number between 0 and 2147483647, got ${ms}`));
 		});
 
 		it('should throw a TypeError eagerly for a non-number ms', function () {
@@ -840,13 +894,26 @@ describe('Decorators (round 2)', function () {
 				},
 				configurable: true
 			};
-			[decorators.log, decorators.memoize, decorators.once, decorators.bound, decorators.debounced(1), decorators.throttled(1), decorators.deprecated()].forEach(
-				function (decorator: any) {
-					expect(function () {
-						decorator({}, 'value', getter);
-					}).toThrow(TypeError);
-				}
-			);
+			const decorated: Array<[unknown, string]> = [
+				[decorators.log, 'log'],
+				[decorators.memoize, 'memoize'],
+				[decorators.once, 'once'],
+				[decorators.bound, 'bound'],
+				[decorators.debounced(1), 'debounced'],
+				[decorators.throttled(1), 'throttled'],
+				[decorators.deprecated(), 'deprecated'],
+				[decorators.timeout(1), 'timeout']
+			];
+			decorated.forEach(function ([decorator, name]: [any, string]) {
+				expect(function () {
+					decorator({}, 'value', getter);
+				}).toThrow(new TypeError(`@${name} can only decorate methods (value is not a method)`));
+				expect(function () {
+					decorator(undefined, fakeContext('field', 'value').context);
+				}).toThrow(
+					name === 'bound' ? new TypeError('@bound can only decorate public methods, not fields') : new TypeError(`@${name} can only decorate methods, not fields`)
+				);
+			});
 		});
 	});
 });

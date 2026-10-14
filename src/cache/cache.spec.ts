@@ -33,7 +33,7 @@ describe('createLRUCache', function () {
 		it.each(['2' as any, undefined as any])('throws TypeError for a non-number max = %p', function (max) {
 			expect(function () {
 				createLRUCache({ max });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError(`createLRUCache: \`max\` must be an integer >= 1 or Infinity, got ${typeof max}`));
 		});
 
 		it('accepts max = Infinity and integer max >= 1', function () {
@@ -50,7 +50,7 @@ describe('createLRUCache', function () {
 		it.each(['10' as any, null as any])('throws TypeError for a non-number ttl = %p', function (ttl) {
 			expect(function () {
 				createLRUCache({ max: 2, ttl });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError(`createLRUCache: \`ttl\` must be a number > 0 or Infinity, got ${ttl === null ? 'null' : typeof ttl}`));
 		});
 
 		it('throws RangeError for an invalid per-entry ttl and leaves the cache untouched', function () {
@@ -68,13 +68,16 @@ describe('createLRUCache', function () {
 		it('throws TypeError for non-object options or non-function now/onEvict', function () {
 			expect(function () {
 				createLRUCache(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createLRUCache: `options` must be an object, got null'));
 			expect(function () {
 				createLRUCache(5 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createLRUCache: `options` must be an object, got number'));
+			expect(function () {
+				createLRUCache(undefined as any);
+			}).toThrow(new TypeError('createLRUCache: `options` must be an object, got undefined'));
 			expect(function () {
 				createLRUCache({ max: 1, now: 5 as any });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createLRUCache: `now` must be a function, got number'));
 			expect(function () {
 				createLRUCache({ max: 1, onEvict: 'x' as any });
 			}).toThrow(new TypeError('createLRUCache: `onEvict` must be a function, got string'));
@@ -111,6 +114,20 @@ describe('createLRUCache', function () {
 			expect(cache.get({})).toBeUndefined();
 			expect(cache.get(obj)).toBe('obj');
 			expect(cache.get('😀')).toBe('emoji');
+		});
+
+		it('normalises a -0 key to +0 like Map, in iteration and eviction reports', function () {
+			const evicted: unknown[] = [];
+			const cache = createLRUCache<number, string>({
+				max: 1,
+				onEvict: function (key) {
+					evicted.push(key);
+				}
+			});
+			cache.set(-0, 'zero');
+			expect(Object.is([...cache.keys()][0], 0)).toBe(true);
+			cache.set(1, 'one');
+			expect(Object.is(evicted[0], 0)).toBe(true);
 		});
 
 		it('delete returns whether a live entry was removed', function () {
@@ -406,6 +423,7 @@ describe('createLRUCache', function () {
 			}
 			expect(seen).toEqual(['a', 'b', 'c']);
 			expect(thrown).toBeInstanceOf(AggregateError);
+			expect((thrown as AggregateError).message).toBe('createLRUCache: 2 onEvict calls threw');
 			expect((thrown as AggregateError).errors.map(String)).toEqual(['Error: boom a', 'Error: boom c']);
 			expect([...cache.keys()]).toEqual(['d']);
 		});

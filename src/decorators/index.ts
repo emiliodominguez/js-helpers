@@ -1,7 +1,6 @@
 import { retry, withTimeout, type RetryOptions } from '../async/index.js';
 import {
 	debounce,
-	defaultMemoizeKey,
 	memoize as memoizeFunction,
 	noop,
 	once as onceFunction,
@@ -82,7 +81,8 @@ const NO_INSTANCE: object = {};
  * @returns {boolean} `true` for a standard decorator context
  */
 function isStandardContext(value: unknown): value is StandardContext {
-	return typeof value === 'object' && value !== null && typeof (value as { kind?: unknown }).kind === 'string';
+	// Legacy decorators receive a property key (a string or symbol, whose `kind` is undefined) instead.
+	return typeof (value as { kind?: unknown } | null | undefined)?.kind === 'string';
 }
 
 /**
@@ -265,9 +265,7 @@ export function readonly(targetOrValue: unknown, keyOrContext: unknown, descript
 	Object.defineProperty(target, key, {
 		configurable: true,
 		enumerable: false,
-		get: function (): undefined {
-			return undefined;
-		},
+		get: noop,
 		set: function (this: unknown, value: unknown): void {
 			Object.defineProperty(this as object, key, { value, writable: false, enumerable: true, configurable: false });
 		}
@@ -372,7 +370,7 @@ function wrapMemoize(method: UnknownMethod): UnknownMethod {
 		let memoized = perInstance.get(owner);
 
 		if (memoized === undefined) {
-			memoized = memoizeFunction(method, { resolver: defaultMemoizeKey });
+			memoized = memoizeFunction(method);
 			perInstance.set(owner, memoized);
 		}
 
@@ -382,7 +380,7 @@ function wrapMemoize(method: UnknownMethod): UnknownMethod {
 
 /**
  * Caches the results of the decorated method, separately for every instance (instances never see each other's results, and caches
- * are garbage-collected with their instance). Keys are computed with {@link defaultMemoizeKey} (see its limitations).
+ * are garbage-collected with their instance). Keys are computed with `defaultMemoizeKey` from the `functions` module (see its limitations).
  * Works with TypeScript/Babel legacy decorators and with TC39 standard decorators.
  * @template T - The method type
  * @param {object | T} targetOrValue - Legacy: the prototype (or constructor); standard: the method

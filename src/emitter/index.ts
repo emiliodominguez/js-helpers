@@ -128,16 +128,12 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 
 	/**
 	 * Adds a registration (copy-on-write, so in-progress emits keep iterating their snapshot).
-	 * @param {string} caller - Name of the public method, used in error messages
 	 * @param {PropertyKey} event - The event name (`'*'` for wildcard listeners)
-	 * @param {unknown} handler - The listener
+	 * @param {AnyFunction} handler - The listener
 	 * @param {boolean} once - Whether to remove the registration before its first call
 	 * @returns {Unsubscribe} Removes this registration
-	 * @throws {TypeError} when `handler` is not a function
 	 */
-	function add(caller: string, event: PropertyKey, handler: unknown, once: boolean): Unsubscribe {
-		assertFunction(caller, 'handler', handler);
-
+	function add(event: PropertyKey, handler: AnyFunction, once: boolean): Unsubscribe {
 		const registration: Registration = { handler: handler as (...args: unknown[]) => unknown, once, active: true };
 
 		registry.set(event, [...(registry.get(event) ?? []), registration]);
@@ -174,28 +170,43 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	}
 
 	/**
-	 * Calls the active registrations of a snapshot, collecting thrown errors.
-	 * @param {PropertyKey} event - The event the registrations belong to (`'*'` for wildcard listeners)
+	 * Calls the active registrations of a snapshot, collecting thrown errors. Listeners are called with no argument, `(payload)` or, for
+	 * wildcard listeners, `(event, payload)`.
+	 * @param {PropertyKey} event - The emitted event
 	 * @param {ReadonlyArray<Registration>} snapshot - The registrations at the start of the emit
-	 * @param {unknown[]} args - The arguments to pass
-	 * @param {unknown[]} errors - Collects the thrown errors
-	 * @returns {void}
+	 * @param {boolean} wildcard - Whether the snapshot holds the wildcard listeners
+	 * @param {boolean} withPayload - Whether a payload argument was given to `emit`
+	 * @param {unknown} payload - The payload
+	 * @param {unknown[] | undefined} errors - The errors collected so far, if any
+	 * @returns {unknown[] | undefined} The collected errors, if any
 	 */
-	function run(event: PropertyKey, snapshot: ReadonlyArray<Registration>, args: unknown[], errors: unknown[]): void {
+	function run(
+		event: PropertyKey,
+		snapshot: ReadonlyArray<Registration>,
+		wildcard: boolean,
+		withPayload: boolean,
+		payload: unknown,
+		errors: unknown[] | undefined
+	): unknown[] | undefined {
 		for (const registration of snapshot) {
 			if (!registration.active) continue;
 			if (registration.once) {
-				remove(event, function (candidate) {
+				remove(wildcard ? WILDCARD : event, function (candidate) {
 					return candidate === registration;
 				});
 			}
 
 			try {
-				registration.handler(...args);
+				if (wildcard) registration.handler(event, payload);
+				else if (withPayload) registration.handler(payload);
+				else registration.handler();
 			} catch (error) {
+				errors = errors ?? [];
 				errors.push(error);
 			}
 		}
+
+		return errors;
 	}
 
 	/**
@@ -211,11 +222,15 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 
 	const emitter: Emitter<Events> = {
 		on(event: PropertyKey, handler: AnyFunction): Unsubscribe {
-			return add('on', event, handler, false);
+			assertFunction('on', 'handler', handler);
+
+			return add(event, handler, false);
 		},
 
 		once(event: PropertyKey, handler: AnyFunction): Unsubscribe {
-			return add('once', event, handler, true);
+			assertFunction('once', 'handler', handler);
+
+			return add(event, handler, true);
 		},
 
 		off(event: PropertyKey, handler: AnyFunction): boolean {
@@ -229,15 +244,18 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		emit(event: PropertyKey, ...args: unknown[]): void {
 			assertNotWildcard('emit', event);
 
-			const listeners = registry.get(event) ?? [];
-			const wildcards = registry.get(WILDCARD) ?? [];
-			const errors: unknown[] = [];
+			// Both snapshots are taken before any listener runs.
+			const listeners = registry.get(event);
+			const wildcards = registry.get(WILDCARD);
+			const withPayload = args.length > 0;
+			let errors: unknown[] | undefined;
 
-			run(event, listeners, args.slice(0, 1), errors);
-			run(WILDCARD, wildcards, [event, args[0]], errors);
+			if (listeners !== undefined) errors = run(event, listeners, false, withPayload, args[0], errors);
+			if (wildcards !== undefined) errors = run(event, wildcards, true, withPayload, args[0], errors);
 
+			if (errors === undefined) return;
 			if (errors.length === 1) throw errors[0];
-			if (errors.length > 1) throw new AggregateError(errors, `emit: ${errors.length} listeners of ${String(event)} threw`);
+			throw new AggregateError(errors, `emit: ${errors.length} listeners of ${String(event)} threw`);
 		},
 
 		clear(event?: PropertyKey): void {
@@ -279,7 +297,7 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 						: setTimeout(function () {
 								finish(reject, new TimeoutError(`waitFor: ${String(event)} was not emitted within ${timeout} ms`));
 							}, timeout);
-				const unsubscribe = add('waitFor', event, onEvent, false);
+				const unsubscribe = add(event, onEvent, false);
 
 				/**
 				 * Settles the promise and releases the listener, the timer and the abort listener.
@@ -320,7 +338,8 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 					if (accepted) finish(resolve, payload);
 				}
 
-				signal?.addEventListener('abort', onAbort, { once: true });
+				// `finish` removes it, so it never runs twice.
+				signal?.addEventListener('abort', onAbort);
 			});
 		}
 	};

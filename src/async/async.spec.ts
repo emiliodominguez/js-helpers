@@ -46,12 +46,12 @@ class CountingSignal implements AbortSignalLike {
 		return this.listeners.size;
 	}
 
-	addEventListener(_type: 'abort', listener: () => void, options?: { once?: boolean }): void {
-		if (!this.listeners.has(listener)) this.listeners.set(listener, { once: options?.once ?? false });
+	addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void {
+		if (type === 'abort' && !this.listeners.has(listener)) this.listeners.set(listener, { once: options?.once ?? false });
 	}
 
-	removeEventListener(_type: 'abort', listener: () => void): void {
-		this.listeners.delete(listener);
+	removeEventListener(type: 'abort', listener: () => void): void {
+		if (type === 'abort') this.listeners.delete(listener);
 	}
 
 	abort(reason?: unknown): void {
@@ -173,6 +173,15 @@ describe('Async helpers', function () {
 			await expect(sleep(1, { signal: preAborted })).rejects.toBeInstanceOf(AbortError);
 		});
 
+		it('should not keep its abort listener after an abort', async function () {
+			const signal = new CountingSignal();
+			const promise = sleep(1000, { signal });
+			expect(signal.listenerCount).toBe(1);
+			signal.abort('stop');
+			await expect(promise).rejects.toBe('stop');
+			expect(signal.listenerCount).toBe(0);
+		});
+
 		it('should remove the abort listener once resolved', async function () {
 			jest.useFakeTimers();
 
@@ -184,7 +193,7 @@ describe('Async helpers', function () {
 		});
 
 		it.each([-1, NaN, Infinity, 2 ** 31])('should reject with a RangeError for ms = %p', async function (ms) {
-			await expect(sleep(ms)).rejects.toThrow(RangeError);
+			await expect(sleep(ms)).rejects.toThrow(new RangeError(`sleep: \`ms\` must be a number between 0 and 2147483647, got ${ms}`));
 		});
 	});
 
@@ -226,12 +235,16 @@ describe('Async helpers', function () {
 			await assertion;
 		});
 
+		it('should accept the largest delay setTimeout supports, 2^31 - 1 ms', async function () {
+			await expect(withTimeout(Promise.resolve('ok'), 2 ** 31 - 1)).resolves.toBe('ok');
+		});
+
 		it('should accept plain values', async function () {
 			await expect(withTimeout(7, 10)).resolves.toBe(7);
 		});
 
 		it('should reject with a RangeError for invalid ms', async function () {
-			await expect(withTimeout(Promise.resolve(1), -1)).rejects.toThrow(RangeError);
+			await expect(withTimeout(Promise.resolve(1), -1)).rejects.toThrow(new RangeError('withTimeout: `ms` must be a number between 0 and 2147483647, got -1'));
 		});
 	});
 
@@ -376,21 +389,38 @@ describe('Async helpers', function () {
 		});
 
 		it.each([
-			[{ retries: -1 }],
-			[{ retries: 1.5 }],
-			[{ retries: NaN }],
-			[{ delay: -1 }],
-			[{ delay: Infinity }],
-			[{ factor: 0 }],
-			[{ factor: NaN }],
-			[{ maxDelay: -1 }],
-			[{ maxDelay: NaN }]
-		])('should reject with a RangeError for %p', async function (options) {
-			await expect(retry(jest.fn(), options)).rejects.toThrow(RangeError);
+			[{ retries: -1 }, '`retries` must be an integer >= 0 or Infinity, got -1'],
+			[{ retries: 1.5 }, '`retries` must be an integer >= 0 or Infinity, got 1.5'],
+			[{ retries: NaN }, '`retries` must be an integer >= 0 or Infinity, got NaN'],
+			[{ delay: -1 }, '`delay` must be a finite number >= 0, got -1'],
+			[{ delay: Infinity }, '`delay` must be a finite number >= 0, got Infinity'],
+			[{ factor: 0 }, '`factor` must be a finite number > 0, got 0'],
+			[{ factor: Infinity }, '`factor` must be a finite number > 0, got Infinity'],
+			[{ factor: NaN }, '`factor` must be a finite number > 0, got NaN'],
+			[{ maxDelay: -1 }, '`maxDelay` must be a number >= 0, got -1'],
+			[{ maxDelay: NaN }, '`maxDelay` must be a number >= 0, got NaN']
+		])('should reject with a RangeError for %p', async function (options, message) {
+			await expect(retry(jest.fn(), options)).rejects.toThrow(new RangeError(`retry: ${message}`));
+		});
+
+		it('should accept maxDelay = 0 and retry without any timer when the delay is 0', async function () {
+			jest.useFakeTimers();
+
+			let calls = 0;
+			const fn = jest.fn(async function () {
+				calls++;
+				if (calls < 3) throw new Error('again');
+				return 'done';
+			});
+			// No timer is involved: the retries complete without advancing the fake clock.
+			await expect(retry(fn, { delay: 0 })).resolves.toBe('done');
+			calls = 0;
+			await expect(retry(fn, { delay: 100, maxDelay: 0 })).resolves.toBe('done');
+			expect(jest.getTimerCount()).toBe(0);
 		});
 
 		it('should reject with a TypeError when fn is not a function', async function () {
-			await expect(retry(42 as any)).rejects.toThrow(TypeError);
+			await expect(retry(42 as any)).rejects.toThrow(new TypeError('retry: `fn` must be a function, got number'));
 		});
 	});
 
@@ -474,11 +504,13 @@ describe('Async helpers', function () {
 		});
 
 		it.each([0, -1, 1.5, NaN])('should reject with a RangeError for concurrency = %p', async function (concurrency) {
-			await expect(mapWithConcurrency([1], jest.fn(), concurrency)).rejects.toThrow(RangeError);
+			await expect(mapWithConcurrency([1], jest.fn(), concurrency)).rejects.toThrow(
+				new RangeError(`mapWithConcurrency: \`concurrency\` must be an integer >= 1 or Infinity, got ${concurrency}`)
+			);
 		});
 
 		it('should reject with a TypeError when mapper is not a function', async function () {
-			await expect(mapWithConcurrency([1], null as any)).rejects.toThrow(TypeError);
+			await expect(mapWithConcurrency([1], null as any)).rejects.toThrow(new TypeError('mapWithConcurrency: `mapper` must be a function, got null'));
 		});
 	});
 });
@@ -583,8 +615,30 @@ describe('Async helpers (round 2)', function () {
 			await expect(third).resolves.toBe('ok');
 		});
 
+		it('should drain its queue without leaving unhandled rejections behind', async function () {
+			const unhandled = jest.fn();
+			process.on('unhandledRejection', unhandled);
+			try {
+				const limit = createLimiter(1);
+				const results = await Promise.all(
+					[1, 2, 3].map(function (n) {
+						return limit(function () {
+							return n;
+						});
+					})
+				);
+				expect(results).toEqual([1, 2, 3]);
+				await new Promise(function (resolve) {
+					setTimeout(resolve, 10);
+				});
+				expect(unhandled).not.toHaveBeenCalled();
+			} finally {
+				process.off('unhandledRejection', unhandled);
+			}
+		});
+
 		it('should reject with a TypeError for non-function tasks', async function () {
-			await expect(createLimiter(1)(42 as any)).rejects.toThrow(TypeError);
+			await expect(createLimiter(1)(42 as any)).rejects.toThrow(new TypeError('createLimiter: `fn` must be a function, got number'));
 		});
 
 		it('should discard queued tasks on clearQueue (never settling by default)', async function () {
@@ -611,8 +665,11 @@ describe('Async helpers (round 2)', function () {
 				return blocker.promise;
 			});
 			const queued = limit(jest.fn());
+			const second = limit(jest.fn());
 			limit.clearQueue();
-			await expect(queued).rejects.toBeInstanceOf(AbortError);
+			await expect(queued).rejects.toThrow(new AbortError('The task was removed from the limiter queue.'));
+			await expect(second).rejects.toBeInstanceOf(AbortError);
+			expect(limit.pendingCount).toBe(0);
 			blocker.resolve();
 		});
 
@@ -643,7 +700,7 @@ describe('Async helpers (round 2)', function () {
 		it.each([0, -1, 1.5, NaN])('should throw a RangeError for concurrency = %p', function (concurrency) {
 			expect(function () {
 				createLimiter(concurrency);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError(`createLimiter: \`concurrency\` must be an integer >= 1 or Infinity, got ${concurrency}`));
 		});
 	});
 
@@ -708,7 +765,7 @@ describe('Async helpers (round 2)', function () {
 				return false;
 			});
 			const promise = pollUntil(check, { interval: 10, timeout: 35 });
-			const assertion = expect(promise).rejects.toBeInstanceOf(TimeoutError);
+			const assertion = expect(promise).rejects.toThrow(new TimeoutError('pollUntil: condition not met within 35 ms'));
 			await jest.advanceTimersByTimeAsync(35);
 			await assertion;
 			expect(jest.getTimerCount()).toBe(0);
@@ -729,6 +786,19 @@ describe('Async helpers (round 2)', function () {
 			const assertion = expect(promise).rejects.toBeInstanceOf(TimeoutError);
 			await jest.advanceTimersByTimeAsync(200);
 			await assertion;
+
+			// A late falsy result does not start polling again.
+			const slowFalsy = jest.fn(function () {
+				return sleep(100).then(function () {
+					return false;
+				});
+			});
+			const stopped = pollUntil(slowFalsy, { interval: 10, timeout: 20 });
+			const stoppedAssertion = expect(stopped).rejects.toBeInstanceOf(TimeoutError);
+			await jest.advanceTimersByTimeAsync(1000);
+			await stoppedAssertion;
+			expect(slowFalsy).toHaveBeenCalledTimes(1);
+			expect(jest.getTimerCount()).toBe(0);
 
 			const lateFailure = pollUntil(
 				function () {
@@ -784,12 +854,17 @@ describe('Async helpers (round 2)', function () {
 			expect(signal.removeEventListener).toHaveBeenCalledWith('abort', signal.addEventListener.mock.calls[0][1]);
 		});
 
-		it.each([[{ interval: -1 }], [{ interval: NaN }], [{ timeout: -5 }], [{ timeout: 2 ** 31 }]])('should reject with a RangeError for %p', async function (options) {
-			await expect(pollUntil(jest.fn(), options)).rejects.toThrow(RangeError);
+		it.each([
+			[{ interval: -1 }, '`interval` must be a number between 0 and 2147483647, got -1'],
+			[{ interval: NaN }, '`interval` must be a number between 0 and 2147483647, got NaN'],
+			[{ timeout: -5 }, '`timeout` must be Infinity or a number between 0 and 2147483647, got -5'],
+			[{ timeout: 2 ** 31 }, '`timeout` must be Infinity or a number between 0 and 2147483647, got 2147483648']
+		])('should reject with a RangeError for %p', async function (options, message) {
+			await expect(pollUntil(jest.fn(), options)).rejects.toThrow(new RangeError(`pollUntil: ${message}`));
 		});
 
 		it('should reject with a TypeError for a non-function check', async function () {
-			await expect(pollUntil(null as any)).rejects.toThrow(TypeError);
+			await expect(pollUntil(null as any)).rejects.toThrow(new TypeError('pollUntil: `check` must be a function, got null'));
 		});
 	});
 
@@ -799,6 +874,10 @@ describe('Async helpers (round 2)', function () {
 			const result = await promiseAllObject({ a: Promise.resolve(1), b: 'plain', [sym]: Promise.resolve(true) });
 			expect(result).toEqual({ a: 1, b: 'plain', [sym]: true });
 			expect(result[sym]).toBe(true);
+			// Ordinary data properties, like those of an object literal.
+			expect(Object.getOwnPropertyDescriptor(result, 'a')).toEqual({ value: 1, writable: true, enumerable: true, configurable: true });
+			const settled = await promiseAllSettledObject({ a: 1 });
+			expect(Object.getOwnPropertyDescriptor(settled, 'a')).toEqual({ value: { status: 'fulfilled', value: 1 }, writable: true, enumerable: true, configurable: true });
 			const typed: { a: number; b: string } = result;
 			expect(typed.a).toBe(1);
 			await expect(promiseAllObject({})).resolves.toEqual({});
@@ -827,8 +906,9 @@ describe('Async helpers (round 2)', function () {
 		});
 
 		it.each([null, 1, 'str', [1]])('should reject with a TypeError for %p', async function (input) {
-			await expect(promiseAllObject(input as any)).rejects.toThrow(TypeError);
-			await expect(promiseAllSettledObject(input as any)).rejects.toThrow(TypeError);
+			const got = Array.isArray(input) ? 'an array' : input === null ? 'null' : typeof input;
+			await expect(promiseAllObject(input as any)).rejects.toThrow(new TypeError(`promiseAllObject: expected a non-array object, got ${got}`));
+			await expect(promiseAllSettledObject(input as any)).rejects.toThrow(new TypeError(`promiseAllSettledObject: expected a non-array object, got ${got}`));
 		});
 	});
 
@@ -902,7 +982,7 @@ describe('Async helpers (round 2)', function () {
 			const debounced = debounceAsync(fn, 100);
 			const cancelled = debounced(1);
 			debounced.cancel();
-			await expect(cancelled).rejects.toBeInstanceOf(AbortError);
+			await expect(cancelled).rejects.toThrow(new AbortError('The debounced call was cancelled.'));
 			expect(jest.getTimerCount()).toBe(0);
 			debounced.cancel();
 
@@ -916,13 +996,13 @@ describe('Async helpers (round 2)', function () {
 		it('should validate its arguments', function () {
 			expect(function () {
 				debounceAsync(null as any, 10);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('debounceAsync: `fn` must be a function, got null'));
 			expect(function () {
 				debounceAsync(jest.fn(), -1);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounceAsync: `wait` must be a number between 0 and 2147483647, got -1'));
 			expect(function () {
 				debounceAsync(jest.fn(), 2 ** 31);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('debounceAsync: `wait` must be a number between 0 and 2147483647, got 2147483648'));
 		});
 	});
 
@@ -1007,7 +1087,7 @@ describe('Async helpers (round 2)', function () {
 			);
 			expect(function () {
 				createLimiter(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createLimiter: `concurrency` must be an integer >= 1 or Infinity, got null'));
 		});
 	});
 	describe('timeoutSignal', function () {
@@ -1054,7 +1134,7 @@ describe('Async helpers (round 2)', function () {
 			for (const ms of [-1, NaN, 2 ** 31, -Infinity]) {
 				expect(function () {
 					timeoutSignal(ms);
-				}).toThrow(RangeError);
+				}).toThrow(new RangeError(`timeoutSignal: \`ms\` must be Infinity or a number between 0 and 2147483647, got ${ms}`));
 			}
 		});
 
@@ -1159,7 +1239,15 @@ describe('Async helpers (round 2)', function () {
 			}).toThrow(new TypeError('anySignal: `signals[0]` must be an AbortSignal, null or undefined, got string'));
 			expect(function () {
 				anySignal([{ addEventListener() {} }] as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('anySignal: `signals[0]` must be an AbortSignal, null or undefined, got object'));
+			expect(function () {
+				anySignal([{ removeEventListener() {} }] as any);
+			}).toThrow(new TypeError('anySignal: `signals[0]` must be an AbortSignal, null or undefined, got object'));
+			// Only objects qualify, even callable ones with the right methods.
+			const callable = Object.assign(function () {}, { aborted: false, addEventListener() {}, removeEventListener() {} });
+			expect(function () {
+				anySignal([callable] as any);
+			}).toThrow(new TypeError('anySignal: `signals[0]` must be an AbortSignal, null or undefined, got function'));
 		});
 
 		it('should throw a clear Error without AbortController', function () {
@@ -1189,6 +1277,15 @@ describe('Async helpers (round 2)', function () {
 
 		it('should accept plain values', async function () {
 			await expect(abortable(7, new CountingSignal())).resolves.toBe(7);
+		});
+
+		it('should not keep its abort listener after an abort, even if the promise never settles', async function () {
+			const signal = new CountingSignal();
+			const promise = abortable(new Promise(function () {}), signal);
+			expect(signal.listenerCount).toBe(1);
+			signal.abort('gone');
+			await expect(promise).rejects.toBe('gone');
+			expect(signal.listenerCount).toBe(0);
 		});
 
 		it('should reject with the abort reason when the signal aborts first', async function () {
@@ -1221,7 +1318,9 @@ describe('Async helpers (round 2)', function () {
 
 		it('should reject with a TypeError for an invalid signal', async function () {
 			await expect(abortable(Promise.resolve(1), {} as any)).rejects.toThrow(new TypeError('abortable: `signal` must be an AbortSignal, null or undefined, got object'));
-			await expect(abortable(Promise.resolve(1), 'signal' as any)).rejects.toThrow(TypeError);
+			await expect(abortable(Promise.resolve(1), 'signal' as any)).rejects.toThrow(
+				new TypeError('abortable: `signal` must be an AbortSignal, null or undefined, got string')
+			);
 		});
 	});
 

@@ -78,7 +78,7 @@ function createNotifier(): Notifier {
 			pending = true;
 			if (notifying) return;
 
-			const errors: unknown[] = [];
+			let errors: unknown[] | undefined;
 			let rounds = 0;
 
 			notifying = true;
@@ -94,14 +94,16 @@ function createNotifier(): Notifier {
 				try {
 					emitter.emit('change');
 				} catch (error) {
+					errors = errors ?? [];
 					errors.push(error);
 				}
 			}
 
 			notifying = false;
 
+			if (errors === undefined) return;
 			if (errors.length === 1) throw errors[0];
-			if (errors.length > 1) throw new AggregateError(errors, `store: ${errors.length} notification rounds threw`);
+			throw new AggregateError(errors, `store: ${errors.length} notification rounds threw`);
 		},
 
 		size(): number {

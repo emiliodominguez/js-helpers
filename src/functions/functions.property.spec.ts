@@ -246,6 +246,34 @@ describe('Functions helpers (properties)', function () {
 				})
 			);
 		});
+
+		it('serialises argument lists like JSON.stringify with the documented markers (reference implementation)', function () {
+			const special = /^\\*(?:-?\d+n|NaN|-?Infinity|-0|undefined)$/;
+			function referenceKey(args: unknown[]): string {
+				return JSON.stringify(args, function (this: unknown, _key: string, value: unknown): unknown {
+					if (typeof value === 'bigint') return `${value}n`;
+					if (typeof value === 'number') return Object.is(value, -0) ? '-0' : Number.isFinite(value) ? value : String(value);
+					if (typeof value === 'string') return special.test(value) ? `\\${value}` : value;
+					if (value === undefined && this === args) return 'undefined';
+					return value;
+				});
+			}
+			const value = fc.oneof(
+				fc.double(),
+				fc.integer(),
+				fc.string({ unit: 'binary', maxLength: 4 }),
+				fc.constantFrom(NaN, -0, Infinity, -Infinity, null, undefined, true, false, 'NaN', '\\-0', '12n', '"', '\\', '\u2028', Symbol.iterator, add1),
+				fc.bigInt(),
+				fc.array(fc.oneof(fc.integer(), fc.constantFrom(undefined, -0, 'NaN')), { maxLength: 2 }),
+				fc.dictionary(fc.string({ maxLength: 2 }), fc.oneof(fc.integer(), fc.constantFrom(undefined, NaN)), { maxKeys: 2 })
+			);
+
+			fc.assert(
+				fc.property(fc.array(value, { minLength: 2, maxLength: 4 }), function (args) {
+					expect(defaultMemoizeKey(...args)).toBe(referenceKey(args));
+				})
+			);
+		});
 	});
 
 	describe('attempt', function () {

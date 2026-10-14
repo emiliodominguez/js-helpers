@@ -260,6 +260,7 @@ describe('createStore', function () {
 				caught = error;
 			}
 			expect(caught).toBeInstanceOf(AggregateError);
+			expect((caught as AggregateError).message).toBe('store: 2 notification rounds threw');
 			expect((caught as AggregateError).errors).toEqual(errors);
 			expect(errors).toHaveLength(2);
 		});
@@ -269,18 +270,25 @@ describe('createStore', function () {
 
 			expect(function () {
 				store.subscribe(null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('subscribe: `listener` must be a function, got null'));
 			expect(function () {
 				createStore(0, { equals: 'x' as any });
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createStore: `options.equals` must be a function, got string'));
 			expect(function () {
 				store.select('x' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('select: `selector` must be a function, got string'));
 			expect(function () {
 				store.select(function (n) {
 					return n;
 				}, 1 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('select: `equals` must be a function, got number'));
+			expect(function () {
+				store
+					.select(function (n) {
+						return n;
+					})
+					.subscribe(undefined as any);
+			}).toThrow(new TypeError('subscribe: `listener` must be a function, got undefined'));
 		});
 	});
 
@@ -352,7 +360,7 @@ describe('createStore', function () {
 
 			expect(function () {
 				store.setState(1);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('store: listeners changed the state during more than 100 consecutive notification rounds'));
 			expect(store.getState()).toBeGreaterThan(100);
 
 			stop();
@@ -461,6 +469,7 @@ describe('createStore', function () {
 			expect(listener).toHaveBeenCalledTimes(3);
 
 			again();
+			expect(again).not.toThrow(); // already detached: calling it again is a no-op
 			selector.mockClear();
 			store.setState(4);
 			store.setState(5);

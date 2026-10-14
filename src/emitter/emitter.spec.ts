@@ -35,11 +35,11 @@ function createSignal(): AbortSignalLike & { abort(reason?: unknown): void; list
 		get listeners() {
 			return listeners.size;
 		},
-		addEventListener(_type: 'abort', listener: () => void) {
-			listeners.add(listener);
+		addEventListener(type: 'abort', listener: () => void) {
+			if (type === 'abort') listeners.add(listener);
 		},
-		removeEventListener(_type: 'abort', listener: () => void) {
-			listeners.delete(listener);
+		removeEventListener(type: 'abort', listener: () => void) {
+			if (type === 'abort') listeners.delete(listener);
 		},
 		abort(reason?: unknown) {
 			signal.aborted = true;
@@ -329,7 +329,7 @@ describe('createEmitter', function () {
 			}
 			expect(caught).toBeInstanceOf(AggregateError);
 			expect((caught as AggregateError).errors).toEqual([e1, e2]);
-			expect((caught as AggregateError).message).toContain('count');
+			expect((caught as AggregateError).message).toBe('emit: 2 listeners of count threw');
 		});
 
 		it('does not depend on `this`', function () {
@@ -347,13 +347,13 @@ describe('createEmitter', function () {
 
 			expect(function () {
 				events.on('count', null as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('on: `handler` must be a function, got null'));
 			expect(function () {
 				events.once('count', 'x' as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('once: `handler` must be a function, got string'));
 			expect(function () {
 				events.off('count', 1 as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('off: `handler` must be a function, got number'));
 			expect(function () {
 				(events.emit as any)('*');
 			}).toThrow(new RangeError("emit: `event` must not be '*' (reserved for wildcard listeners), got '*'"));
@@ -591,6 +591,18 @@ describe('createEmitter', function () {
 			expect(jest.getTimerCount()).toBe(0);
 		});
 
+		it('waits indefinitely without a timeout', async function () {
+			const events = createEmitter<TestEvents>();
+			const promise = events.waitFor('count');
+
+			await new Promise(function (resolve) {
+				setTimeout(resolve, 20);
+			});
+			expect(await stateOf(promise)).toBe('pending');
+			events.emit('count', 4);
+			await expect(promise).resolves.toBe(4);
+		});
+
 		it('timeout 0 rejects on the next timer tick', async function () {
 			const events = createEmitter<TestEvents>();
 			await expect(events.waitFor('count', { timeout: 0 })).rejects.toBeInstanceOf(TimeoutError);
@@ -665,7 +677,7 @@ describe('createEmitter', function () {
 				new TypeError('waitFor: `timeout` must be Infinity or a number between 0 and 2147483647, got string')
 			);
 			await expect(events.waitFor('count', { filter: 'x' as any })).rejects.toThrow(new TypeError('waitFor: `filter` must be a function, got string'));
-			await expect((events.waitFor as any)('*')).rejects.toThrow(RangeError);
+			await expect((events.waitFor as any)('*')).rejects.toThrow(new RangeError("waitFor: `event` must not be '*' (reserved for wildcard listeners), got '*'"));
 			expect(events.listenerCount()).toBe(0);
 		});
 	});

@@ -76,13 +76,20 @@ export interface LRUCache<K, V> extends Iterable<[K, V]> {
 }
 
 /**
- * A stored entry: its value, its own TTL (for `updateAgeOnGet`) and the instant it expires (`Infinity` for never).
+ * A stored entry: its key and value, its own TTL (for `updateAgeOnGet`), the instant it expires (`Infinity` for never), and its
+ * neighbours in the recency list.
+ * @template K - The key type
  * @template V - The value type
  */
-interface Entry<V> {
+interface Entry<K, V> {
+	readonly key: K;
 	value: V;
 	ttl: number;
 	expiresAt: number;
+	/** The next more recently used entry (`undefined` for the most recently used one). */
+	newer: Entry<K, V> | undefined;
+	/** The next less recently used entry (`undefined` for the least recently used one). */
+	older: Entry<K, V> | undefined;
 }
 
 /**
@@ -98,8 +105,8 @@ function assertTTL(caller: string, ttl: number): void {
 }
 
 /**
- * Creates a least-recently-used cache backed by a single `Map` (whose insertion order tracks recency), so `get`, `set`, `peek`, `has` and
- * `delete` are O(1).
+ * Creates a least-recently-used cache backed by a `Map` for lookups and a doubly linked list for recency, so `get`, `set`, `peek`, `has`
+ * and `delete` are O(1) (a hit only relinks two list nodes; it never re-inserts the key into the `Map`).
  *
  * Semantics:
  * - Recency: `get` and `set` make an entry most-recently used; `peek`, `has` and iteration do not.
@@ -154,8 +161,10 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	assertFunction('createLRUCache', 'now', now);
 	if (onEvict !== undefined) assertFunction('createLRUCache', 'onEvict', onEvict);
 
-	// Oldest (least-recently used) first; bumping is delete + re-set.
-	const store = new Map<K, Entry<V>>();
+	const store = new Map<K, Entry<K, V>>();
+	// Both ends of the recency list.
+	let newest: Entry<K, V> | undefined;
+	let oldest: Entry<K, V> | undefined;
 
 	/**
 	 * Reports a removal to `onEvict`, if any.
@@ -171,36 +180,71 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	/**
 	 * Reports several removals, calling `onEvict` for every one of them even if some calls throw; the errors are rethrown afterwards (the
 	 * error itself, or an `AggregateError` holding every error in call order when several calls threw).
-	 * @param {Array<[K, Entry<V>, LRUEvictionReason]>} removed - The removed entries and why
+	 * @param {Array<[Entry<K, V>, LRUEvictionReason]>} removed - The removed entries and why
 	 * @returns {void}
 	 * @throws {AggregateError} when several `onEvict` calls threw (a single error is rethrown as is)
 	 */
-	function notifyAll(removed: Array<[K, Entry<V>, LRUEvictionReason]>): void {
+	function notifyAll(removed: Array<[Entry<K, V>, LRUEvictionReason]>): void {
 		const errors: unknown[] = [];
 
-		for (const [key, entry, reason] of removed) {
+		for (const [entry, reason] of removed) {
 			try {
-				notify(key, entry.value, reason);
+				notify(entry.key, entry.value, reason);
 			} catch (error) {
 				errors.push(error);
 			}
 		}
 
-		if (errors.length === 1) throw errors[0];
 		if (errors.length > 1) throw new AggregateError(errors, `createLRUCache: ${errors.length} onEvict calls threw`);
+		if (errors.length === 1) throw errors[0];
+	}
+
+	/**
+	 * Inserts a detached entry at the most-recently-used end of the list.
+	 * @param {Entry<K, V>} entry - The entry
+	 * @returns {void}
+	 */
+	function pushNewest(entry: Entry<K, V>): void {
+		entry.newer = undefined;
+		entry.older = newest;
+		if (newest === undefined) oldest = entry;
+		else newest.newer = entry;
+		newest = entry;
+	}
+
+	/**
+	 * Detaches an entry from the list (its own links are left as they are).
+	 * @param {Entry<K, V>} entry - The entry
+	 * @returns {void}
+	 */
+	function unlink(entry: Entry<K, V>): void {
+		if (entry.newer === undefined) newest = entry.older;
+		else entry.newer.older = entry.older;
+		if (entry.older === undefined) oldest = entry.newer;
+		else entry.older.newer = entry.newer;
+	}
+
+	/**
+	 * Removes an entry from the map and the list.
+	 * @param {Entry<K, V>} entry - The entry
+	 * @returns {void}
+	 */
+	function remove(entry: Entry<K, V>): void {
+		store.delete(entry.key);
+		unlink(entry);
 	}
 
 	/**
 	 * Looks `key` up, removing it (and reporting `'expired'`) when it has expired at `time`.
 	 * @param {K} key - The key to look up
 	 * @param {number} [time=now()] - The current time
-	 * @returns {Entry<V> | undefined} The live entry, or `undefined`
+	 * @returns {Entry<K, V> | undefined} The live entry, or `undefined`
 	 */
-	function lookup(key: K, time: number = now()): Entry<V> | undefined {
+	function lookup(key: K, time: number = now()): Entry<K, V> | undefined {
 		const entry = store.get(key);
 
 		if (entry !== undefined && time >= entry.expiresAt) {
-			store.delete(key);
+			remove(entry);
 			notify(key, entry.value, 'expired');
 			return undefined;
 		}
@@ -209,18 +253,29 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	}
 
 	/**
-	 * Snapshots the live entries from most- to least-recently used.
-	 * @returns {Array<[K, V]>} The live entries
+	 * Snapshots something of every live entry, from most- to least-recently used.
+	 * @template T - The snapshot element type
+	 * @param {(entry: Entry<K, V>) => T} pick - Extracts what to collect from a live entry
+	 * @returns {IterableIterator<T>} An iterator over the snapshot
 	 */
-	function liveEntries(): Array<[K, V]> {
+	function live<T>(pick: (entry: Entry<K, V>) => T): IterableIterator<T> {
 		const time = now();
-		const result: Array<[K, V]> = [];
+		const result: T[] = [];
 
-		for (const [key, entry] of store) {
-			if (time < entry.expiresAt) result.push([key, entry.value]);
+		for (let entry = newest; entry !== undefined; entry = entry.older) {
+			if (time < entry.expiresAt) result.push(pick(entry));
 		}
 
-		return result.reverse();
+		return result.values();
+	}
+
+	/**
+	 * Extracts the `[key, value]` pair of an entry.
+	 * @param {Entry<K, V>} entry - The entry
+	 * @returns {[K, V]} The pair
+	 */
+	function pair(entry: Entry<K, V>): [K, V] {
+		return [entry.key, entry.value];
 	}
 
 	const cache: LRUCache<K, V> = {
@@ -232,8 +287,8 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 			const entry = lookup(key, time);
 			if (entry === undefined) return undefined;
 
-			store.delete(key);
-			store.set(key, entry);
+			unlink(entry);
+			pushNewest(entry);
 			if (updateAgeOnGet) entry.expiresAt = time + entry.ttl;
 
 			return entry.value;
@@ -249,23 +304,36 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 			assertTTL('LRUCache.set', ttl);
 
 			const time = now();
-			const previous = store.get(key);
-			let evicted: [K, Entry<V>] | undefined;
+			const entry = store.get(key);
 
-			store.delete(key);
-			store.set(key, { value, ttl, expiresAt: time + ttl });
+			if (entry !== undefined) {
+				const previousValue = entry.value;
+				const expired = time >= entry.expiresAt;
 
-			if (previous === undefined && store.size > max) {
-				// Map iteration starts at the least-recently-used entry, which is never the key just added (size > max >= 1).
-				evicted = store.entries().next().value as [K, Entry<V>];
-				store.delete(evicted[0]);
+				entry.value = value;
+				entry.ttl = ttl;
+				entry.expiresAt = time + ttl;
+				unlink(entry);
+				pushNewest(entry);
+
+				if (expired) notify(key, previousValue, 'expired');
+				else if (!Object.is(previousValue, value)) notify(key, previousValue, 'replaced');
+
+				return cache;
 			}
 
-			if (previous !== undefined) {
-				if (time >= previous.expiresAt) notify(key, previous.value, 'expired');
-				else if (!Object.is(previous.value, value)) notify(key, previous.value, 'replaced');
-			} else if (evicted !== undefined) {
-				notify(evicted[0], evicted[1].value, time >= evicted[1].expiresAt ? 'expired' : 'capacity');
+			// `Map` normalises -0 to +0; keep the key it actually stores, so iteration and eviction report the same key as before.
+			const added: Entry<K, V> = { key: Object.is(key, -0) ? (0 as K) : key, value, ttl, expiresAt: time + ttl, newer: undefined, older: undefined };
+
+			store.set(key, added);
+			pushNewest(added);
+
+			if (store.size > max) {
+				// The least-recently-used entry is never the one just added (size > max >= 1).
+				const evicted = oldest as Entry<K, V>;
+
+				remove(evicted);
+				notify(evicted.key, evicted.value, time >= evicted.expiresAt ? 'expired' : 'capacity');
 			}
 
 			return cache;
@@ -274,51 +342,49 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 			const entry = lookup(key);
 			if (entry === undefined) return false;
 
-			store.delete(key);
+			remove(entry);
 			notify(key, entry.value, 'deleted');
 
 			return true;
 		},
 		clear(): void {
 			const time = now();
-			const removed = [...store].map(function ([key, entry]): [K, Entry<V>, LRUEvictionReason] {
-				return [key, entry, time >= entry.expiresAt ? 'expired' : 'cleared'];
-			});
+			const removed: Array<[Entry<K, V>, LRUEvictionReason]> = [];
+
+			for (let entry = oldest; entry !== undefined; entry = entry.newer) removed.push([entry, time >= entry.expiresAt ? 'expired' : 'cleared']);
 			store.clear();
+			newest = undefined;
+			oldest = undefined;
 
 			notifyAll(removed);
 		},
 		prune(): number {
 			const time = now();
-			const expired: Array<[K, Entry<V>, LRUEvictionReason]> = [];
+			const expired: Array<[Entry<K, V>, LRUEvictionReason]> = [];
 
-			for (const [key, entry] of store) {
-				if (time >= entry.expiresAt) expired.push([key, entry, 'expired']);
+			for (let entry = oldest; entry !== undefined; entry = entry.newer) {
+				if (time >= entry.expiresAt) expired.push([entry, 'expired']);
 			}
-			for (const [key] of expired) store.delete(key);
+			for (const [entry] of expired) remove(entry);
 			notifyAll(expired);
 
 			return expired.length;
 		},
 		keys(): IterableIterator<K> {
-			return liveEntries()
-				.map(function ([key]): K {
-					return key;
-				})
-				.values();
+			return live(function (entry): K {
+				return entry.key;
+			});
 		},
 		values(): IterableIterator<V> {
-			return liveEntries()
-				.map(function ([, value]): V {
-					return value;
-				})
-				.values();
+			return live(function (entry): V {
+				return entry.value;
+			});
 		},
 		entries(): IterableIterator<[K, V]> {
-			return liveEntries().values();
+			return live(pair);
 		},
 		[Symbol.iterator](): IterableIterator<[K, V]> {
-			return liveEntries().values();
+			return live(pair);
 		}
 	};
 
