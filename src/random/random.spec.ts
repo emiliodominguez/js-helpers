@@ -1,0 +1,560 @@
+import * as helpers from '.';
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/**
+ * Temporarily replaces `globalThis.crypto` for the duration of `fn`, restoring the original property afterwards.
+ */
+function withCrypto<T>(value: unknown, fn: () => T): T {
+	const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+	Object.defineProperty(globalThis, 'crypto', { value, configurable: true, writable: true, enumerable: false });
+	try {
+		return fn();
+	} finally {
+		if (original) Object.defineProperty(globalThis, 'crypto', original);
+		else delete (globalThis as any).crypto;
+	}
+}
+
+/**
+ * A fake crypto whose `getRandomValues` fills buffers from successive `batches` (each batch fills one call).
+ */
+function scriptedCrypto(batches: number[][]): { getRandomValues: jest.Mock } {
+	let call = 0;
+	return {
+		getRandomValues: jest.fn(function (array: Uint8Array) {
+			const batch = batches[call++] ?? [];
+			for (let i = 0; i < array.length; i++) array[i] = batch[i] ?? 0;
+			return array;
+		})
+	};
+}
+
+function constant(value: number): () => number {
+	return function () {
+		return value;
+	};
+}
+
+describe('random', function () {
+	describe('createRandom', function () {
+		it('should reproduce the reference sfc32/cyrb128 sequence for a string seed', function () {
+			const rng = helpers.createRandom('js-helpers');
+			const values = [rng(), rng(), rng(), rng(), rng()];
+			expect(values).toEqual([0.07175572402775288, 0.3699936708435416, 0.01671538082882762, 0.5509338909760118, 0.4222039554733783]);
+		});
+
+		it('should reproduce the reference sequence for a numeric seed (hashed as its string form)', function () {
+			const rng = helpers.createRandom(42);
+			expect([rng(), rng(), rng(), rng(), rng()]).toEqual([0.5258469053078443, 0.18668818706646562, 0.4050233217421919, 0.8641218249686062, 0.4309007697738707]);
+			const fromString = helpers.createRandom('42');
+			expect(fromString()).toBe(0.5258469053078443);
+			expect(helpers.createRandom(42).state()).toEqual([3917207958, 1691418813, 2659351410, 944835786]);
+		});
+
+		it('should produce reproducible derived values', function () {
+			const dice = helpers.createRandom('dice');
+			expect(
+				Array.from({ length: 10 }, function () {
+					return dice.int(1, 6);
+				})
+			).toEqual([6, 5, 3, 6, 2, 3, 5, 3, 5, 1]);
+			expect(helpers.createRandom('shuffle').shuffle([1, 2, 3, 4, 5, 6, 7, 8])).toEqual([3, 4, 2, 1, 8, 5, 7, 6]);
+			const big = helpers.createRandom('big');
+			expect(big.int(0, Number.MAX_SAFE_INTEGER)).toBe(572415390030419);
+			expect(big.int(-Number.MAX_SAFE_INTEGER, 0)).toBe(-8631897986744781);
+		});
+
+		it('should accept the empty string, unicode strings, zero and negative seeds', function () {
+			expect(helpers.createRandom('').state()).toEqual([228195672, 929963046, 124707130, 1262568331]);
+			expect(helpers.createRandom('🎲')()).not.toBe(helpers.createRandom('🎰')());
+			expect(helpers.createRandom(-1)()).not.toBe(helpers.createRandom(1)());
+			expect(helpers.createRandom(-0)()).toBe(helpers.createRandom(0)());
+		});
+
+		it('should be usable wherever a RandomGenerator is expected', function () {
+			const rng = helpers.createRandom('gen');
+			const value = helpers.randomBoolean(0.5, rng);
+			expect(typeof value).toBe('boolean');
+			expect(typeof rng).toBe('function');
+			expect(Object.isFrozen(rng)).toBe(true);
+		});
+
+		it('should reject invalid seeds', function () {
+			expect(function () {
+				helpers.createRandom(NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.createRandom(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.createRandom(undefined as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.createRandom({} as any);
+			}).toThrow(TypeError);
+		});
+
+		it('should distribute int() uniformly (chi-square on 10k samples)', function () {
+			const rng = helpers.createRandom('uniformity');
+			const counts = new Array(10).fill(0);
+			const samples = 10_000;
+			for (let i = 0; i < samples; i++) counts[rng.int(0, 9)]++;
+			const expected = samples / 10;
+			const chiSquare = counts.reduce(function (total: number, observed: number) {
+				return total + (observed - expected) ** 2 / expected;
+			}, 0);
+			// 9 degrees of freedom: p = 0.001 critical value is ~27.9.
+			expect(chiSquare).toBeLessThan(27.9);
+		});
+
+		it('should have a mean close to 0.5 for raw floats', function () {
+			const rng = helpers.createRandom('mean');
+			let total = 0;
+			for (let i = 0; i < 10_000; i++) total += rng();
+			expect(Math.abs(total / 10_000 - 0.5)).toBeLessThan(0.02);
+		});
+
+		describe('int', function () {
+			it('should handle degenerate, fractional and negative ranges', function () {
+				const rng = helpers.createRandom('int');
+				expect(rng.int(5, 5)).toBe(5);
+				expect([2, 3]).toContain(rng.int(1.2, 3.8));
+				const value = rng.int(-10, -5);
+				expect(value).toBeGreaterThanOrEqual(-10);
+				expect(value).toBeLessThanOrEqual(-5);
+				expect(Object.is(rng.int(-0.5, 0), 0)).toBe(true);
+			});
+
+			it('should stay in bounds on ranges that need rejection sampling', function () {
+				const rng = helpers.createRandom('rejection');
+				for (let i = 0; i < 200; i++) {
+					const small = rng.int(0, 2 ** 31);
+					expect(small).toBeGreaterThanOrEqual(0);
+					expect(small).toBeLessThanOrEqual(2 ** 31);
+					const large = rng.int(0, 2 ** 52);
+					expect(Number.isSafeInteger(large)).toBe(true);
+					expect(large).toBeLessThanOrEqual(2 ** 52);
+				}
+			});
+
+			it('should throw on invalid ranges', function () {
+				const rng = helpers.createRandom('int');
+				expect(function () {
+					rng.int(NaN, 1);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(0, Infinity);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(2, 1);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(1.2, 1.8);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(0, 2 ** 53);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+				}).toThrow(RangeError);
+			});
+		});
+
+		describe('float / bool / pick / shuffle', function () {
+			it('should delegate float to a half-open range', function () {
+				const rng = helpers.createRandom('float');
+				const value = rng.float(10, 20);
+				expect(value).toBeGreaterThanOrEqual(10);
+				expect(value).toBeLessThan(20);
+				expect(rng.float(3, 3)).toBe(3);
+				expect(function () {
+					rng.float(2, 1);
+				}).toThrow(RangeError);
+			});
+
+			it('should honour bool probabilities', function () {
+				const rng = helpers.createRandom('bool');
+				expect(rng.bool(0)).toBe(false);
+				expect(rng.bool(1)).toBe(true);
+				let trues = 0;
+				for (let i = 0; i < 10_000; i++) if (rng.bool()) trues++;
+				expect(trues).toBeGreaterThan(4_700);
+				expect(trues).toBeLessThan(5_300);
+				expect(function () {
+					rng.bool(1.5);
+				}).toThrow(RangeError);
+			});
+
+			it('should pick items and return undefined for empty arrays without advancing', function () {
+				const rng = helpers.createRandom('pick');
+				expect(['a', 'b', 'c']).toContain(rng.pick(['a', 'b', 'c']));
+				const before = rng.state();
+				expect(rng.pick([])).toBeUndefined();
+				expect(rng.state()).toEqual(before);
+			});
+
+			it('should shuffle without mutating the input', function () {
+				const rng = helpers.createRandom('shuffle-copy');
+				const input = Object.freeze([1, 2, 3, 4, 5]);
+				const result = rng.shuffle(input);
+				expect(result).not.toBe(input);
+				expect([...result].sort()).toEqual([1, 2, 3, 4, 5]);
+				expect(rng.shuffle([])).toEqual([]);
+			});
+		});
+
+		describe('fork / state / restore', function () {
+			it('should create a deterministic child stream that differs from the parent', function () {
+				const parent = helpers.createRandom('fork');
+				const child = parent.fork();
+				const again = helpers.createRandom('fork').fork();
+				const childValues = [child(), child(), child()];
+				expect([again(), again(), again()]).toEqual(childValues);
+				expect([parent(), parent(), parent()]).not.toEqual(childValues);
+			});
+
+			it('should advance the parent by four draws when forking', function () {
+				const forked = helpers.createRandom('advance');
+				forked.fork();
+				const reference = helpers.createRandom('advance');
+				for (let i = 0; i < 4; i++) reference();
+				expect(forked()).toBe(reference());
+			});
+
+			it('should replay a stream from a snapshot', function () {
+				const rng = helpers.createRandom('replay');
+				rng();
+				const snapshot = rng.state();
+				expect(Object.isFrozen(snapshot)).toBe(true);
+				const first = [rng(), rng(), rng()];
+				rng.restore(snapshot);
+				expect([rng(), rng(), rng()]).toEqual(first);
+				const other = helpers.createRandom('other');
+				other.restore(snapshot);
+				expect(other()).toBe(first[0]);
+			});
+
+			it('should reject malformed snapshots', function () {
+				const rng = helpers.createRandom('restore');
+				const invalid: unknown[] = [null, 'abcd', [1, 2, 3], [1, 2, 3, 4, 5], [1, 2, 3, -1], [1, 2, 3, 2 ** 32], [1, 2, 3, 0.5], [1, 2, 3, '4']];
+				for (const snapshot of invalid) {
+					expect(function () {
+						rng.restore(snapshot as any);
+					}).toThrow(TypeError);
+				}
+			});
+		});
+	});
+
+	describe('randomBytes', function () {
+		it('should return the requested number of bytes', function () {
+			expect(helpers.randomBytes(0)).toEqual(new Uint8Array(0));
+			const bytes = helpers.randomBytes(32);
+			expect(bytes).toBeInstanceOf(Uint8Array);
+			expect(bytes.length).toBe(32);
+		});
+
+		it('should fill requests larger than the 65536-byte WebCrypto quota in chunks', function () {
+			const large = helpers.randomBytes(200_000);
+			expect(large.length).toBe(200_000);
+			// The tail must have been filled too (all-zero 1000 bytes is astronomically unlikely).
+			expect(large.subarray(199_000).some(Boolean)).toBe(true);
+
+			const fake = scriptedCrypto([]);
+			withCrypto(fake, function () {
+				helpers.randomBytes(65_536 * 2 + 5);
+			});
+			const lengths = fake.getRandomValues.mock.calls.map(function (call: any[]) {
+				return call[0].length;
+			});
+			expect(lengths).toEqual([65_536, 65_536, 5]);
+		});
+
+		it('should reject invalid lengths', function () {
+			for (const length of [-1, 1.5, NaN, Infinity, 2 ** 53]) {
+				expect(function () {
+					helpers.randomBytes(length);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('randomUUID', function () {
+		it('should return a version 4, RFC 4122 variant UUID', function () {
+			const uuid = helpers.randomUUID();
+			expect(uuid).toMatch(UUID_V4);
+			expect(helpers.randomUUID()).not.toBe(uuid);
+		});
+
+		it('should prefer crypto.randomUUID when available (called as a method)', function () {
+			const fake = {
+				getRandomValues: jest.fn(),
+				randomUUID: jest.fn(function (this: unknown) {
+					expect(this).toBe(fake);
+					return '11111111-1111-4111-8111-111111111111';
+				})
+			};
+			expect(
+				withCrypto(fake, function () {
+					return helpers.randomUUID();
+				})
+			).toBe('11111111-1111-4111-8111-111111111111');
+			expect(fake.getRandomValues).not.toHaveBeenCalled();
+		});
+
+		it('should build a UUID from getRandomValues when randomUUID is missing', function () {
+			const real = globalThis.crypto;
+			const uuid = withCrypto(
+				{
+					getRandomValues: function (array: Uint8Array) {
+						return real.getRandomValues(array);
+					}
+				},
+				function () {
+					return helpers.randomUUID();
+				}
+			);
+			expect(uuid).toMatch(UUID_V4);
+		});
+
+		it('should set the version and variant bits regardless of the random bytes', function () {
+			expect(
+				withCrypto(scriptedCrypto([new Array(16).fill(0xff)]), function () {
+					return helpers.randomUUID();
+				})
+			).toBe('ffffffff-ffff-4fff-bfff-ffffffffffff');
+			expect(
+				withCrypto(scriptedCrypto([new Array(16).fill(0)]), function () {
+					return helpers.randomUUID();
+				})
+			).toBe('00000000-0000-4000-8000-000000000000');
+			expect(
+				withCrypto(scriptedCrypto([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]]), function () {
+					return helpers.randomUUID();
+				})
+			).toBe('00010203-0405-4607-8809-0a0b0c0d0e0f');
+		});
+	});
+
+	describe('randomId', function () {
+		it('should default to 21 URL-safe characters', function () {
+			const id = helpers.randomId();
+			expect(id).toHaveLength(21);
+			expect(id).toMatch(/^[A-Za-z0-9_-]{21}$/);
+			expect(helpers.URL_ALPHABET).toHaveLength(64);
+			expect(new Set(helpers.URL_ALPHABET).size).toBe(64);
+		});
+
+		it('should honour size and alphabet, including astral characters', function () {
+			expect(helpers.randomId(0)).toBe('');
+			expect(helpers.randomId(50, 'ab')).toMatch(/^[ab]{50}$/);
+			const emoji = helpers.randomId(10, '🍎🍌🍒');
+			expect(Array.from(emoji)).toHaveLength(10);
+			for (const char of emoji) expect(['🍎', '🍌', '🍒']).toContain(char);
+			const full = Array.from({ length: 256 }, function (_, i) {
+				return String.fromCharCode(0x100 + i);
+			}).join('');
+			expect(Array.from(helpers.randomId(100, full))).toHaveLength(100);
+		});
+
+		it('should reject out-of-range mask values (rejection sampling) and request more bytes when needed', function () {
+			// Alphabet of 10 => mask 15: values 10..15 must be skipped, not wrapped around.
+			const fake = scriptedCrypto([[10, 3, 15, 7, 26, 255, 9]]);
+			const id = withCrypto(fake, function () {
+				return helpers.randomId(4, '0123456789');
+			});
+			// 10 rejected, 3, 15 rejected, 7, 26 & 15 = 10 rejected, 255 & 15 = 15 rejected, 9 then 0 (filler bytes).
+			expect(id).toBe('3790');
+
+			// Alphabet of 3 => mask 3: an all-rejected first batch forces a second request.
+			const retry = scriptedCrypto([
+				[3, 3],
+				[2, 3]
+			]);
+			expect(
+				withCrypto(retry, function () {
+					return helpers.randomId(1, 'xyz');
+				})
+			).toBe('z');
+			expect(retry.getRandomValues).toHaveBeenCalledTimes(2);
+		});
+
+		it('should reject invalid sizes and alphabets', function () {
+			for (const size of [-1, 1.5, NaN, Infinity]) {
+				expect(function () {
+					helpers.randomId(size);
+				}).toThrow(RangeError);
+			}
+			const tooLong = Array.from({ length: 257 }, function (_, i) {
+				return String.fromCharCode(0x100 + i);
+			}).join('');
+			for (const alphabet of ['', 'a', 'abca', '🍎🍎', tooLong]) {
+				expect(function () {
+					helpers.randomId(5, alphabet);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('when no CSPRNG is available', function () {
+		it.each([
+			['undefined', undefined],
+			['null', null],
+			['an object without getRandomValues', {}]
+		])('should throw instead of falling back to Math.random (crypto is %s)', function (_label, value) {
+			const mathRandom = jest.spyOn(Math, 'random');
+			withCrypto(value, function () {
+				expect(function () {
+					helpers.randomUUID();
+				}).toThrow(/cryptographically secure/);
+				expect(function () {
+					helpers.randomBytes(8);
+				}).toThrow(/cryptographically secure/);
+				expect(function () {
+					helpers.randomId();
+				}).toThrow(/cryptographically secure/);
+				expect(function () {
+					helpers.randomId(0);
+				}).toThrow(Error);
+			});
+			expect(mathRandom).not.toHaveBeenCalled();
+		});
+
+		it('should restore the real crypto afterwards', function () {
+			expect(typeof globalThis.crypto.getRandomValues).toBe('function');
+			expect(helpers.randomUUID()).toMatch(UUID_V4);
+		});
+	});
+
+	describe('weightedRandom', function () {
+		it('should map the uniform draw onto cumulative weights', function () {
+			const items = ['a', 'b', 'c'];
+			const weights = [1, 2, 1];
+			expect(helpers.weightedRandom(items, weights, constant(0))).toBe('a');
+			expect(helpers.weightedRandom(items, weights, constant(0.24))).toBe('a');
+			expect(helpers.weightedRandom(items, weights, constant(0.25))).toBe('b');
+			expect(helpers.weightedRandom(items, weights, constant(0.74))).toBe('b');
+			expect(helpers.weightedRandom(items, weights, constant(0.75))).toBe('c');
+			expect(helpers.weightedRandom(items, weights, constant(1 - Number.EPSILON / 2))).toBe('c');
+		});
+
+		it('should never return zero-weight items, even at the extremes', function () {
+			expect(helpers.weightedRandom(['a', 'b', 'c'], [0, 1, 0], constant(0))).toBe('b');
+			expect(helpers.weightedRandom(['a', 'b', 'c'], [0, 1, 0], constant(1 - Number.EPSILON / 2))).toBe('b');
+			expect(helpers.weightedRandom(['a', 'b', 'c'], [1, 0, -0], constant(0.999))).toBe('a');
+			expect(helpers.weightedRandom(['only'], [3])).toBe('only');
+		});
+
+		it('should follow the weights statistically', function () {
+			const rng = helpers.createRandom('weighted');
+			const counts: Record<string, number> = { common: 0, rare: 0, never: 0 };
+			for (let i = 0; i < 10_000; i++) counts[helpers.weightedRandom(['common', 'rare', 'never'], [9, 1, 0], rng)]++;
+			expect(counts.never).toBe(0);
+			expect(counts.rare).toBeGreaterThan(800);
+			expect(counts.rare).toBeLessThan(1_200);
+		});
+
+		it('should throw on invalid input', function () {
+			const cases: [unknown[], number[]][] = [
+				[['a'], [1, 2]],
+				[[], []],
+				[
+					['a', 'b'],
+					[0, 0]
+				],
+				[
+					['a', 'b'],
+					[1, -1]
+				],
+				[
+					['a', 'b'],
+					[1, NaN]
+				],
+				[
+					['a', 'b'],
+					[1, Infinity]
+				],
+				[
+					['a', 'b'],
+					[1e308, 1e308]
+				]
+			];
+			for (const [items, weights] of cases) {
+				expect(function () {
+					helpers.weightedRandom(items, weights);
+				}).toThrow(RangeError);
+			}
+			expect(function () {
+				helpers.weightedRandom(['a'], [1], constant(1));
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('randomGaussian', function () {
+		it('should guard against log(0) when random() returns 0', function () {
+			expect(helpers.randomGaussian(5, 2, constant(0))).toBe(5);
+			expect(Number.isFinite(helpers.randomGaussian(0, 1, constant(1 - Number.EPSILON / 2)))).toBe(true);
+		});
+
+		it('should return the mean when stdDev is 0', function () {
+			expect(helpers.randomGaussian(3, 0)).toBe(3);
+		});
+
+		it('should approximate the requested mean and standard deviation', function () {
+			const rng = helpers.createRandom('gauss');
+			const samples = Array.from({ length: 10_000 }, function () {
+				return helpers.randomGaussian(100, 15, rng);
+			});
+			const mean =
+				samples.reduce(function (a, b) {
+					return a + b;
+				}, 0) / samples.length;
+			const variance =
+				samples.reduce(function (a, b) {
+					return a + (b - mean) ** 2;
+				}, 0) / samples.length;
+			expect(Math.abs(mean - 100)).toBeLessThan(0.5);
+			expect(Math.abs(Math.sqrt(variance) - 15)).toBeLessThan(0.5);
+			expect(Number.isFinite(helpers.randomGaussian())).toBe(true);
+		});
+
+		it('should throw on invalid parameters', function () {
+			for (const [mean, stdDev] of [
+				[NaN, 1],
+				[Infinity, 1],
+				[0, -1],
+				[0, NaN],
+				[0, Infinity]
+			]) {
+				expect(function () {
+					helpers.randomGaussian(mean, stdDev);
+				}).toThrow(RangeError);
+			}
+			expect(function () {
+				helpers.randomGaussian(0, 1, constant(-0.1));
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('randomBoolean', function () {
+		it('should compare the draw against the probability', function () {
+			expect(helpers.randomBoolean(0.5, constant(0.49))).toBe(true);
+			expect(helpers.randomBoolean(0.5, constant(0.5))).toBe(false);
+			expect(helpers.randomBoolean(0, constant(0))).toBe(false);
+			expect(helpers.randomBoolean(1, constant(1 - Number.EPSILON / 2))).toBe(true);
+			expect(typeof helpers.randomBoolean()).toBe('boolean');
+		});
+
+		it('should throw on invalid probabilities or generators', function () {
+			for (const probability of [-0.1, 1.1, NaN]) {
+				expect(function () {
+					helpers.randomBoolean(probability);
+				}).toThrow(RangeError);
+			}
+			expect(function () {
+				helpers.randomBoolean(0.5, constant(NaN));
+			}).toThrow(RangeError);
+		});
+	});
+});
