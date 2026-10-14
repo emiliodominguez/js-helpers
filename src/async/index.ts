@@ -1,5 +1,5 @@
 import { debounce, type Result } from '../functions/index.js';
-import { assertDelay, assertFunction, assertInteger, assertNumber, describe, MAX_TIMEOUT } from '../utils/assert.js';
+import { assertDelay, assertFunction, assertInteger, assertNumber, describe, draw, MAX_TIMEOUT } from '../utils/assert.js';
 import type { AbortSignalLike, RandomGenerator } from '../utils/index.js';
 
 export type { Result } from '../functions/index.js';
@@ -204,9 +204,9 @@ export function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, message?
  * @param {RetryOptions} [options] - `retries` (3), `delay` (0), `factor` (2), `maxDelay` (Infinity), `jitter` (false), `shouldRetry`, `onRetry`, `signal`
  * @param {RandomGenerator} [random=Math.random] - Random source used for jitter
  * @returns {Promise<T>} The first successful result
- * @throws {TypeError} (as a rejection) when `fn`, `shouldRetry` or `onRetry` is not a function, or a numeric option is not a number
+ * @throws {TypeError} (as a rejection) when `fn`, `shouldRetry`, `onRetry` or (with `jitter`) `random` is not a function, or a numeric option is not a number
  * @throws {RangeError} (as a rejection) when `retries` is not a non-negative integer or `Infinity`, `delay` is not a finite number >= 0,
- * `factor` is not a finite number > 0, or `maxDelay` is negative or `NaN`
+ * `factor` is not a finite number > 0, `maxDelay` is negative or `NaN`, or `random()` returns a value outside [0, 1)
  * @throws {unknown} (as a rejection) the last error of `fn`, or the abort reason of `signal`
  * @example
  * let calls = 0;
@@ -224,6 +224,7 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
 	assertNumber('retry', 'maxDelay', maxDelay, maxDelay >= 0, 'a number >= 0');
 	if (shouldRetry !== undefined) assertFunction('retry', 'shouldRetry', shouldRetry);
 	if (onRetry !== undefined) assertFunction('retry', 'onRetry', onRetry);
+	if (jitter) assertFunction('retry', 'random', random);
 
 	for (let attempt = 1; ; attempt++) {
 		if (signal?.aborted) throw abortReason(signal);
@@ -239,7 +240,7 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
 			onRetry?.(error, attempt);
 
 			const base = Math.min(delay * factor ** (attempt - 1), maxDelay, MAX_TIMEOUT);
-			const wait = jitter ? random() * base : base;
+			const wait = jitter ? draw('retry', random) * base : base;
 
 			if (wait > 0) await sleep(wait, { signal });
 		}

@@ -249,6 +249,19 @@ describe('Async helpers', function () {
 	});
 
 	describe('retry', function () {
+		it('should validate the jitter random generator like the other modules do', async function () {
+			const failing = jest.fn(function () {
+				throw new Error('busy');
+			});
+
+			await expect(retry(failing, { retries: 1, jitter: true }, 'nope' as never)).rejects.toThrow(new TypeError('retry: `random` must be a function, got string'));
+			await expect(
+				retry(failing, { retries: 1, delay: 1, jitter: true }, function () {
+					return 1;
+				})
+			).rejects.toThrow(new RangeError('retry: `random()` must return a number in [0, 1), got 1'));
+		});
+
 		it('should resolve on the first success without retrying', async function () {
 			const fn = jest.fn(async function (attempt: number) {
 				return attempt;
