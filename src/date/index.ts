@@ -6,7 +6,8 @@
  *   runtime's LOCAL time zone, exactly like `Date#getDate()` / `Date#setDate()`. Nothing here uses UTC
  *   unless its name says so.
  * - **Pure.** Inputs are never mutated; every function that returns a date returns a NEW `Date` instance.
- * - **Inputs.** Every date parameter accepts a {@link DateInput}: a `Date` or a millisecond timestamp.
+ * - **Inputs.** Every date parameter accepts a {@link DateInput}: a `Date` or a millisecond timestamp. Dates created in another
+ *   realm (iframe, `vm` context) are accepted; objects that merely inherit from `Date.prototype` are not.
  * - **Invalid dates.** Every function except {@link isValidDate} throws `RangeError('Invalid date')` when
  *   given an invalid date (`new Date(NaN)`, `NaN`, `Infinity`…), and `TypeError` when given something that is
  *   neither a `Date` nor a number.
@@ -14,10 +15,14 @@
  *   so "one day later" keeps the wall-clock time even across a daylight-saving transition (the day may then last
  *   23 or 25 hours). Calendar-day differences are computed from the local calendar fields, never by dividing a
  *   millisecond delta by 86 400 000. When a wall-clock time does not exist on the target day (it falls inside a
- *   DST gap), the engine moves it forward by the size of the gap.
+ *   DST gap), the engine moves it forward by the size of the gap. When it occurs twice (the repeated hour after the clocks are
+ *   set back), the earlier occurrence is used, except that adding `0` always returns the original instant unchanged.
+ * - **Range.** Results outside the `Date` range (±8.64e15 ms) throw a `RangeError`; an Invalid Date is never returned.
  * - **Absolute arithmetic.** `addHours`, `addMinutes`, `addSeconds`, `addMilliseconds` and `diffInHours` & co.
  *   work on the absolute timeline (milliseconds), so `addHours(date, 24)` is not always the same as `addDays(date, 1)`.
  */
+
+import { isDate } from '../guards/index.js';
 
 /**
  * A value that can be interpreted as a date: a `Date` instance or a millisecond timestamp.
@@ -34,14 +39,70 @@ export type WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
  */
 export type BetweenInclusivity = '[]' | '()' | '[)' | '(]';
 
+/**
+ * A calendar quarter, `1` (January-March) to `4` (October-December).
+ */
+export type Quarter = 1 | 2 | 3 | 4;
+
+/**
+ * A unit understood by {@link formatDuration} and {@link parseDuration}: days, hours, minutes, seconds, milliseconds.
+ */
+export type DurationUnit = 'd' | 'h' | 'm' | 's' | 'ms';
+
+/**
+ * Options for {@link eachDayOfInterval}.
+ */
+export interface EachDayOfIntervalOptions {
+	/** Number of calendar days between two consecutive results (a positive integer, default `1`). */
+	step?: number;
+}
+
+/**
+ * Options for {@link formatDuration}.
+ */
+export interface FormatDurationOptions {
+	/** The units that may appear in the output (any order; default: all of `d`, `h`, `m`, `s`, `ms`). */
+	units?: ReadonlyArray<DurationUnit>;
+	/** The maximum number of (non-zero) units to output, largest first (a positive integer, default: unlimited). */
+	largest?: number;
+}
+
 const MS_PER_SECOND = 1000;
 const MS_PER_MINUTE = 60 * MS_PER_SECOND;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 const MS_PER_DAY = 24 * MS_PER_HOUR;
 
+const DAYS_PER_WEEK = 7;
+
+/**
+ * Epoch day number (days since 1970-01-01) of a Monday (1970-01-05), used as an anchor for weekday arithmetic.
+ */
+const EPOCH_MONDAY = 4;
+
 const DAYS_PER_MONTH: ReadonlyArray<number> = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 const INCLUSIVITIES: ReadonlyArray<string> = ['[]', '()', '[)', '(]'];
+
+/**
+ * Size in milliseconds of every unit understood by {@link formatDuration} and {@link parseDuration}.
+ */
+const DURATION_UNIT_MS: Readonly<Record<DurationUnit, number>> = { d: MS_PER_DAY, h: MS_PER_HOUR, m: MS_PER_MINUTE, s: MS_PER_SECOND, ms: 1 };
+
+/**
+ * Every duration unit, largest first (also the default `units` of {@link formatDuration}).
+ */
+const DURATION_UNITS: ReadonlyArray<DurationUnit> = ['d', 'h', 'm', 's', 'ms'];
+
+/**
+ * A whole duration string: optional leading minus sign, then one or more `<number><unit>` tokens. Every token must
+ * contain digits and end in a unit, so the repetition cannot backtrack exponentially.
+ */
+const DURATION_REGEX = /^\s*-?(?:(?:\d+(?:\.\d+)?|\.\d+)\s*(?:ms|d|h|m|s)\s*)+$/;
+
+/**
+ * A single `<number><unit>` token of a duration string (`ms` is listed before `m` so it wins).
+ */
+const DURATION_TOKEN_REGEX = /(\d+(?:\.\d+)?|\.\d+)\s*(ms|d|h|m|s)/g;
 
 const ISO_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -143,11 +204,12 @@ const FORMATTERS: Readonly<Record<string, (date: Date) => string>> = {
  * toValidDate(0); // 1970-01-01T00:00:00.000Z
  */
 function toValidDate(input: DateInput): Date {
-	if (!(input instanceof Date) && typeof input !== 'number') {
+	if (!isDate(input) && typeof input !== 'number') {
 		throw new TypeError('Expected a Date or a timestamp number');
 	}
 
-	const date = new Date(input instanceof Date ? input.getTime() : input);
+	// The intrinsic getter reads the internal time value, also for Dates from another realm or with an overridden `getTime`.
+	const date = new Date(typeof input === 'number' ? input : Date.prototype.getTime.call(input));
 
 	if (Number.isNaN(date.getTime())) throw new RangeError('Invalid date');
 
@@ -229,12 +291,98 @@ function assertWeekday(weekStartsOn: number): void {
  * epochDay(new Date(1970, 0, 2)); // 1
  */
 function epochDay(date: Date): number {
-	const utc = new Date(0);
+	return daysFromCivil(date.getFullYear(), date.getMonth(), date.getDate());
+}
 
-	// setUTCFullYear (unlike Date.UTC) does not remap years 0-99 to 1900-1999.
-	utc.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+/**
+ * Returns the number of days from 1970-01-01 to a proleptic Gregorian calendar date, using pure integer arithmetic
+ * (Howard Hinnant's `days_from_civil`), so it works for every year, even where the UTC midnight of that date is outside
+ * the `Date` range.
+ * @param {number} year - The integer year
+ * @param {number} monthIndex - The zero-based month (0-11)
+ * @param {number} day - The day of the month (1-31)
+ * @returns {number} The epoch day number
+ * @example
+ * daysFromCivil(1970, 0, 2); // 1
+ */
+function daysFromCivil(year: number, monthIndex: number, day: number): number {
+	const y = monthIndex < 2 ? year - 1 : year;
+	const era = Math.floor(y / 400);
+	const yearOfEra = y - era * 400;
+	const marchBasedMonth = monthIndex < 2 ? monthIndex + 10 : monthIndex - 2;
+	const dayOfYear = Math.floor((153 * marchBasedMonth + 2) / 5) + day - 1;
+	const dayOfEra = yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
 
-	return utc.getTime() / MS_PER_DAY;
+	return era * 146097 + dayOfEra - 719468;
+}
+
+/**
+ * Mathematical (always non-negative) modulo.
+ * @param {number} value - The dividend
+ * @param {number} divisor - The positive divisor
+ * @returns {number} `value mod divisor`, in `[0, divisor)`
+ * @example
+ * mod(-1, 7); // 6
+ */
+function mod(value: number, divisor: number): number {
+	return ((value % divisor) + divisor) % divisor;
+}
+
+/**
+ * Returns a new date at the start (normally 00:00:00.000) of a LOCAL calendar day. Out-of-range day numbers roll over
+ * into the neighbouring months, like `Date#setFullYear`.
+ * @param {number} year - The integer year (0-99 are NOT remapped to 1900-1999)
+ * @param {number} monthIndex - The zero-based month
+ * @param {number} day - The day of the month
+ * @returns {Date} The start of that local day
+ * @throws {RangeError} when the result is outside the representable range
+ * @example
+ * localMidnight(2024, 0, 32); // 2024-02-01 00:00 (local)
+ */
+function localMidnight(year: number, monthIndex: number, day: number): Date {
+	const result = new Date(0);
+
+	// Go through noon first so that the intermediate wall-clock time can never fall into a DST gap.
+	result.setHours(12, 0, 0, 0);
+	result.setFullYear(year, monthIndex, day);
+	result.setHours(0, 0, 0, 0);
+
+	return ensureInRange(result);
+}
+
+/**
+ * Number of weekdays (Monday-Friday) from an arbitrary fixed origin up to and including an epoch day, so that
+ * `weekdaysThrough(b) - weekdaysThrough(a)` counts the weekdays in `(a, b]`.
+ * @param {number} day - An epoch day number
+ * @returns {number} The cumulative weekday count
+ * @example
+ * weekdaysThrough(4) - weekdaysThrough(3); // 1 (1970-01-05 was a Monday)
+ */
+function weekdaysThrough(day: number): number {
+	const sinceMonday = day - EPOCH_MONDAY;
+
+	return Math.floor(sinceMonday / DAYS_PER_WEEK) * 5 + Math.min(mod(sinceMonday, DAYS_PER_WEEK) + 1, 5);
+}
+
+/**
+ * Computes the ISO 8601 week-numbering year and week of the LOCAL calendar date (weeks start on Monday; week 1 is the
+ * week containing the year's first Thursday).
+ * @param {Date} date - A valid date
+ * @returns {[number, number]} `[isoWeekYear, isoWeek]`
+ * @example
+ * isoWeekParts(new Date(2021, 0, 3)); // [2020, 53]
+ */
+function isoWeekParts(date: Date): [number, number] {
+	const day = epochDay(date);
+	// 1 = Monday … 7 = Sunday (1970-01-01, epoch day 0, was a Thursday).
+	const isoWeekday = mod(day + 3, DAYS_PER_WEEK) + 1;
+	const thursday = day + 4 - isoWeekday;
+	let year = date.getFullYear();
+
+	if (thursday < daysFromCivil(year, 0, 1)) year -= 1;
+	else if (thursday >= daysFromCivil(year + 1, 0, 1)) year += 1;
+
+	return [year, Math.floor((thursday - daysFromCivil(year, 0, 1)) / DAYS_PER_WEEK) + 1];
 }
 
 /**
@@ -286,9 +434,10 @@ function lastInstantOfDay(date: Date): Date {
  * isValidDate(new Date()); // true
  * isValidDate(new Date('nope')); // false
  * isValidDate(Date.now()); // false (a number, not a Date)
+ * isValidDate(Object.create(Date.prototype)); // false (not a real Date)
  */
 export function isValidDate(value: unknown): value is Date {
-	return value instanceof Date && !Number.isNaN(value.getTime());
+	return isDate(value) && !Number.isNaN(Date.prototype.getTime.call(value));
 }
 
 /**
@@ -304,6 +453,9 @@ export function addDays(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
 
 	const result = toValidDate(date);
+
+	// Re-setting the same wall-clock time would move an instant in a repeated (fall-back) hour to its first occurrence.
+	if (amount === 0) return result;
 
 	result.setDate(result.getDate() + amount);
 
@@ -340,6 +492,10 @@ export function addMonths(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
 
 	const result = toValidDate(date);
+
+	// Re-setting the same wall-clock time would move an instant in a repeated (fall-back) hour to its first occurrence.
+	if (amount === 0) return result;
+
 	const totalMonths = result.getMonth() + amount;
 	const year = result.getFullYear() + Math.floor(totalMonths / 12);
 	const month = ((totalMonths % 12) + 12) % 12;
@@ -506,7 +662,7 @@ export function diffInMonths(later: DateInput, earlier: DateInput): number {
  * Returns the start of the local day (00:00:00.000).
  * @param {DateInput} date - The date
  * @returns {Date} A new date at the start of the same local day
- * @throws {RangeError} when `date` is invalid
+ * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
  * startOfDay(new Date(2024, 4, 10, 15, 30)); // 2024-05-10 00:00:00.000 (local)
  */
@@ -515,7 +671,7 @@ export function startOfDay(date: DateInput): Date {
 
 	result.setHours(0, 0, 0, 0);
 
-	return result;
+	return ensureInRange(result);
 }
 
 /**
@@ -535,7 +691,7 @@ export function endOfDay(date: DateInput): Date {
  * Returns the first day of the local month at 00:00:00.000.
  * @param {DateInput} date - The date
  * @returns {Date} A new date at the start of the month
- * @throws {RangeError} when `date` is invalid
+ * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
  * startOfMonth(new Date(2024, 1, 20)); // 2024-02-01 00:00:00.000 (local)
  */
@@ -545,7 +701,7 @@ export function startOfMonth(date: DateInput): Date {
 	result.setDate(1);
 	result.setHours(0, 0, 0, 0);
 
-	return result;
+	return ensureInRange(result);
 }
 
 /**
@@ -569,7 +725,7 @@ export function endOfMonth(date: DateInput): Date {
  * @param {DateInput} date - The date
  * @param {WeekdayIndex} [weekStartsOn=0] - The first day of the week: 0 = Sunday … 6 = Saturday
  * @returns {Date} A new date at the start of the week
- * @throws {RangeError} when `date` is invalid or `weekStartsOn` is not an integer between 0 and 6
+ * @throws {RangeError} when `date` is invalid, `weekStartsOn` is not an integer between 0 and 6, or the result is out of range
  * @example
  * startOfWeek(new Date(2024, 4, 15)); // Sun 2024-05-12 00:00 (local)
  * startOfWeek(new Date(2024, 4, 15), 1); // Mon 2024-05-13 00:00 (local)
@@ -582,7 +738,7 @@ export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Da
 	result.setDate(result.getDate() - ((result.getDay() - weekStartsOn + 7) % 7));
 	result.setHours(0, 0, 0, 0);
 
-	return result;
+	return ensureInRange(result);
 }
 
 /**
@@ -590,7 +746,7 @@ export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Da
  * @param {DateInput} date - The date
  * @param {WeekdayIndex} [weekStartsOn=0] - The first day of the week: 0 = Sunday … 6 = Saturday
  * @returns {Date} A new date at the end of the week
- * @throws {RangeError} when `date` is invalid `weekStartsOn` is not an integer between 0 and 6, or the result is out of range
+ * @throws {RangeError} when `date` is invalid, `weekStartsOn` is not an integer between 0 and 6, or the result is out of range
  * @example
  * endOfWeek(new Date(2024, 4, 15)); // Sat 2024-05-18 23:59:59.999 (local)
  */
@@ -606,7 +762,7 @@ export function endOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Date
  * Returns January 1st of the local year at 00:00:00.000.
  * @param {DateInput} date - The date
  * @returns {Date} A new date at the start of the year
- * @throws {RangeError} when `date` is invalid
+ * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
  * startOfYear(new Date(2024, 6, 4)); // 2024-01-01 00:00:00.000 (local)
  */
@@ -616,7 +772,7 @@ export function startOfYear(date: DateInput): Date {
 	result.setMonth(0, 1);
 	result.setHours(0, 0, 0, 0);
 
-	return result;
+	return ensureInRange(result);
 }
 
 /**
@@ -936,13 +1092,7 @@ export function parseISODate(value: string): Date | undefined {
 
 	if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > daysInMonth(year, monthIndex)) return undefined;
 
-	const result = new Date(0);
-
-	// setFullYear (unlike the Date constructor) does not remap years 0-99 to 1900-1999.
-	result.setFullYear(year, monthIndex, day);
-	result.setHours(0, 0, 0, 0);
-
-	return result;
+	return localMidnight(year, monthIndex, day);
 }
 
 /**
@@ -984,4 +1134,363 @@ export function getRelativeTime(date: DateInput, baseDate: DateInput = new Date(
 	if (Math.abs(months) < 12) return formatter.format(months, 'month');
 
 	return formatter.format(truncate(months / 12), 'year');
+}
+
+/**
+ * Returns every LOCAL calendar day from `start` to `end` (both inclusive), each at the start of the day (normally
+ * 00:00:00.000). Only the calendar days of `start` and `end` matter for which days are included.
+ * @param {DateInput} start - The first day of the interval
+ * @param {DateInput} end - The last day of the interval (must not be before `start`)
+ * @param {EachDayOfIntervalOptions} [options={}] - `step`: the number of days between consecutive results (default `1`)
+ * @returns {Date[]} A new array of new dates, in ascending order; its first element is the start of `start`'s day
+ * @throws {RangeError} when a date is invalid, `start` is after `end`, `step` is not a positive integer, or a result is out of range
+ * @example
+ * eachDayOfInterval(new Date(2024, 0, 30, 18), new Date(2024, 1, 2, 9));
+ * // [2024-01-30, 2024-01-31, 2024-02-01, 2024-02-02] (local midnights)
+ * eachDayOfInterval(new Date(2024, 0, 1), new Date(2024, 0, 10), { step: 3 });
+ * // [2024-01-01, 2024-01-04, 2024-01-07, 2024-01-10]
+ */
+export function eachDayOfInterval(start: DateInput, end: DateInput, options: EachDayOfIntervalOptions = {}): Date[] {
+	const { step = 1 } = options;
+
+	if (!Number.isSafeInteger(step) || step < 1) throw new RangeError(`step must be a positive integer, received ${String(step)}`);
+
+	const from = toValidDate(start);
+	const to = toValidDate(end);
+
+	if (from.getTime() > to.getTime()) throw new RangeError('start must not be after end');
+
+	const total = diffInDays(to, from);
+	const result: Date[] = [];
+
+	for (let offset = 0; offset <= total; offset += step) {
+		result.push(localMidnight(from.getFullYear(), from.getMonth(), from.getDate() + offset));
+	}
+
+	return result;
+}
+
+/**
+ * Returns the ISO 8601 week number (1-53) of the LOCAL calendar date. ISO weeks start on Monday and week 1 is the week
+ * that contains the year's first Thursday (equivalently, January 4th), so the first days of January may belong to
+ * week 52/53 of the previous ISO year and the last days of December to week 1 of the next (see {@link getISOWeekYear}).
+ * @param {DateInput} date - The date
+ * @returns {number} The ISO week number, 1-53
+ * @throws {RangeError} when `date` is invalid
+ * @example
+ * getISOWeek(new Date(2024, 0, 1)); // 1 (Monday)
+ * getISOWeek(new Date(2021, 0, 3)); // 53 (Sunday; belongs to ISO year 2020)
+ * getISOWeek(new Date(2024, 11, 30)); // 1 (belongs to ISO year 2025)
+ */
+export function getISOWeek(date: DateInput): number {
+	return isoWeekParts(toValidDate(date))[1];
+}
+
+/**
+ * Returns the ISO 8601 week-numbering year of the LOCAL calendar date: the calendar year of the Thursday of its ISO
+ * week. It differs from the calendar year for a few days around New Year.
+ * @param {DateInput} date - The date
+ * @returns {number} The ISO week-numbering year
+ * @throws {RangeError} when `date` is invalid
+ * @example
+ * getISOWeekYear(new Date(2021, 0, 3)); // 2020
+ * getISOWeekYear(new Date(2024, 11, 30)); // 2025
+ * getISOWeekYear(new Date(2024, 5, 15)); // 2024
+ */
+export function getISOWeekYear(date: DateInput): number {
+	return isoWeekParts(toValidDate(date))[0];
+}
+
+/**
+ * Returns the calendar quarter (1-4) of the LOCAL date: `Math.floor(monthIndex / 3) + 1`.
+ * @param {DateInput} date - The date
+ * @returns {Quarter} 1 (Jan-Mar), 2 (Apr-Jun), 3 (Jul-Sep) or 4 (Oct-Dec)
+ * @throws {RangeError} when `date` is invalid
+ * @example
+ * getQuarter(new Date(2024, 4, 10)); // 2
+ */
+export function getQuarter(date: DateInput): Quarter {
+	return (Math.floor(toValidDate(date).getMonth() / 3) + 1) as Quarter;
+}
+
+/**
+ * Returns the first day of the local quarter at 00:00:00.000.
+ * @param {DateInput} date - The date
+ * @returns {Date} A new date at the start of the quarter
+ * @throws {RangeError} when `date` is invalid or the result is outside the representable range
+ * @example
+ * startOfQuarter(new Date(2024, 4, 10, 15)); // 2024-04-01 00:00:00.000 (local)
+ */
+export function startOfQuarter(date: DateInput): Date {
+	const result = toValidDate(date);
+
+	return localMidnight(result.getFullYear(), result.getMonth() - (result.getMonth() % 3), 1);
+}
+
+/**
+ * Returns the last day of the local quarter at 23:59:59.999.
+ * @param {DateInput} date - The date
+ * @returns {Date} A new date at the end of the quarter
+ * @throws {RangeError} when `date` is invalid or the result is outside the representable range
+ * @example
+ * endOfQuarter(new Date(2024, 4, 10)); // 2024-06-30 23:59:59.999 (local)
+ */
+export function endOfQuarter(date: DateInput): Date {
+	const source = toValidDate(date);
+	const year = source.getFullYear();
+	const lastMonth = source.getMonth() - (source.getMonth() % 3) + 2;
+
+	return lastInstantOfDay(localMidnight(year, lastMonth, daysInMonth(year, lastMonth)));
+}
+
+/**
+ * Returns a person's age: the number of COMPLETED years between the LOCAL calendar days of `birthDate` and `now` (the
+ * time of day is ignored, so the age increases at the start of the birthday).
+ *
+ * February 29th birthdays: in non-leap years the birthday is taken to be **February 28th** (consistent with
+ * {@link addYears}, which clamps Feb 29 to Feb 28), so `getAge(birthDate, addYears(birthDate, n)) === n` for every date.
+ * @param {DateInput} birthDate - The date of birth
+ * @param {DateInput} [now=new Date()] - The reference date
+ * @returns {number} The age in completed years (`0` on the day of birth)
+ * @throws {RangeError} when a date is invalid or `birthDate` is on a later calendar day than `now`
+ * @example
+ * getAge(new Date(1990, 5, 15), new Date(2024, 5, 14)); // 33
+ * getAge(new Date(1990, 5, 15), new Date(2024, 5, 15)); // 34
+ * getAge(new Date(2000, 1, 29), new Date(2001, 1, 28)); // 1
+ */
+export function getAge(birthDate: DateInput, now: DateInput = new Date()): number {
+	const birth = toValidDate(birthDate);
+	const current = toValidDate(now);
+
+	if (epochDay(birth) > epochDay(current)) throw new RangeError('birthDate must not be after now');
+
+	const birthday = Math.min(birth.getDate(), daysInMonth(current.getFullYear(), birth.getMonth()));
+	const hadBirthday = current.getMonth() > birth.getMonth() || (current.getMonth() === birth.getMonth() && current.getDate() >= birthday);
+	const years = current.getFullYear() - birth.getFullYear();
+
+	return hadBirthday ? years : years - 1;
+}
+
+/**
+ * Adds a number of business days (Monday-Friday, local time; no holidays), skipping Saturdays and Sundays. The time
+ * of day is preserved like in {@link addDays}.
+ *
+ * Weekend start: when `date` falls on a weekend, the first business day in the direction of travel counts as the
+ * first step (Saturday + 1 → Monday, Sunday - 1 → Friday), so for any non-zero `amount` the result is always a
+ * weekday. An `amount` of `0` returns a copy of `date` unchanged, even on a weekend.
+ * @param {DateInput} date - The date to start from
+ * @param {number} amount - The integer number of business days to add (negative to subtract)
+ * @returns {Date} A new date
+ * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
+ * @example
+ * addBusinessDays(new Date(2024, 4, 17, 9), 1); // Mon 2024-05-20 09:00 (from Friday)
+ * addBusinessDays(new Date(2024, 4, 20), -1); // Fri 2024-05-17
+ * addBusinessDays(new Date(2024, 4, 18), 1); // Mon 2024-05-20 (from Saturday)
+ */
+export function addBusinessDays(date: DateInput, amount: number): Date {
+	assertInteger(amount, 'amount');
+
+	const start = toValidDate(date);
+
+	if (amount === 0) return start;
+
+	const sign = amount < 0 ? -1 : 1;
+	let weekday = start.getDay();
+	let remaining = Math.abs(amount);
+	let offset = 0;
+
+	if (weekday === 0 || weekday === 6) {
+		// Step onto the nearest weekday in the direction of travel; that counts as one business day.
+		const target = sign > 0 ? 1 : 5;
+
+		offset = sign > 0 ? mod(target - weekday, DAYS_PER_WEEK) : 0 - mod(weekday - target, DAYS_PER_WEEK);
+		weekday = target;
+		remaining -= 1;
+	}
+
+	// Five business days from a weekday are always exactly one calendar week.
+	offset += Math.trunc(remaining / 5) * DAYS_PER_WEEK * sign;
+	remaining %= 5;
+
+	while (remaining > 0) {
+		offset += sign;
+		weekday = mod(weekday + sign, DAYS_PER_WEEK);
+		if (weekday !== 0 && weekday !== 6) remaining -= 1;
+	}
+
+	return addDays(start, offset);
+}
+
+/**
+ * Returns the signed number of business days (Monday-Friday, local calendar days; the time of day is ignored) between
+ * two dates: for `later >= earlier` it counts the weekdays AFTER `earlier`'s day up to and INCLUDING `later`'s day;
+ * for `later < earlier` it is `-diffInBusinessDays(earlier, later)`. Hence, for a weekday `d`,
+ * `diffInBusinessDays(addBusinessDays(d, n), d) === n`.
+ * @param {DateInput} later - The later date
+ * @param {DateInput} earlier - The earlier date
+ * @returns {number} The number of business days
+ * @throws {RangeError} when either date is invalid
+ * @example
+ * diffInBusinessDays(new Date(2024, 4, 20), new Date(2024, 4, 17)); // 1 (Fri → Mon)
+ * diffInBusinessDays(new Date(2024, 4, 31), new Date(2024, 4, 1)); // 22
+ * diffInBusinessDays(new Date(2024, 4, 17), new Date(2024, 4, 20)); // -1
+ */
+export function diffInBusinessDays(later: DateInput, earlier: DateInput): number {
+	return weekdaysThrough(epochDay(toValidDate(later))) - weekdaysThrough(epochDay(toValidDate(earlier)));
+}
+
+/**
+ * Checks whether a date falls on the same LOCAL calendar day as `now`.
+ * @param {DateInput} date - The date to check
+ * @param {DateInput} [now=new Date()] - The reference date
+ * @returns {boolean} `true` when `date` is on `now`'s calendar day
+ * @throws {RangeError} when either date is invalid
+ * @example
+ * isToday(new Date()); // true
+ * isToday(new Date(2024, 0, 1, 23, 59), new Date(2024, 0, 1, 8)); // true
+ */
+export function isToday(date: DateInput, now: DateInput = new Date()): boolean {
+	return isSameDay(date, now);
+}
+
+/**
+ * Checks whether a date is strictly before `now` (absolute time).
+ * @param {DateInput} date - The date to check
+ * @param {DateInput} [now=new Date()] - The reference date
+ * @returns {boolean} `true` when `date < now`
+ * @throws {RangeError} when either date is invalid
+ * @example
+ * isPast(new Date(2000, 0, 1)); // true
+ * isPast(5, 5); // false
+ */
+export function isPast(date: DateInput, now: DateInput = new Date()): boolean {
+	return timeOf(date) < timeOf(now);
+}
+
+/**
+ * Checks whether a date is strictly after `now` (absolute time).
+ * @param {DateInput} date - The date to check
+ * @param {DateInput} [now=new Date()] - The reference date
+ * @returns {boolean} `true` when `date > now`
+ * @throws {RangeError} when either date is invalid
+ * @example
+ * isFuture(Date.now() + 60_000); // true
+ * isFuture(5, 5); // false
+ */
+export function isFuture(date: DateInput, now: DateInput = new Date()): boolean {
+	return timeOf(date) > timeOf(now);
+}
+
+/**
+ * Clamps a date into the closed range `[min, max]`.
+ * @param {DateInput} date - The date to clamp
+ * @param {DateInput} min - The lower bound
+ * @param {DateInput} max - The upper bound (must not be before `min`)
+ * @returns {Date} A new date: `min` if `date < min`, `max` if `date > max`, else a copy of `date`
+ * @throws {RangeError} when a date is invalid or `min` is after `max`
+ * @example
+ * clampDate(new Date(2025, 0, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // 2024-12-31
+ * clampDate(new Date(2024, 5, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // 2024-06-01
+ */
+export function clampDate(date: DateInput, min: DateInput, max: DateInput): Date {
+	const time = timeOf(date);
+	const lower = timeOf(min);
+	const upper = timeOf(max);
+
+	if (lower > upper) throw new RangeError('min must not be after max');
+
+	return new Date(Math.min(Math.max(time, lower), upper));
+}
+
+/**
+ * Formats a millisecond duration as a compact string such as `'1d 2h 3m'`.
+ *
+ * The duration is split into the selected units, largest first, with every unit but the largest one below its
+ * natural limit (`h` < 24, `m` < 60…); units whose value is zero are skipped. Whatever is smaller than the smallest
+ * selected unit, or than the last unit shown when `largest` is set, is TRUNCATED (not rounded). A zero result is
+ * `'0s'` (or `0` followed by the smallest selected unit when `s` is not selected). Negative durations get a `'-'`
+ * prefix. With the default options, {@link parseDuration} is its exact inverse for every safe integer.
+ * @param {number} ms - The duration in milliseconds (finite; may be negative or fractional)
+ * @param {FormatDurationOptions} [options={}] - `units`: the units allowed in the output (default all: `d`, `h`, `m`,
+ * `s`, `ms`); `largest`: the maximum number of non-zero units to show (default unlimited)
+ * @returns {string} The formatted duration
+ * @throws {TypeError} when `ms` is not a number or `units` is not an array
+ * @throws {RangeError} when `ms` is not finite, `units` is empty or contains an unknown unit, or `largest` is not a positive integer
+ * @example
+ * formatDuration(93_784_005); // '1d 2h 3m 4s 5ms'
+ * formatDuration(5_400_000); // '1h 30m'
+ * formatDuration(0); // '0s'
+ * formatDuration(-90_500); // '-1m 30s 500ms'
+ * formatDuration(93_784_005, { largest: 2 }); // '1d 2h'
+ * formatDuration(93_784_005, { units: ['h', 'm'] }); // '26h 3m'
+ */
+export function formatDuration(ms: number, options: FormatDurationOptions = {}): string {
+	if (typeof ms !== 'number') throw new TypeError(`ms must be a number, received ${typeof ms}`);
+	if (!Number.isFinite(ms)) throw new RangeError(`ms must be a finite number, received ${String(ms)}`);
+
+	const { units = DURATION_UNITS, largest = Infinity } = options;
+
+	if (!Array.isArray(units)) throw new TypeError('units must be an array of duration units');
+	if (units.length === 0) throw new RangeError('units must not be empty');
+
+	units.forEach(function (unit: unknown): void {
+		if (!DURATION_UNITS.includes(unit as DurationUnit)) throw new RangeError(`Unknown duration unit: ${String(unit)}`);
+	});
+
+	if (largest !== Infinity && (!Number.isInteger(largest) || largest < 1)) throw new RangeError(`largest must be a positive integer, received ${String(largest)}`);
+
+	const selected = DURATION_UNITS.filter(function (unit: DurationUnit): boolean {
+		return units.includes(unit);
+	});
+	const parts: string[] = [];
+	let rest = Math.abs(ms);
+
+	for (const unit of selected) {
+		if (parts.length >= largest) break;
+
+		const size = DURATION_UNIT_MS[unit];
+		let value = Math.floor(rest / size);
+
+		// Guard against the quotient being rounded up to the next integer for large values.
+		if (value * size > rest) value -= 1;
+
+		rest -= value * size;
+
+		if (value > 0) parts.push(`${value}${unit}`);
+	}
+
+	if (parts.length === 0) return units.includes('s') ? '0s' : `0${selected[selected.length - 1]}`;
+
+	return (ms < 0 ? '-' : '') + parts.join(' ');
+}
+
+/**
+ * Parses a duration string made of `<number><unit>` tokens (units `d`, `h`, `m`, `s`, `ms`, lowercase; whitespace
+ * between and inside tokens is optional; decimals such as `'1.5h'` or `'.5s'` are allowed) into milliseconds, e.g.
+ * `'1h 30m'` → `5_400_000`. Tokens may appear in any order and repeated units are summed. A single leading `'-'`
+ * negates the whole duration. It is the inverse of {@link formatDuration}'s output.
+ * @param {string} value - The duration string
+ * @returns {number} The duration in milliseconds (may be fractional, e.g. `'0.5ms'`)
+ * @throws {TypeError} when `value` is not a string or is not a valid duration (empty, a bare number, an unknown unit…)
+ * @throws {RangeError} when the duration is too large to be represented as a finite number
+ * @example
+ * parseDuration('1h 30m'); // 5_400_000
+ * parseDuration('1d 2h 3m 4s 5ms'); // 93_784_005
+ * parseDuration('1.5s'); // 1_500
+ * parseDuration('-2m'); // -120_000
+ * parseDuration('10'); // throws TypeError (missing unit)
+ */
+export function parseDuration(value: string): number {
+	if (typeof value !== 'string') throw new TypeError(`Expected a duration string, received ${typeof value}`);
+	if (!DURATION_REGEX.test(value)) throw new TypeError(`Invalid duration: ${JSON.stringify(value.length > 50 ? `${value.slice(0, 50)}…` : value)}`);
+
+	let total = 0;
+
+	for (const [, amount, unit] of value.matchAll(DURATION_TOKEN_REGEX)) {
+		total += Number(amount) * DURATION_UNIT_MS[unit as DurationUnit];
+	}
+
+	if (!Number.isFinite(total)) throw new RangeError('Duration is too large to be represented');
+
+	return value.trimStart().startsWith('-') ? 0 - total : total;
 }

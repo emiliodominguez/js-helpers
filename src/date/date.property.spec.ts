@@ -337,4 +337,230 @@ describe('Date helpers (properties)', function () {
 			})
 		);
 	});
+
+	describe('round 2 additions', function () {
+		const amountArb = fc.integer({ min: -1_000, max: 1_000 });
+
+		/**
+		 * Reference ISO week computation (the classic "Thursday rule"), done on a UTC date built from the local fields.
+		 */
+		function referenceISOWeek(date: Date): [number, number] {
+			const utc = new Date(0);
+
+			utc.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+
+			const weekday = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay();
+
+			utc.setUTCDate(utc.getUTCDate() + 4 - weekday);
+
+			const yearStart = new Date(0);
+
+			yearStart.setUTCFullYear(utc.getUTCFullYear(), 0, 1);
+
+			return [utc.getUTCFullYear(), Math.ceil(((utc.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)];
+		}
+
+		/**
+		 * Naive reference: walks one calendar day at a time, always measuring the offset from the original date (chaining
+		 * addDays would permanently shift the wall-clock time after passing through a DST gap).
+		 */
+		function naiveAddBusinessDays(date: Date, amount: number): Date {
+			const sign = amount < 0 ? -1 : 1;
+			let remaining = Math.abs(amount);
+			let offset = 0;
+
+			while (remaining > 0) {
+				offset += sign;
+				if (!helpers.isWeekend(helpers.addDays(date, offset))) remaining--;
+			}
+
+			return helpers.addDays(date, offset);
+		}
+
+		it('adding zero calendar units is the identity on the instant', function () {
+			fc.assert(
+				fc.property(dateArb, function (date) {
+					expect(helpers.addDays(date, 0).getTime()).toBe(date.getTime());
+					expect(helpers.addMonths(date, 0).getTime()).toBe(date.getTime());
+					expect(helpers.addBusinessDays(date, 0).getTime()).toBe(date.getTime());
+				})
+			);
+		});
+
+		it('eachDayOfInterval: length = floor(diffInDays / step) + 1, consecutive local midnights `step` days apart', function () {
+			fc.assert(
+				fc.property(dateArb, fc.integer({ min: 0, max: 400 }), fc.integer({ min: 1, max: 10 }), function (start, span, step) {
+					const end = helpers.addDays(start, span);
+					const days = helpers.eachDayOfInterval(start, end, { step });
+
+					expect(days).toHaveLength(Math.floor(helpers.diffInDays(end, start) / step) + 1);
+					expect(helpers.isSameDay(days[0], start)).toBe(true);
+					expect(helpers.diffInDays(end, days[days.length - 1])).toBeLessThan(step);
+					days.forEach(function (day, index) {
+						expect(day.getTime()).toBe(helpers.startOfDay(day).getTime());
+						if (index > 0) expect(helpers.diffInDays(day, days[index - 1])).toBe(step);
+					});
+				})
+			);
+		});
+
+		it('getISOWeek / getISOWeekYear match the reference Thursday-rule algorithm (1900-2200)', function () {
+			fc.assert(
+				fc.property(dateArb, function (date) {
+					expect([helpers.getISOWeekYear(date), helpers.getISOWeek(date)]).toEqual(referenceISOWeek(date));
+				}),
+				{ numRuns: 1000 }
+			);
+		});
+
+		it('January 4th is always in week 1 and December 28th always in the last ISO week of its year', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: 1900, max: 2200 }), function (year) {
+					const jan4 = new Date(year, 0, 4, 12);
+					const dec28 = new Date(year, 11, 28, 12);
+					const jan1Weekday = new Date(year, 0, 1, 12).getDay();
+					const weeksInYear = jan1Weekday === 4 || (jan1Weekday === 3 && helpers.isLeapYear(year)) ? 53 : 52;
+
+					expect(helpers.getISOWeek(jan4)).toBe(1);
+					expect(helpers.getISOWeekYear(jan4)).toBe(year);
+					expect(helpers.getISOWeek(dec28)).toBe(weeksInYear);
+					expect(helpers.getISOWeekYear(dec28)).toBe(year);
+					expect(helpers.getISOWeek(helpers.addDays(dec28, 7))).toBe(1);
+				})
+			);
+		});
+
+		it('getQuarter = floor(month / 3) + 1 and startOfQuarter <= d <= endOfQuarter within the same quarter', function () {
+			fc.assert(
+				fc.property(dateArb, function (date) {
+					const quarter = helpers.getQuarter(date);
+					const start = helpers.startOfQuarter(date);
+					const end = helpers.endOfQuarter(date);
+
+					expect(quarter).toBe(Math.floor(date.getMonth() / 3) + 1);
+					expect(start.getTime()).toBeLessThanOrEqual(date.getTime());
+					expect(end.getTime()).toBeGreaterThanOrEqual(date.getTime());
+					expect([start.getMonth() % 3, start.getDate()]).toEqual([0, 1]);
+					expect(helpers.getQuarter(start)).toBe(quarter);
+					expect(helpers.getQuarter(end)).toBe(quarter);
+					expect(helpers.getQuarter(helpers.addMilliseconds(end, 1))).toBe((quarter % 4) + 1);
+					expect(helpers.startOfQuarter(start).getTime()).toBe(start.getTime());
+				})
+			);
+		});
+
+		it('getAge(d, addYears(d, n)) === n, the day before is n - 1, and getAge is monotonic in now', function () {
+			fc.assert(
+				fc.property(dateArb, fc.integer({ min: 0, max: 120 }), dateArb, function (birth, n, other) {
+					const anniversary = helpers.addYears(birth, n);
+
+					expect(helpers.getAge(birth, anniversary)).toBe(n);
+					if (n > 0) expect(helpers.getAge(birth, helpers.addDays(anniversary, -1))).toBe(n - 1);
+
+					fc.pre(helpers.diffInDays(other, birth) >= 0);
+
+					const later = helpers.addDays(other, 1);
+
+					expect(helpers.getAge(birth, later)).toBeGreaterThanOrEqual(helpers.getAge(birth, other));
+					expect(helpers.getAge(birth, other)).toBeGreaterThanOrEqual(0);
+				})
+			);
+		});
+
+		it('addBusinessDays never lands on a weekend (n != 0) and matches a naive day-by-day walk', function () {
+			fc.assert(
+				fc.property(dateArb, fc.integer({ min: -60, max: 60 }), function (date, n) {
+					const result = helpers.addBusinessDays(date, n);
+
+					expect(result.getTime()).toBe(naiveAddBusinessDays(date, n).getTime());
+					if (n !== 0) expect(helpers.isWeekend(result)).toBe(false);
+				})
+			);
+		});
+
+		it('diffInBusinessDays(addBusinessDays(d, n), d) === n for weekdays d, and diffInBusinessDays is antisymmetric', function () {
+			fc.assert(
+				fc.property(dateArb, amountArb, dateArb, function (date, n, other) {
+					expect(helpers.diffInBusinessDays(date, other)).toBe(0 - helpers.diffInBusinessDays(other, date));
+
+					fc.pre(!helpers.isWeekend(date));
+					expect(helpers.diffInBusinessDays(helpers.addBusinessDays(date, n), date)).toBe(n);
+				})
+			);
+		});
+
+		it('diffInBusinessDays matches a naive count of weekdays in (earlier, later]', function () {
+			fc.assert(
+				fc.property(dateArb, fc.integer({ min: 0, max: 60 }), function (earlier, span) {
+					const later = helpers.addDays(earlier, span);
+					let count = 0;
+
+					for (let offset = 1; offset <= span; offset++) {
+						if (!helpers.isWeekend(helpers.addDays(earlier, offset))) count++;
+					}
+
+					expect(helpers.diffInBusinessDays(later, earlier)).toBe(count);
+				})
+			);
+		});
+
+		it('isPast / isFuture / equality form a trichotomy consistent with compareAsc', function () {
+			fc.assert(
+				fc.property(dateArb, dateArb, function (date, now) {
+					const order = helpers.compareAsc(date, now);
+
+					expect(helpers.isPast(date, now)).toBe(order === -1);
+					expect(helpers.isFuture(date, now)).toBe(order === 1);
+					expect(helpers.isToday(date, now)).toBe(helpers.diffInDays(date, now) === 0);
+				})
+			);
+		});
+
+		it('clampDate stays within the bounds, is idempotent and is the identity inside the range', function () {
+			fc.assert(
+				fc.property(dateArb, dateArb, dateArb, function (date, a, b) {
+					const min = a.getTime() <= b.getTime() ? a : b;
+					const max = min === a ? b : a;
+					const clamped = helpers.clampDate(date, min, max);
+
+					expect(clamped.getTime()).toBeGreaterThanOrEqual(min.getTime());
+					expect(clamped.getTime()).toBeLessThanOrEqual(max.getTime());
+					expect(helpers.clampDate(clamped, min, max).getTime()).toBe(clamped.getTime());
+					if (helpers.isBetween(date, min, max)) expect(clamped.getTime()).toBe(date.getTime());
+				})
+			);
+		});
+
+		it('parseDuration(formatDuration(ms)) === ms for every safe integer', function () {
+			fc.assert(
+				fc.property(fc.oneof(fc.integer(), fc.integer({ min: -100_000_000, max: 100_000_000 }), fc.maxSafeInteger(), fc.maxSafeNat()), function (ms) {
+					expect(helpers.parseDuration(helpers.formatDuration(ms))).toBe(ms + 0);
+				})
+			);
+		});
+
+		it('formatDuration with restricted units / largest truncates toward zero by less than the dropped part', function () {
+			const unitsArb = fc.subarray(['d', 'h', 'm', 's', 'ms'] as helpers.DurationUnit[], { minLength: 1 });
+
+			fc.assert(
+				fc.property(fc.integer({ min: 0, max: 10 * 86_400_000 }), unitsArb, fc.integer({ min: 1, max: 5 }), function (ms, units, largest) {
+					const text = helpers.formatDuration(ms, { units, largest });
+					const parsed = helpers.parseDuration(text);
+					const tokens = text === '0s' || /^0[a-z]+$/.test(text) ? [] : text.split(' ');
+
+					expect(tokens.length).toBeLessThanOrEqual(largest);
+					expect(parsed).toBeLessThanOrEqual(ms);
+					tokens.forEach(function (token) {
+						expect(units).toContain(token.replace(/^\d+/, ''));
+					});
+					if (largest === 5) {
+						const smallest = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1_000, ms: 1 }[units[units.length - 1]];
+
+						expect(ms - parsed).toBeLessThan(smallest);
+					}
+					expect(helpers.formatDuration(0 - ms, { units, largest })).toBe(parsed === 0 ? text : `-${text}`);
+				})
+			);
+		});
+	});
 });

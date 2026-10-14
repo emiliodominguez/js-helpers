@@ -371,4 +371,493 @@ describe('guards', function () {
 			expect(guards.isInteger('3')).toBe(false);
 		});
 	});
+
+	describe('regressions (round 2)', function () {
+		it('built-in guards reject objects that only inherit from the built-in prototype (no internal slots)', function () {
+			expect(guards.isDate(Object.create(Date.prototype))).toBe(false);
+			expect(guards.isRegExp(Object.create(RegExp.prototype))).toBe(false);
+			expect(guards.isMap(Object.create(Map.prototype))).toBe(false);
+			expect(guards.isSet(Object.create(Set.prototype))).toBe(false);
+			expect(guards.isWeakMap(Object.create(WeakMap.prototype))).toBe(false);
+			expect(guards.isWeakSet(Object.create(WeakSet.prototype))).toBe(false);
+			expect(guards.isRegExp(RegExp.prototype)).toBe(false);
+			expect(guards.isDate(Date.prototype)).toBe(false);
+		});
+
+		it('built-in guards reject proxies, whose methods would throw on use', function () {
+			expect(guards.isMap(new Proxy(new Map(), {}))).toBe(false);
+			expect(guards.isSet(new Proxy(new Set(), {}))).toBe(false);
+			expect(guards.isDate(new Proxy(new Date(), {}))).toBe(false);
+		});
+
+		it('still accepts subclasses, cross-realm instances and instances with a custom toStringTag', function () {
+			class MyMap extends Map<unknown, unknown> {}
+			class MyDate extends Date {}
+			const tagged = new Date(0);
+
+			Object.defineProperty(tagged, Symbol.toStringTag, { value: 'Other' });
+			expect(guards.isMap(new MyMap())).toBe(true);
+			expect(guards.isDate(new MyDate())).toBe(true);
+			expect(guards.isDate(tagged)).toBe(true);
+			expect(guards.isDate(foreign.date)).toBe(true);
+			expect(guards.isRegExp(foreign.regexp)).toBe(true);
+			expect(guards.isMap(foreign.map)).toBe(true);
+		});
+	});
+
+	describe('isNonEmptyString', function () {
+		it('accepts primitive strings with at least one code unit', function () {
+			expect(guards.isNonEmptyString('a')).toBe(true);
+			expect(guards.isNonEmptyString(' ')).toBe(true);
+			expect(guards.isNonEmptyString('😀')).toBe(true);
+			expect(guards.isNonEmptyString('')).toBe(false);
+			expect(guards.isNonEmptyString(new String('a'))).toBe(false);
+			expect(guards.isNonEmptyString(['a'])).toBe(false);
+			expect(guards.isNonEmptyString(null)).toBe(false);
+		});
+	});
+
+	describe('isNonEmptyArray', function () {
+		it('accepts arrays with at least one slot', function () {
+			expect(guards.isNonEmptyArray([1])).toBe(true);
+			expect(guards.isNonEmptyArray([undefined])).toBe(true);
+			expect(guards.isNonEmptyArray(new Array(3))).toBe(true);
+			expect(guards.isNonEmptyArray(foreign.array)).toBe(true);
+			expect(guards.isNonEmptyArray([])).toBe(false);
+			expect(guards.isNonEmptyArray('ab')).toBe(false);
+			expect(guards.isNonEmptyArray({ length: 1, 0: 'a' })).toBe(false);
+			expect(guards.isNonEmptyArray(null)).toBe(false);
+			expect(guards.isNonEmptyArray(undefined)).toBe(false);
+		});
+
+		it('narrows to a non-empty tuple, keeping the element type and readonly-ness', function () {
+			const mutable: number[] | undefined = [1, 2];
+			const frozen: ReadonlyArray<string> = ['a'];
+			const unknownValue: unknown = [true];
+
+			if (guards.isNonEmptyArray(mutable)) {
+				const first: number = mutable[0];
+				const tuple: [number, ...number[]] = mutable;
+
+				expect([first, tuple.length]).toEqual([1, 2]);
+			}
+			if (guards.isNonEmptyArray(frozen)) {
+				const first: string = frozen[0];
+				const tuple: readonly [string, ...string[]] = frozen;
+
+				expect([first, tuple.length]).toEqual(['a', 1]);
+			}
+			if (guards.isNonEmptyArray(unknownValue)) {
+				const tuple: [unknown, ...unknown[]] = unknownValue;
+
+				expect(tuple[0]).toBe(true);
+			}
+		});
+	});
+
+	describe('isKeyOf', function () {
+		const colors = { red: '#f00', blue: '#00f' };
+
+		it('accepts own keys only', function () {
+			expect(guards.isKeyOf(colors, 'red')).toBe(true);
+			expect(guards.isKeyOf(colors, 'green')).toBe(false);
+			expect(guards.isKeyOf(colors, 'toString')).toBe(false);
+			expect(guards.isKeyOf(colors, '__proto__')).toBe(false);
+			expect(guards.isKeyOf(colors, 'constructor')).toBe(false);
+		});
+
+		it('handles numeric, symbol and non-enumerable keys, and null-prototype objects', function () {
+			const symbol = Symbol('s');
+			const target = Object.create(null) as Record<PropertyKey, unknown>;
+
+			target[symbol] = 1;
+			target[0] = 'zero';
+			Object.defineProperty(target, 'hidden', { value: true, enumerable: false });
+			expect(guards.isKeyOf(target, symbol)).toBe(true);
+			expect(guards.isKeyOf(target, 0)).toBe(true);
+			expect(guards.isKeyOf(target, '0')).toBe(true);
+			expect(guards.isKeyOf(target, 'hidden')).toBe(true);
+			expect(guards.isKeyOf(target, Symbol('s'))).toBe(false);
+			expect(guards.isKeyOf(['a'], 'length')).toBe(true);
+			expect(guards.isKeyOf(['a'], 0)).toBe(true);
+			expect(guards.isKeyOf(['a'], 1)).toBe(false);
+		});
+
+		it('rejects values that are not property keys', function () {
+			expect(guards.isKeyOf(colors, null)).toBe(false);
+			expect(guards.isKeyOf(colors, undefined)).toBe(false);
+			expect(
+				guards.isKeyOf(colors, {
+					toString: function () {
+						return 'red';
+					}
+				})
+			).toBe(false);
+			expect(guards.isKeyOf(colors, true)).toBe(false);
+		});
+
+		it('narrows the key to keyof T', function () {
+			const key: string = 'blue';
+
+			if (guards.isKeyOf(colors, key)) {
+				const narrowed: 'red' | 'blue' = key;
+
+				expect(colors[narrowed]).toBe('#00f');
+			}
+		});
+
+		it('throws TypeError for a nullish object', function () {
+			expect(function () {
+				guards.isKeyOf(null as any, 'a');
+			}).toThrow(TypeError);
+			expect(function () {
+				guards.isKeyOf(undefined as any, 'a');
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('isOneOf', function () {
+		it('checks membership with SameValueZero and narrows to the literal union', function () {
+			const isDirection = guards.isOneOf(['up', 'down']);
+			const value: unknown = 'up';
+
+			expect(isDirection('up')).toBe(true);
+			expect(isDirection('left')).toBe(false);
+			expect(isDirection(new String('up'))).toBe(false);
+			if (isDirection(value)) {
+				const narrowed: 'up' | 'down' = value;
+
+				expect(narrowed).toBe('up');
+			}
+			expect(guards.isOneOf([NaN])(NaN)).toBe(true);
+			expect(guards.isOneOf([0])(-0)).toBe(true);
+			expect(guards.isOneOf([])(undefined)).toBe(false);
+			expect(guards.isOneOf([undefined, null])(undefined)).toBe(true);
+		});
+
+		it('copies the list, so later mutations do not affect the guard', function () {
+			const list = [1, 2];
+			const isAllowed = guards.isOneOf(list);
+
+			list.push(3);
+			expect(isAllowed(3)).toBe(false);
+		});
+
+		it('throws TypeError for non-array lists', function () {
+			expect(function () {
+				guards.isOneOf('abc' as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				guards.isOneOf(new Set([1]) as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('isInstanceOf', function () {
+		class Animal {}
+		class Dog extends Animal {}
+
+		it('checks instanceof and narrows', function () {
+			const isAnimal = guards.isInstanceOf(Animal);
+			const value: unknown = new Dog();
+
+			expect(isAnimal(new Animal())).toBe(true);
+			expect(isAnimal(value)).toBe(true);
+			expect(guards.isInstanceOf(Dog)(new Animal())).toBe(false);
+			expect(isAnimal({})).toBe(false);
+			expect(isAnimal(null)).toBe(false);
+			expect(isAnimal(1)).toBe(false);
+			if (isAnimal(value)) {
+				const narrowed: Animal = value;
+
+				expect(narrowed).toBeInstanceOf(Dog);
+			}
+		});
+
+		it('honours Symbol.hasInstance, built-ins and bound functions', function () {
+			class Even {
+				static [Symbol.hasInstance](value: unknown): boolean {
+					return typeof value === 'number' && value % 2 === 0;
+				}
+			}
+			const BoundAnimal = Animal.bind(null);
+
+			expect(guards.isInstanceOf(Even)(4)).toBe(true);
+			expect(guards.isInstanceOf(Even)(3)).toBe(false);
+			expect(guards.isInstanceOf(Error)(new TypeError('x'))).toBe(true);
+			expect(guards.isInstanceOf(BoundAnimal)(new Animal())).toBe(true);
+		});
+
+		it('throws TypeError for invalid constructors', function () {
+			expect(function () {
+				guards.isInstanceOf({} as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				guards.isInstanceOf(
+					function () {
+						return 1;
+					}.bind(null) as any
+				);
+			}).not.toThrow();
+			const arrowLike = { method() {} }.method;
+
+			expect(function () {
+				guards.isInstanceOf(arrowLike as any);
+			}).toThrow('constructor is not a valid instanceof target');
+		});
+	});
+
+	describe('isArrayOf', function () {
+		it('checks every element, including the holes of sparse arrays', function () {
+			const isStrings = guards.isArrayOf(guards.isString);
+
+			expect(isStrings(['a', 'b'])).toBe(true);
+			expect(isStrings([])).toBe(true);
+			expect(isStrings(['a', 1])).toBe(false);
+			expect(isStrings(new Array(2))).toBe(false);
+			expect(guards.isArrayOf(guards.isUndefined)(new Array(2))).toBe(true);
+			expect(isStrings('ab')).toBe(false);
+			expect(isStrings({ 0: 'a', length: 1 })).toBe(false);
+			expect(guards.isArrayOf(guards.isNumber)(foreign.array)).toBe(true);
+		});
+
+		it('calls the guard with the element only and narrows to T[]', function () {
+			const calls: unknown[][] = [];
+			const spy = function (...args: unknown[]): boolean {
+				calls.push(args);
+				return true;
+			} as unknown as (value: unknown) => value is string;
+			const value: unknown = ['x'];
+
+			expect(guards.isArrayOf(spy)(['x', 'y'])).toBe(true);
+			expect(calls).toEqual([['x'], ['y']]);
+			if (guards.isArrayOf(guards.isString)(value)) {
+				const narrowed: string[] = value;
+
+				expect(narrowed[0].toUpperCase()).toBe('X');
+			}
+		});
+
+		it('composes for nested arrays and throws for non-function guards', function () {
+			expect(guards.isArrayOf(guards.isArrayOf(guards.isInteger))([[1], [2, 3], []])).toBe(true);
+			expect(guards.isArrayOf(guards.isArrayOf(guards.isInteger))([[1], [2.5]])).toBe(false);
+			expect(function () {
+				guards.isArrayOf('isString' as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('isRecordOf', function () {
+		const isScores = guards.isRecordOf(guards.isFiniteNumber);
+
+		it('accepts plain objects whose own enumerable values all pass', function () {
+			const nullProto = Object.create(null);
+
+			nullProto.a = 1;
+			expect(isScores({ alice: 3, bob: 5 })).toBe(true);
+			expect(isScores({})).toBe(true);
+			expect(isScores(nullProto)).toBe(true);
+			expect(isScores({ alice: '3' })).toBe(false);
+			expect(isScores({ alice: 3, bob: NaN })).toBe(false);
+		});
+
+		it('checks symbol keys and ignores non-enumerable properties', function () {
+			const withSymbol = { a: 1, [Symbol('s')]: 'x' };
+			const withHidden = { a: 1 };
+
+			Object.defineProperty(withHidden, 'hidden', { value: 'x', enumerable: false });
+			expect(isScores(withSymbol)).toBe(false);
+			expect(isScores(withHidden)).toBe(true);
+		});
+
+		it('rejects non-plain objects', function () {
+			expect(isScores([1, 2])).toBe(false);
+			expect(isScores(new Map([['a', 1]]))).toBe(false);
+			expect(
+				isScores(
+					new (class {
+						a = 1;
+					})()
+				)
+			).toBe(false);
+			expect(isScores(null)).toBe(false);
+			expect(isScores(1)).toBe(false);
+		});
+
+		it('narrows and validates the guard', function () {
+			const value: unknown = { a: 'x' };
+
+			if (guards.isRecordOf(guards.isString)(value)) {
+				const narrowed: Record<PropertyKey, string> = value;
+
+				expect(narrowed.a.toUpperCase()).toBe('X');
+			}
+			expect(function () {
+				guards.isRecordOf(null as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('isTypedArray / isArrayBuffer', function () {
+		const typedArrays = [
+			new Int8Array(1),
+			new Uint8Array(1),
+			new Uint8ClampedArray(1),
+			new Int16Array(1),
+			new Uint16Array(1),
+			new Int32Array(1),
+			new Uint32Array(1),
+			new Float32Array(1),
+			new Float64Array(1),
+			new BigInt64Array(1),
+			new BigUint64Array(1)
+		];
+
+		it('isTypedArray accepts every typed array (incl. subclasses such as Buffer and other realms)', function () {
+			typedArrays.forEach(function (array) {
+				expect(guards.isTypedArray(array)).toBe(true);
+			});
+			expect(guards.isTypedArray(Buffer.from('a'))).toBe(true);
+			expect(guards.isTypedArray(vm.runInNewContext('new Uint16Array(2)'))).toBe(true);
+		});
+
+		it('isTypedArray rejects DataView, buffers, arrays, fakes and primitives', function () {
+			expect(guards.isTypedArray(new DataView(new ArrayBuffer(1)))).toBe(false);
+			expect(guards.isTypedArray(new ArrayBuffer(1))).toBe(false);
+			expect(guards.isTypedArray([1])).toBe(false);
+			expect(guards.isTypedArray(Object.create(Uint8Array.prototype))).toBe(false);
+			expect(guards.isTypedArray({ [Symbol.toStringTag]: 'Uint8Array' })).toBe(false);
+			expect(guards.isTypedArray(null)).toBe(false);
+			expect(guards.isTypedArray('Uint8Array')).toBe(false);
+		});
+
+		it('isArrayBuffer accepts real (incl. cross-realm and detached) ArrayBuffers only', function () {
+			const detached = new ArrayBuffer(8);
+
+			structuredClone(detached, { transfer: [detached] });
+			expect(detached.byteLength).toBe(0);
+			expect(guards.isArrayBuffer(new ArrayBuffer(8))).toBe(true);
+			expect(guards.isArrayBuffer(new Uint8Array(8).buffer)).toBe(true);
+			expect(guards.isArrayBuffer(detached)).toBe(true);
+			expect(guards.isArrayBuffer(vm.runInNewContext('new ArrayBuffer(1)'))).toBe(true);
+			expect(guards.isArrayBuffer(new SharedArrayBuffer(8))).toBe(false);
+			expect(guards.isArrayBuffer(new Uint8Array(8))).toBe(false);
+			expect(guards.isArrayBuffer(Object.create(ArrayBuffer.prototype))).toBe(false);
+			expect(guards.isArrayBuffer(ArrayBuffer.prototype)).toBe(false);
+			expect(guards.isArrayBuffer({ byteLength: 8 })).toBe(false);
+			expect(guards.isArrayBuffer(null)).toBe(false);
+		});
+	});
+
+	describe('assertions', function () {
+		it('AssertionError is an Error with its own name', function () {
+			const error = new guards.AssertionError();
+
+			expect(error).toBeInstanceOf(Error);
+			expect(error).toBeInstanceOf(guards.AssertionError);
+			expect(error.name).toBe('AssertionError');
+			expect(error.message).toBe('Assertion failed');
+			expect(new guards.AssertionError('custom').message).toBe('custom');
+		});
+
+		it('assert throws iff the condition is falsy, and narrows', function () {
+			[false, 0, -0, '', NaN, null, undefined, 0n].forEach(function (value) {
+				expect(function () {
+					guards.assert(value);
+				}).toThrow(guards.AssertionError);
+			});
+			[true, 1, 'a', {}, [], -1n].forEach(function (value) {
+				expect(function () {
+					guards.assert(value);
+				}).not.toThrow();
+			});
+			expect(function () {
+				guards.assert(false, 'boom');
+			}).toThrow(new guards.AssertionError('boom'));
+
+			const value: string | number = 'abc' as string | number;
+
+			guards.assert(typeof value === 'string');
+			expect(value.toUpperCase()).toBe('ABC');
+		});
+
+		it('assertDefined throws iff the value is nullish, and narrows', function () {
+			expect(function () {
+				guards.assertDefined(null);
+			}).toThrow('Expected value to be defined, received null');
+			expect(function () {
+				guards.assertDefined(undefined, 'missing');
+			}).toThrow(new guards.AssertionError('missing'));
+			[0, '', false, NaN].forEach(function (value) {
+				expect(function () {
+					guards.assertDefined(value);
+				}).not.toThrow();
+			});
+
+			const maybe = [1, 2].find(function (n) {
+				return n === 2;
+			});
+
+			guards.assertDefined(maybe);
+			expect(maybe.toFixed(1)).toBe('2.0');
+		});
+
+		it('assertNever enforces exhaustiveness at compile time and always throws at runtime', function () {
+			type Shape = { kind: 'circle'; r: number } | { kind: 'square'; size: number };
+
+			function area(shape: Shape): number {
+				switch (shape.kind) {
+					case 'circle':
+						return shape.r;
+					case 'square':
+						return shape.size;
+					default:
+						return guards.assertNever(shape);
+				}
+			}
+
+			expect(area({ kind: 'square', size: 2 })).toBe(2);
+			expect(function () {
+				area({ kind: 'triangle' } as any);
+			}).toThrow(new guards.AssertionError('Unexpected value: {"kind":"triangle"}'));
+			expect(function () {
+				guards.assertNever('x' as never, 'custom');
+			}).toThrow(new guards.AssertionError('custom'));
+		});
+
+		it('assertNever describes any value without throwing a different error', function () {
+			const circular: Record<string, unknown> = {};
+
+			circular.self = circular;
+
+			const cases: Array<[unknown, string]> = [
+				['a', 'Unexpected value: "a"'],
+				[1, 'Unexpected value: 1'],
+				[10n, 'Unexpected value: 10n'],
+				[Symbol('s'), 'Unexpected value: Symbol(s)'],
+				[undefined, 'Unexpected value: undefined'],
+				[null, 'Unexpected value: null'],
+				[Object.create(null), 'Unexpected value: {}'],
+				[circular, 'Unexpected value: [object Object]'],
+				[
+					{
+						toJSON: function () {
+							return undefined;
+						}
+					},
+					'Unexpected value: [object Object]'
+				],
+				[[1, 'a'], 'Unexpected value: [1,"a"]']
+			];
+
+			cases.forEach(function ([value, message]) {
+				expect(function () {
+					guards.assertNever(value as never);
+				}).toThrow(new guards.AssertionError(message));
+			});
+			expect(function () {
+				guards.assertNever(noop as never);
+			}).toThrow(guards.AssertionError);
+		});
+	});
 });
