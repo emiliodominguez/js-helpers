@@ -319,25 +319,19 @@ export function randomUUID(): string {
  */
 export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): string {
 	assertNumber('randomId', 'size', size, Number.isSafeInteger(size) && size >= 0, 'a safe integer >= 0');
-	const characters = Array.from(alphabet);
+	const characters = alphabetCharacters(alphabet);
 	const length = characters.length;
-	if (length < 2 || length > 256) {
-		throw new RangeError(`randomId: \`alphabet\` must contain between 2 and 256 characters, got ${length}`);
-	}
-	if (new Set(characters).size !== length) {
-		throw new RangeError('randomId: `alphabet` must not contain duplicate characters');
-	}
-	getCrypto('randomId');
+	const crypto = getCrypto('randomId');
 
 	// Smallest all-ones bit mask covering every index; values above `length - 1` are rejected to stay unbiased.
 	const mask = (2 << (31 - Math.clz32((length - 1) | 1))) - 1;
 	// Over-request bytes so a single batch usually suffices (the expected acceptance rate is `length / (mask + 1)` > 1/2).
-	const step = Math.min(Math.ceil((1.6 * mask * size) / length), MAX_RANDOM_VALUES_BYTES);
+	const bytes = new Uint8Array(Math.min(Math.ceil((1.6 * mask * size) / length), MAX_RANDOM_VALUES_BYTES));
 	let id = '';
 	let count = 0;
 	while (count < size) {
-		const bytes = randomBytes(step);
-		for (let i = 0; i < step && count < size; i++) {
+		crypto.getRandomValues(bytes);
+		for (let i = 0; i < bytes.length && count < size; i++) {
 			const index = bytes[i] & mask;
 			if (index < length) {
 				id += characters[index];
@@ -346,6 +340,34 @@ export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): st
 		}
 	}
 	return id;
+}
+
+/** The alphabet most recently validated by {@link alphabetCharacters}, and its characters. */
+let cachedAlphabet: string | undefined;
+let cachedCharacters: string[] = [];
+
+/**
+ * Splits a {@link randomId} alphabet into its code points and validates it. The last result is cached, so repeated
+ * calls with the same alphabet (the common case) skip the split and the duplicate check.
+ * @param {string} alphabet - The alphabet to split
+ * @returns {string[]} The characters of the alphabet
+ * @throws {RangeError} when the alphabet has fewer than 2 or more than 256 characters or contains duplicates
+ * @example
+ * alphabetCharacters('ab🍎'); // => ['a', 'b', '🍎']
+ */
+function alphabetCharacters(alphabet: string): string[] {
+	if (alphabet === cachedAlphabet) return cachedCharacters;
+	const characters = Array.from(alphabet);
+	const length = characters.length;
+	if (length < 2 || length > 256) {
+		throw new RangeError(`randomId: \`alphabet\` must contain between 2 and 256 characters, got ${length}`);
+	}
+	if (new Set(characters).size !== length) {
+		throw new RangeError('randomId: `alphabet` must not contain duplicate characters');
+	}
+	cachedAlphabet = alphabet;
+	cachedCharacters = characters;
+	return characters;
 }
 
 /**

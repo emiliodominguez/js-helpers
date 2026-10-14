@@ -43,17 +43,15 @@ function nextDown(value: number): number {
 }
 
 /**
- * Comparator sorting numbers in ascending order, with `NaN` placed last.
- * @param {number} a - First number
- * @param {number} b - Second number
- * @returns {number} A negative number if `a` sorts first, positive if `b` sorts first, `0` otherwise
+ * Returns an ascending sorted copy of some numbers. Typed-array sorting is numeric and much faster than `Array#sort`
+ * with a comparator; it places `NaN` last and `-0` before `0`, so the order never depends on the input order.
+ * @param {ArrayLike<number>} numbers - The numbers to sort (not mutated)
+ * @returns {Float64Array} A new, sorted array
  * @example
- * [3, NaN, 1].sort(compareAscending); // => [1, 3, NaN]
+ * sortedCopy([3, NaN, 1]); // => new Float64Array([1, 3, NaN])
  */
-function compareAscending(a: number, b: number): number {
-	if (Number.isNaN(a)) return Number.isNaN(b) ? 0 : 1;
-	if (Number.isNaN(b)) return -1;
-	return a - b;
+function sortedCopy(numbers: ArrayLike<number>): Float64Array {
+	return Float64Array.from(numbers).sort();
 }
 
 /**
@@ -87,7 +85,9 @@ function assertIntegers(caller: string, a: number, b: number): void {
 export function sum(numbers: ReadonlyArray<number>): number {
 	let total = 0;
 	let compensation = 0;
-	for (const value of numbers) {
+	// An index loop: several times faster than `for...of` here.
+	for (let i = 0; i < numbers.length; i++) {
+		const value = numbers[i];
 		const next = total + value;
 		if (Math.abs(total) >= Math.abs(value)) {
 			compensation += total - next + value;
@@ -126,12 +126,37 @@ export function round(number: number, decimals = 0): number {
 
 	const negative = number < 0 || Object.is(number, -0);
 	const magnitude = Math.abs(number);
-	const shifted = shiftDecimal(magnitude, decimals);
-	// The number already has fewer fractional digits than requested: rounding is the identity.
-	if (!Number.isFinite(shifted)) return number;
-
-	const rounded = shiftDecimal(Math.round(shifted), -decimals);
+	const rounded = roundMagnitude(magnitude, decimals);
+	// `undefined`: the number already has fewer fractional digits than requested, so rounding is the identity.
+	if (rounded === undefined) return number;
 	return negative ? -rounded : rounded;
+}
+
+/** `10 ** k` for `k` in `0..22`, the powers of ten that are exactly representable as doubles. */
+const POWERS_OF_TEN: ReadonlyArray<number> = [1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22];
+
+/**
+ * Rounds a non-negative finite number half up to `decimals` places, as {@link round} does, on its decimal representation.
+ *
+ * Fast path: `magnitude * 10 ** decimals` (exact power of ten, correctly rounded product) is within a few ulps of the
+ * decimal-shifted value, so unless it lies within a safety margin of a `.5` tie, both round to the same integer `k`, and
+ * `k / 10 ** decimals` (a correctly rounded division) is exactly the double nearest to the decimal `k e-decimals`.
+ * Near ties, for huge values (the margin exceeds `0.5` beyond `2 ** 45`) and for `decimals` outside `0..22` (no exact
+ * power of ten: the product is `NaN`, which fails the margin test), the decimal strings are edited instead.
+ * @param {number} magnitude - A finite number `>= 0`
+ * @param {number} decimals - An integer number of decimal places (may be negative)
+ * @returns {number | undefined} The rounded magnitude, or `undefined` when the shifted value overflows (rounding is then the identity)
+ * @example
+ * roundMagnitude(1.005, 2); // => 1.01
+ */
+function roundMagnitude(magnitude: number, decimals: number): number | undefined {
+	const scale = POWERS_OF_TEN[decimals];
+	const scaled = magnitude * scale;
+	const fraction = scaled - Math.floor(scaled);
+	if (Math.abs(fraction - 0.5) > scaled * 2 ** -46) return Math.round(scaled) / scale;
+	const shifted = shiftDecimal(magnitude, decimals);
+	if (!Number.isFinite(shifted)) return undefined;
+	return shiftDecimal(Math.round(shifted), -decimals);
 }
 
 /**
@@ -180,7 +205,7 @@ export function max(numbers: ReadonlyArray<number>): number {
 	let result = -Infinity;
 	for (const value of numbers) {
 		if (Number.isNaN(value)) return NaN;
-		if (value > result || (value === 0 && result === 0 && Object.is(result, -0))) result = value;
+		if (value > result || (value === 0 && Object.is(result, -0))) result = value;
 	}
 	return result;
 }
@@ -199,7 +224,7 @@ export function min(numbers: ReadonlyArray<number>): number {
 	let result = Infinity;
 	for (const value of numbers) {
 		if (Number.isNaN(value)) return NaN;
-		if (value < result || (value === 0 && result === 0 && Object.is(value, -0))) result = value;
+		if (value < result || (result === 0 && Object.is(value, -0))) result = value;
 	}
 	return result;
 }
@@ -257,7 +282,8 @@ export function log(number: number, base: number): number {
 	if (base === Math.E) return Math.log(number);
 	const ratio = Math.log(number) / Math.log(base);
 	const nearest = Math.round(ratio);
-	if (Number.isFinite(ratio) && Math.abs(ratio - nearest) <= 1e-9 * Math.max(1, Math.abs(nearest)) && Math.pow(base, nearest) === number) return nearest;
+	// A non-finite ratio fails the first test (`Infinity - Infinity` is `NaN`) and is returned as is.
+	if (Math.abs(ratio - nearest) <= 1e-9 * Math.max(1, Math.abs(nearest)) && Math.pow(base, nearest) === number) return nearest;
 	return ratio;
 }
 
@@ -341,8 +367,9 @@ export function randomBetween(minimum: number, maximum: number, random: RandomGe
 	const r = draw('randomBetween', random);
 	const span = maximum - minimum;
 	const value = Number.isFinite(span) ? minimum + r * span : minimum * (1 - r) + maximum * r;
+	const clamped = Math.max(value, minimum);
 	// Floating-point rounding can land exactly on `maximum`; keep the range half-open.
-	return Math.min(Math.max(value, minimum), nextDown(maximum));
+	return clamped < maximum ? clamped : nextDown(maximum);
 }
 
 /**
@@ -492,7 +519,7 @@ export function product(numbers: ReadonlyArray<number>): number {
 
 /**
  * Finds the median of an array of numbers (the mean of the two middle values for even lengths).
- * The input is not mutated.
+ * The input is not mutated, and the result does not depend on its order (`-0` sorts before `0`).
  * @param {ReadonlyArray<number>} numbers - The numbers
  * @returns {number} The median, or `NaN` if the array is empty or contains `NaN`
  * @example
@@ -501,10 +528,10 @@ export function product(numbers: ReadonlyArray<number>): number {
  * median([]); // => NaN
  */
 export function median(numbers: ReadonlyArray<number>): number {
-	const length = numbers.length;
-	if (length === 0) return NaN;
-	const sorted = Array.from(numbers).sort(compareAscending);
-	if (Number.isNaN(sorted[length - 1])) return NaN;
+	const sorted = sortedCopy(numbers);
+	const length = sorted.length;
+	// The largest value is missing (empty input) or NaN (sorted last): the median is undefined.
+	if (!(sorted[length - 1] <= Infinity)) return NaN;
 	const middle = length >> 1;
 	if (length % 2 === 1) return sorted[middle];
 	const low = sorted[middle - 1];
@@ -530,13 +557,13 @@ export function mode(numbers: ReadonlyArray<number>): number[] {
 	for (const value of numbers) {
 		const count = (counts.get(value) ?? 0) + 1;
 		counts.set(value, count);
-		if (count > highest) highest = count;
+		highest = Math.max(highest, count);
 	}
 	const result: number[] = [];
 	for (const [value, count] of counts) {
 		if (count === highest) result.push(value);
 	}
-	return result.sort(compareAscending);
+	return Array.from(sortedCopy(result));
 }
 
 /**
@@ -569,7 +596,7 @@ export function variance(numbers: ReadonlyArray<number>, options: VarianceOption
 	if (divisor <= 0 || !allFinite) return NaN;
 	// With finite inputs the intermediate deltas can only overflow when the true variance is astronomically large,
 	// which Welford's update turns into `-Infinity` or `NaN`: report the overflow as `Infinity`.
-	if (!(squaredDistance >= 0 && squaredDistance < Infinity)) return Infinity;
+	if (!(squaredDistance >= 0)) return Infinity;
 	return squaredDistance / divisor;
 }
 
@@ -627,8 +654,9 @@ export function gcd(a: number, b: number): number {
  */
 export function lcm(a: number, b: number): number {
 	assertIntegers('lcm', a, b);
-	if (a === 0 || b === 0) return 0;
-	return Math.abs((a / gcd(a, b)) * b);
+	const divisor = gcd(a, b);
+	// The divisor is `0` only for lcm(0, 0).
+	return divisor === 0 ? 0 : Math.abs((a / divisor) * b);
 }
 
 /**
@@ -761,7 +789,7 @@ function decimalPlaces(value: number): number {
  * Computes the `q`-quantile of an array of numbers by linear interpolation between closest ranks
  * (R type 7, the default of R, NumPy and Excel's `PERCENTILE.INC`): with the values sorted ascending,
  * `h = (n - 1) * q` and the result interpolates between the values at ranks `floor(h)` and `ceil(h)`.
- * The input is not mutated.
+ * The input is not mutated, and the result does not depend on its order (`-0` sorts before `0`).
  * @param {ReadonlyArray<number>} numbers - The numbers
  * @param {number} q - The quantile to compute, in `[0, 1]` (`0` gives the minimum, `0.5` the median, `1` the maximum)
  * @returns {number} The quantile, or `NaN` if the array is empty or contains `NaN`
@@ -775,13 +803,13 @@ function decimalPlaces(value: number): number {
  */
 export function quantile(numbers: ReadonlyArray<number>, q: number): number {
 	assertNumber('quantile', 'q', q, q >= 0 && q <= 1, 'a number in [0, 1]');
-	const length = numbers.length;
-	if (length === 0) return NaN;
-	const sorted = Array.from(numbers).sort(compareAscending);
-	if (Number.isNaN(sorted[length - 1])) return NaN;
+	const sorted = sortedCopy(numbers);
+	const length = sorted.length;
+	// The largest value is missing (empty input) or NaN (sorted last): the quantile is undefined.
+	if (!(sorted[length - 1] <= Infinity)) return NaN;
 	const position = (length - 1) * q;
 	const lowerIndex = Math.floor(position);
-	if (lowerIndex === length - 1) return sorted[lowerIndex];
+	// At q = 1 the factor is 0, so the (missing) value after the maximum is never used.
 	return interpolateSorted(sorted[lowerIndex], sorted[lowerIndex + 1], position - lowerIndex);
 }
 
@@ -878,7 +906,7 @@ export function weightedAverage(values: ReadonlyArray<number>, weights: Readonly
 	for (let i = 0; i < weights.length; i++) {
 		const weight = weights[i];
 		if (!(weight >= 0 && weight < Infinity)) assertNumber('weightedAverage', `weights[${i}]`, weight, false, 'a finite number >= 0');
-		if (weight > largestWeight) largestWeight = weight;
+		largestWeight = Math.max(largestWeight, weight);
 	}
 	if (largestWeight === 0) return NaN;
 	// Rescaling the weights into [0, 1] keeps the products and the total weight from overflowing or underflowing.
@@ -956,8 +984,8 @@ export function formatBytes(bytes: number, options: FormatBytesOptions = {}): st
 		exponent++;
 		value = round(bytes / Math.pow(base, exponent), decimals);
 	}
-	// `+ 0` turns `-0` into `0` so tiny negative values do not print as "-0".
-	return `${value + 0} ${units[exponent]}`;
+	// A template literal prints `-0` as "0", so tiny negative values do not print as "-0".
+	return `${value} ${units[exponent]}`;
 }
 
 /**
@@ -1006,16 +1034,15 @@ export function ordinal(n: number): string {
  */
 export function nthRoot(value: number, n: number): number {
 	assertInteger('nthRoot', 'n', n, 1);
-	if (n === 1) return value;
 	if (n === 2) return Math.sqrt(value);
 	if (n === 3) return Math.cbrt(value);
-	if (value === 0) return value;
 	if (value < 0 && n % 2 === 0) return NaN;
 	const magnitude = Math.abs(value);
 	let root = Math.pow(magnitude, 1 / n);
 	const nearest = Math.round(root);
 	if (Math.pow(nearest, n) === magnitude) root = nearest;
-	return value < 0 ? -root : root;
+	// `n = 1` and `±0` need no special case: the root is `|value|` and the sign (of a zero too) is restored here.
+	return Math.sign(value) * root;
 }
 
 /**

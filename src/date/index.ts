@@ -105,6 +105,11 @@ const DURATION_REGEX = /^\s*-?(?:(?:\d+(?:\.\d+)?|\.\d+)\s*(?:ms|d|h|m|s)\s*)+$/
  */
 const DURATION_TOKEN_REGEX = /(\d+(?:\.\d+)?|\.\d+)\s*(ms|d|h|m|s)/g;
 
+/**
+ * Size bound of the module's internal caches (tokenized `formatDate` patterns, `Intl.RelativeTimeFormat` instances).
+ */
+const MAX_CACHE_ENTRIES = 64;
+
 const ISO_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
@@ -209,8 +214,8 @@ function toValidDate(input: DateInput): Date {
 		throw new TypeError('Expected a Date or a timestamp number');
 	}
 
-	// The intrinsic getter reads the internal time value, also for Dates from another realm or with an overridden `getTime`.
-	const date = new Date(typeof input === 'number' ? input : Date.prototype.getTime.call(input));
+	// The constructor reads the internal time value of a Date, also from another realm or with an overridden `getTime`.
+	const date = new Date(input);
 
 	if (Number.isNaN(date.getTime())) throw new RangeError('Invalid date');
 
@@ -1029,15 +1034,12 @@ export function compareDesc(a: DateInput, b: DateInput): -1 | 0 | 1 {
  * minDate([]); // => undefined
  */
 export function minDate(dates: Iterable<DateInput>): Date | undefined {
-	let result: number | undefined;
+	let result = Infinity;
 
-	for (const date of dates) {
-		const time = timeOf(date);
+	for (const date of dates) result = Math.min(result, timeOf(date));
 
-		if (result === undefined || time < result) result = time;
-	}
-
-	return result === undefined ? undefined : new Date(result);
+	// Valid timestamps are finite, so `Infinity` means that `dates` was empty.
+	return result === Infinity ? undefined : new Date(result);
 }
 
 /**
@@ -1051,15 +1053,12 @@ export function minDate(dates: Iterable<DateInput>): Date | undefined {
  * maxDate([]); // => undefined
  */
 export function maxDate(dates: Iterable<DateInput>): Date | undefined {
-	let result: number | undefined;
+	let result = -Infinity;
 
-	for (const date of dates) {
-		const time = timeOf(date);
+	for (const date of dates) result = Math.max(result, timeOf(date));
 
-		if (result === undefined || time > result) result = time;
-	}
-
-	return result === undefined ? undefined : new Date(result);
+	// Valid timestamps are finite, so `-Infinity` means that `dates` was empty.
+	return result === -Infinity ? undefined : new Date(result);
 }
 
 /**
@@ -1086,10 +1085,61 @@ export function maxDate(dates: Iterable<DateInput>): Date | undefined {
  */
 export function formatDate(date: DateInput, pattern: string): string {
 	const d = toValidDate(date);
+	let result = '';
 
-	return pattern.replace(FORMAT_TOKEN_REGEX, function (token: string, literal: string | undefined): string {
-		return literal === undefined ? FORMATTERS[token](d) : literal;
-	});
+	for (const part of cached(compiledPatterns, pattern, compilePattern)) result += typeof part === 'string' ? part : part(d);
+
+	return result;
+}
+
+/**
+ * Returns `cache.get(key)`, computing and storing `create(key)` first when missing. The cache is cleared when it reaches
+ * {@link MAX_CACHE_ENTRIES} entries, so its size stays bounded whatever the keys.
+ * @template K - Type of the keys
+ * @template V - Type of the cached values
+ * @param {Map<K, V>} cache - The cache
+ * @param {K} key - The key
+ * @param {(key: K) => V} create - Computes the value of a missing key
+ * @returns {V} The cached value
+ * @example
+ * cached(new Map(), 'YYYY', compilePattern).length; // => 3
+ */
+function cached<K, V>(cache: Map<K, V>, key: K, create: (key: K) => V): V {
+	let value = cache.get(key);
+
+	if (value === undefined) {
+		value = create(key);
+		if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+		cache.set(key, value);
+	}
+
+	return value;
+}
+
+/**
+ * {@link formatDate} patterns already split by {@link compilePattern}.
+ */
+const compiledPatterns = new Map<string, ReadonlyArray<string | ((date: Date) => string)>>();
+
+/**
+ * Splits a {@link formatDate} pattern into literal strings and token formatters (cached by `formatDate`, so repeated
+ * formatting with the same pattern does not run the tokenizing regex again).
+ * @param {string} pattern - The format pattern
+ * @returns {ReadonlyArray<string | ((date: Date) => string)>} The literal texts and formatters, in pattern order
+ * @example
+ * compilePattern('[at] HH')[1]; // => 'at'
+ */
+function compilePattern(pattern: string): ReadonlyArray<string | ((date: Date) => string)> {
+	const parts: Array<string | ((date: Date) => string)> = [];
+	let end = 0;
+
+	for (const match of pattern.matchAll(FORMAT_TOKEN_REGEX)) {
+		parts.push(pattern.slice(end, match.index), match[1] ?? FORMATTERS[match[0]]);
+		end = match.index + match[0].length;
+	}
+	parts.push(pattern.slice(end));
+
+	return parts;
 }
 
 /**
@@ -1131,6 +1181,24 @@ export function parseISODate(value: string): Date | undefined {
 }
 
 /**
+ * `Intl.RelativeTimeFormat` instances created by {@link relativeTimeFormat}, by locale (cached by `getRelativeTime`:
+ * constructing one is much more expensive than formatting with it).
+ */
+const relativeTimeFormats = new Map<string, Intl.RelativeTimeFormat>();
+
+/**
+ * Creates an `Intl.RelativeTimeFormat` with `numeric: 'auto'` for `locale`.
+ * @param {string} locale - A BCP 47 locale
+ * @returns {Intl.RelativeTimeFormat} The formatter
+ * @throws {RangeError} when the locale is malformed
+ * @example
+ * relativeTimeFormat('en').format(-1, 'day'); // => 'yesterday'
+ */
+function relativeTimeFormat(locale: string): Intl.RelativeTimeFormat {
+	return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+}
+
+/**
  * Describes `date` relative to `baseDate` in words, e.g. `'in 3 days'`, `'2 hours ago'`, `'yesterday'`, `'now'`,
  * using `Intl.RelativeTimeFormat` with `numeric: 'auto'`.
  *
@@ -1152,7 +1220,7 @@ export function parseISODate(value: string): Date | undefined {
 export function getRelativeTime(date: DateInput, baseDate: DateInput = new Date(), locale = 'en'): string {
 	const target = toValidDate(date);
 	const base = toValidDate(baseDate);
-	const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+	const formatter = cached(relativeTimeFormats, locale, relativeTimeFormat);
 	const delta = target.getTime() - base.getTime();
 
 	if (Math.abs(delta) < MS_PER_MINUTE) return formatter.format(truncate(delta / MS_PER_SECOND), 'second');
@@ -1336,7 +1404,7 @@ export function addBusinessDays(date: DateInput, amount: number): Date {
 
 	if (amount === 0) return start;
 
-	const sign = amount < 0 ? -1 : 1;
+	const sign = Math.sign(amount);
 	let weekday = start.getDay();
 	let remaining = Math.abs(amount);
 	let offset = 0;
@@ -1351,7 +1419,7 @@ export function addBusinessDays(date: DateInput, amount: number): Date {
 	}
 
 	// Five business days from a weekday are always exactly one calendar week.
-	offset += Math.trunc(remaining / 5) * DAYS_PER_WEEK * sign;
+	offset += sign * Math.trunc(remaining / 5) * DAYS_PER_WEEK;
 	remaining %= 5;
 
 	while (remaining > 0) {

@@ -134,14 +134,14 @@ function readChannel(name: string, channel: string, value: unknown): number {
 }
 
 /**
- * Clamps a channel to `[0, 255]` and rounds it to the nearest integer (`+ 0` normalizes `-0`).
+ * Clamps a channel to `[0, 255]` and rounds it to the nearest integer (never `-0`: clamping turns `-0` into `0`).
  * @param {number} value - The channel value
  * @returns {number} An integer in `[0, 255]`
  * @example
  * toByte(255.6); // => 255
  */
 function toByte(value: number): number {
-	return Math.round(clamp(value, 0, 255)) + 0;
+	return Math.round(clamp(value, 0, 255));
 }
 
 /**
@@ -155,16 +155,24 @@ function hexByte(value: number): string {
 	return value.toString(16).padStart(2, '0');
 }
 
+/** Cache of {@link linearChannel} results, indexed by channel value (filled on first use, at most 256 entries). */
+const LINEAR_CHANNELS: number[] = [];
+
 /**
  * Converts one 8-bit sRGB channel to linear light, as defined by WCAG 2.x.
- * @param {number} value - Channel in `[0, 255]`
+ * @param {number} value - Integer channel in `[0, 255]`
  * @returns {number} Linear channel in `[0, 1]`
  * @example
  * linearChannel(255); // => 1
  */
 function linearChannel(value: number): number {
-	const unit = value / 255;
-	return unit <= 0.04045 ? unit / 12.92 : Math.pow((unit + 0.055) / 1.055, 2.4);
+	let linear = LINEAR_CHANNELS[value];
+	if (linear === undefined) {
+		const unit = value / 255;
+		linear = unit <= 0.04045 ? unit / 12.92 : Math.pow((unit + 0.055) / 1.055, 2.4);
+		LINEAR_CHANNELS[value] = linear;
+	}
+	return linear;
 }
 
 /**
@@ -182,22 +190,42 @@ export function parseHex(hex: string): Rgba {
 	if (typeof hex !== 'string') throw new TypeError(`parseHex: \`hex\` must be a string, got ${describe(hex)}`);
 	const match = HEX_PATTERN.exec(hex);
 	if (match === null) throw new TypeError(`parseHex: \`hex\` must be a valid hex colour, got ${JSON.stringify(hex)}`);
-	let digits = match[1];
-	if (digits.length <= 4) {
-		digits = digits
-			.split('')
-			.map(function (digit) {
-				return digit + digit;
-			})
-			.join('');
-	}
-	const alpha = digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : 1;
+	return hexToRgba(match[1]);
+}
+
+/**
+ * Converts the 3, 4, 6 or 8 hex digits of a colour (already validated) to an {@link Rgba} colour.
+ * The digits are parsed as a single integer (at most 32 bits) whose channels are then extracted with bit shifts.
+ * @param {string} digits - The hex digits, without `#`
+ * @returns {Rgba} The colour, with alpha `1` when there are no alpha digits
+ * @example
+ * hexToRgba('f80'); // => { r: 255, g: 136, b: 0, a: 1 }
+ */
+function hexToRgba(digits: string): Rgba {
+	const value = parseInt(digits, 16);
+	// Bits per channel: one hex digit (expanded by `* 17`, so `f` → `ff`) in the short forms, two digits otherwise.
+	const width = digits.length <= 4 ? 4 : 8;
+	const end = digits.length * 4;
 	return {
-		r: parseInt(digits.slice(0, 2), 16),
-		g: parseInt(digits.slice(2, 4), 16),
-		b: parseInt(digits.slice(4, 6), 16),
-		a: alpha
+		r: hexChannel(value, end - width, width),
+		g: hexChannel(value, end - 2 * width, width),
+		b: hexChannel(value, end - 3 * width, width),
+		a: end > 3 * width ? hexChannel(value, 0, width) / 255 : 1
 	};
+}
+
+/**
+ * Extracts one channel of a parsed hex colour and scales it to `[0, 255]`.
+ * @param {number} value - The parsed hex digits
+ * @param {number} shift - Bit offset of the channel
+ * @param {number} width - Bits per channel: `4` (one digit) or `8` (two digits)
+ * @returns {number} The channel, an integer in `[0, 255]`
+ * @example
+ * hexChannel(0xf80, 8, 4); // => 255
+ */
+function hexChannel(value: number, shift: number, width: number): number {
+	const mask = (1 << width) - 1;
+	return ((value >>> shift) & mask) * (255 / mask);
 }
 
 /**
@@ -244,7 +272,7 @@ function parseCssFunction(name: string, args: string): Rgba | undefined {
 	const parts = args.split(legacy ? /\s*,\s*/ : /\s*\/\s*/);
 	const tokens = legacy ? parts : parts[0].split(/\s+/);
 	if (tokens.length !== 3 && !(legacy && tokens.length === 4)) return undefined;
-	if (!legacy && parts.length > 1) tokens.push(...parts.slice(1));
+	if (!legacy) tokens.push(...parts.slice(1));
 	if (tokens.length > 4) return undefined;
 
 	const components: CssComponent[] = [];
@@ -256,7 +284,7 @@ function parseCssFunction(name: string, args: string): Rgba | undefined {
 
 	const [first, second, third, alpha = { value: 1, unit: '' }] = components;
 	if (!hasUnits([alpha], ['', '%'])) return undefined;
-	const a = clamp(alpha.unit === '%' ? alpha.value / 100 : alpha.value, 0, 1) + 0;
+	const a = clamp(alpha.unit === '%' ? alpha.value / 100 : alpha.value, 0, 1);
 	const channels = [first, second, third];
 
 	if (name.startsWith('rgb')) {
@@ -288,7 +316,8 @@ function parseCssFunction(name: string, args: string): Rgba | undefined {
  */
 function parseCssColor(caller: string, name: string, input: string): Rgba {
 	const text = input.trim();
-	if (HEX_PATTERN.test(text)) return parseHex(text);
+	const hex = HEX_PATTERN.exec(text);
+	if (hex !== null) return hexToRgba(hex[1]);
 	if (text.toLowerCase() === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
 	const match = CSS_FUNCTION_PATTERN.exec(text);
 	const color = match === null ? undefined : parseCssFunction(match[1].toLowerCase(), match[2]);
@@ -354,7 +383,7 @@ export function toRgba(input: ColorInput): Rgba {
 		r: toByte(readChannel('toRgba', 'input.r', input.r)),
 		g: toByte(readChannel('toRgba', 'input.g', input.g)),
 		b: toByte(readChannel('toRgba', 'input.b', input.b)),
-		a: clamp(alpha, 0, 1) + 0
+		a: clamp(alpha, 0, 1)
 	};
 }
 
@@ -375,7 +404,7 @@ export function toRgba(input: ColorInput): Rgba {
 export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
 	const { r, g, b, a } = toRgba(color);
 	const includeAlpha = options.alpha ?? a < 1;
-	return `#${hexByte(r)}${hexByte(g)}${hexByte(b)}${includeAlpha ? hexByte(Math.round(a * 255)) : ''}`;
+	return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}${includeAlpha ? hexByte(Math.round(a * 255)) : ''}`;
 }
 
 /**
@@ -534,7 +563,7 @@ export function mix(colorA: ColorInput, colorB: ColorInput, weight = 0.5): Rgba 
  */
 function shiftLightness(color: ColorInput, delta: number): Rgba {
 	const rgba = toRgba(color);
-	if (delta === 0) return rgba;
+	// No shortcut is needed for `delta = 0`: the HSL round trip is exact for every 8-bit colour.
 	const hsl = rgbToHsl(rgba);
 	const rgb = hslToRgb({ h: hsl.h, s: hsl.s, l: clamp(hsl.l + delta, 0, 100) });
 	return { r: rgb.r, g: rgb.g, b: rgb.b, a: rgba.a };

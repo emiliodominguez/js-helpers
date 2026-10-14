@@ -350,6 +350,14 @@ describe('Color helpers', function () {
 		it('should accept every CSS number form', function () {
 			expect(helpers.parseColor('rgb(+1 .5e1 3E1)')).toEqual({ r: 1, g: 5, b: 30, a: 1 });
 			expect(helpers.parseColor('rgb(1.4 1.5 254.5 / .5)')).toEqual({ r: 1, g: 2, b: 255, a: 0.5 });
+			expect(helpers.parseColor('rgb(0 0 0 / .25)')).toEqual({ r: 0, g: 0, b: 0, a: 0.25 });
+			expect(helpers.parseColor('rgb(1  2\t\t3)')).toEqual({ r: 1, g: 2, b: 3, a: 1 });
+		});
+
+		it('should only accept a colour function at the start of the string', function () {
+			expect(function () {
+				helpers.parseColor('xrgb(1 2 3)');
+			}).toThrow(TypeError);
 		});
 
 		it('should clamp out-of-range values like CSS', function () {
@@ -358,6 +366,9 @@ describe('Color helpers', function () {
 			expect(helpers.parseColor('rgb(1e300 0 0 / 1e300%)')).toEqual({ r: 255, g: 0, b: 0, a: 1 });
 			expect(helpers.parseColor('hsl(0 200% -10%)')).toEqual({ r: 0, g: 0, b: 0, a: 1 });
 			expect(Object.is(helpers.parseColor('rgb(0 0 0 / -0)').a, 0)).toBe(true);
+			expect(helpers.parseColor('rgb(-0 -0.2 -0% / -0%)')).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+			const negativeZeros = helpers.toRgba({ r: -0, g: -0.2, b: -0, a: -0 });
+			for (const channel of [negativeZeros.r, negativeZeros.g, negativeZeros.b, negativeZeros.a]) expect(Object.is(channel, 0)).toBe(true);
 		});
 
 		it('should parse hsl() and hsla() in both syntaxes', function () {
@@ -526,6 +537,111 @@ describe('Color helpers', function () {
 			expect(function () {
 				helpers.mix('#000', '#fff', '0.5' as any);
 			}).toThrow(new TypeError('mix: `weight` must be a number in [0, 1], got string'));
+		});
+
+		it('names the right function and parameter for every validated argument', function () {
+			function cssError(caller: string, input: string): TypeError {
+				return new TypeError(`${caller}: \`input\` must be a CSS colour (hex, rgb(), hsl() or 'transparent'), got ${JSON.stringify(input)}`);
+			}
+			const cases: Array<[() => unknown, Error]> = [
+				[
+					function () {
+						return helpers.parseHex(5 as any);
+					},
+					new TypeError('parseHex: `hex` must be a string, got number')
+				],
+				[
+					function () {
+						return helpers.parseColor('rgb(1 2 x)');
+					},
+					cssError('parseColor', 'rgb(1 2 x)')
+				],
+				[
+					function () {
+						return helpers.parseColor('rgb(1, 2)');
+					},
+					cssError('parseColor', 'rgb(1, 2)')
+				],
+				[
+					function () {
+						return helpers.parseColor('rgb(1 2)');
+					},
+					cssError('parseColor', 'rgb(1 2)')
+				],
+				[
+					function () {
+						return helpers.toRgba(null as any);
+					},
+					new TypeError('toRgba: `input` must be a colour string or an { r, g, b } object, got null')
+				],
+				[
+					function () {
+						return helpers.toRgba({ r: 0, g: 0, b: 'x' as any });
+					},
+					new TypeError('toRgba: `input.b` must be a number other than NaN, got string')
+				],
+				[
+					function () {
+						return helpers.toRgba({ r: 0, g: 0, b: 0, a: NaN });
+					},
+					new RangeError('toRgba: `input.a` must be a number other than NaN, got NaN')
+				],
+				[
+					function () {
+						return helpers.hslToRgb(null as any);
+					},
+					new TypeError('hslToRgb: `hsl` must be an { h, s, l } object, got null')
+				],
+				[
+					function () {
+						return helpers.hslToRgb(5 as any);
+					},
+					new TypeError('hslToRgb: `hsl` must be an { h, s, l } object, got number')
+				],
+				[
+					function () {
+						return helpers.hslToRgb({ h: 'x' as any, s: 0, l: 0 });
+					},
+					new TypeError('hslToRgb: `hsl.h` must be a number other than NaN, got string')
+				],
+				[
+					function () {
+						return helpers.hslToRgb({ h: Infinity, s: 0, l: 0 });
+					},
+					new RangeError('hslToRgb: `hsl.h` must be finite, got Infinity')
+				],
+				[
+					function () {
+						return helpers.hslToRgb({ h: 0, s: NaN, l: 0 });
+					},
+					new RangeError('hslToRgb: `hsl.s` must be a number other than NaN, got NaN')
+				],
+				[
+					function () {
+						return helpers.hslToRgb({ h: 0, s: 0, l: NaN });
+					},
+					new RangeError('hslToRgb: `hsl.l` must be a number other than NaN, got NaN')
+				],
+				[
+					function () {
+						return helpers.darken('#000', -1);
+					},
+					new RangeError('darken: `amount` must be a number in [0, 100], got -1')
+				],
+				[
+					function () {
+						return helpers.withAlpha('#000', 2);
+					},
+					new RangeError('withAlpha: `alpha` must be a number in [0, 1], got 2')
+				],
+				[
+					function () {
+						return helpers.meetsContrast('#000', '#fff', { level: 'A' as any });
+					},
+					new RangeError("meetsContrast: `level` must be 'AA' or 'AAA', got A")
+				]
+			];
+			for (const [fn, error] of cases) expect(fn).toThrow(error);
 		});
 	});
 });

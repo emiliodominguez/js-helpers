@@ -10,7 +10,52 @@ function take(rng: () => number, count: number): number[] {
 	});
 }
 
+/**
+ * Reference unbiased sampler of an integer in [0, range) from raw 32-bit outputs (rejection sampling, as documented).
+ */
+function referenceBelow(next: () => number, range: number): number {
+	if (range <= 2 ** 32) {
+		const limit = 2 ** 32 - (2 ** 32 % range);
+		for (;;) {
+			const value = next();
+			if (value < limit) return value % range;
+		}
+	}
+	const limit = 2 ** 53 - (2 ** 53 % range);
+	for (;;) {
+		const value = Math.floor(next() / 2 ** 11) * 2 ** 32 + next();
+		if (value < limit) return value % range;
+	}
+}
+
 describe('Random helpers (property-based)', function () {
+	describe('SeededRandom.int', function () {
+		it('should equal a reference rejection sampler over the raw 32-bit stream, for every range size', function () {
+			// Ranges just below / at / above powers of two maximize the rejection rate; 2 ** 32 and beyond use two outputs.
+			const range = fc.oneof(
+				fc.integer({ min: 1, max: 2 ** 32 }),
+				fc.integer({ min: 0, max: 32 }).map(function (k) {
+					return Math.min(2 ** 32, Math.floor(1.5 * 2 ** k));
+				}),
+				fc.constantFrom(2 ** 32, 2 ** 32 + 1, 3 * 2 ** 50, 2 ** 53),
+				fc.integer({ min: 2 ** 32 + 1, max: 2 ** 53 })
+			);
+			fc.assert(
+				fc.property(seed, range, fc.integer({ min: -(2 ** 40), max: 0 }), function (s, size, low) {
+					const rng = helpers.createRandom(s);
+					const reference = helpers.createRandom(s);
+					function raw(): number {
+						return reference() * 2 ** 32;
+					}
+					for (let i = 0; i < 5; i++) {
+						expect(rng.int(low, low + size - 1)).toBe(low + referenceBelow(raw, size));
+					}
+					expect(rng.state()).toEqual(reference.state());
+				})
+			);
+		});
+	});
+
 	describe('createRandom', function () {
 		it('should always produce floats in [0, 1)', function () {
 			fc.assert(

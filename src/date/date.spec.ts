@@ -436,6 +436,7 @@ describe('Date helpers', function () {
 			expect(helpers.diffInMonths(new Date(2024, 0, 20), new Date(2024, 0, 15))).toBe(0);
 			expect(helpers.diffInMonths(new Date(2025, 0, 15), new Date(2024, 0, 15))).toBe(12);
 			expect(helpers.diffInMonths(new Date(2024, 0, 1), new Date(2023, 11, 31))).toBe(0);
+			expect(helpers.diffInMonths(new Date(2024, 0, 15, 8), new Date(2024, 0, 15, 8))).toBe(0);
 		});
 
 		it('uses end-of-month clamping (date-fns semantics)', function () {
@@ -685,6 +686,8 @@ describe('Date helpers', function () {
 			expect(helpers.formatDate(date, 'h a')).toBe('2 pm');
 			expect(helpers.formatDate(new Date(2024, 11, 25, 0, 5), 'h:mm A, hh a, DD/MM')).toBe('12:05 AM, 12 am, 25/12');
 			expect(helpers.formatDate(new Date(2024, 11, 25, 12, 0), 'h A HH')).toBe('12 PM 12');
+			expect(helpers.formatDate(new Date(2024, 11, 25, 12, 0), 'a A')).toBe('pm PM');
+			expect(helpers.formatDate(new Date(2024, 11, 25, 11, 59), 'a A')).toBe('am AM');
 			expect(helpers.formatDate(new Date(2024, 11, 25, 23, 59, 59, 999), 'H h a SSS')).toBe('23 11 pm 999');
 		});
 
@@ -706,6 +709,16 @@ describe('Date helpers', function () {
 
 		it('replaces bare letters that are tokens', function () {
 			expect(helpers.formatDate(date, 'Date: D')).toBe('5pmte: 5');
+		});
+
+		it('formats correctly when the same pattern is reused and after many distinct patterns', function () {
+			const pattern = 'YYYY-MM-DD [at] HH:mm';
+			expect(helpers.formatDate(date, pattern)).toBe('2024-01-05 at 14:07');
+			expect(helpers.formatDate(new Date(1999, 11, 31, 23, 59), pattern)).toBe('1999-12-31 at 23:59');
+			for (let i = 0; i < 150; i++) {
+				expect(helpers.formatDate(date, `[#${i}] D/M`)).toBe(`#${i} 5/1`);
+			}
+			expect(helpers.formatDate(date, pattern)).toBe('2024-01-05 at 14:07');
 		});
 
 		it('pads small and negative years', function () {
@@ -740,6 +753,14 @@ describe('Date helpers', function () {
 			);
 			expect(helpers.parseISODate(20230101 as any)).toBeUndefined();
 			expect(helpers.parseISODate(undefined as any)).toBeUndefined();
+			// Non-strings are rejected, even when their string form is a valid date.
+			expect(
+				helpers.parseISODate({
+					toString: function () {
+						return '2024-01-01';
+					}
+				} as any)
+			).toBeUndefined();
 		});
 
 		it('round-trips', function () {
@@ -767,8 +788,28 @@ describe('Date helpers', function () {
 			expect(helpers.getRelativeTime(new Date(2025, 0, 10, 12), base)).toBe('next year');
 		});
 
+		it('switches unit exactly at one minute, one hour and seven days', function () {
+			expect(helpers.getRelativeTime(helpers.addSeconds(base, 59), base)).toBe('in 59 seconds');
+			expect(helpers.getRelativeTime(helpers.addSeconds(base, 60), base)).toBe('in 1 minute');
+			expect(helpers.getRelativeTime(helpers.addMinutes(base, 59), base)).toBe('in 59 minutes');
+			expect(helpers.getRelativeTime(helpers.addMinutes(base, -60), base)).toBe('1 hour ago');
+			expect(helpers.getRelativeTime(new Date(2024, 0, 16, 12), base)).toBe('in 6 days');
+			expect(helpers.getRelativeTime(new Date(2024, 0, 17, 12), base)).toBe('next week');
+		});
+
 		it('accepts a locale', function () {
 			expect(helpers.getRelativeTime(new Date(2024, 0, 13, 12), base, 'es')).toBe('dentro de 3 días');
+		});
+
+		it('keeps each locale distinct when many locales are used', function () {
+			const tomorrow = new Date(2024, 0, 11, 12);
+			for (let i = 0; i < 100; i++) {
+				expect(helpers.getRelativeTime(tomorrow, base, `en-x-p${i}`)).toBe('tomorrow');
+				expect(helpers.getRelativeTime(tomorrow, base, i % 2 === 0 ? 'es' : 'fr')).toBe(i % 2 === 0 ? 'mañana' : 'demain');
+			}
+			expect(function () {
+				helpers.getRelativeTime(tomorrow, base, 'not a locale!');
+			}).toThrow(RangeError);
 		});
 
 		it('defaults the base date to now', function () {
@@ -1175,6 +1216,13 @@ describe('Date helpers', function () {
 			expect(ymd(helpers.addBusinessDays(monday, 260))).toEqual([2025, 4, 12]);
 		});
 
+		it('counts the step off a Saturday as the first business day, also for whole weeks', function () {
+			const saturday = new Date(2024, 4, 18, 9);
+			expect(parts(helpers.addBusinessDays(saturday, 5))).toEqual([2024, 4, 24, 9, 0, 0, 0]);
+			expect(parts(helpers.addBusinessDays(saturday, -5))).toEqual([2024, 4, 13, 9, 0, 0, 0]);
+			expect(ymd(helpers.addBusinessDays(saturday, 10))).toEqual([2024, 4, 31]);
+		});
+
 		it('from a weekend, the nearest weekday in the direction of travel is the first step', function () {
 			const saturday = new Date(2024, 4, 18, 8);
 			const sunday = new Date(2024, 4, 19, 8);
@@ -1357,6 +1405,22 @@ describe('Date helpers', function () {
 			expect(Object.is(helpers.parseDuration('-0s'), 0)).toBe(true);
 		});
 
+		it('accepts multi-digit decimals, with or without a leading digit', function () {
+			expect(helpers.parseDuration('1.25h')).toBe(4_500_000);
+			expect(helpers.parseDuration('.25s')).toBe(250);
+			expect(helpers.parseDuration('0.125m 1.5s')).toBe(9_000);
+		});
+
+		it('does not coerce non-strings, even those whose string form is valid', function () {
+			expect(function () {
+				helpers.parseDuration({
+					toString: function () {
+						return '1h';
+					}
+				} as any);
+			}).toThrow(TypeError);
+		});
+
 		it('throws TypeError on garbage', function () {
 			['', '   ', '10', 'h', '1x', '1 h m', '--1h', '1h -2m', '1H', '1.h', '1e3s', '1,5s', '+1h', '1hour', 'NaNs', '1 d2'].forEach(function (value) {
 				expect(function () {
@@ -1398,6 +1462,125 @@ describe('Date helpers', function () {
 			expect(function () {
 				helpers.parseDuration('10');
 			}).toThrow(new TypeError('parseDuration: `value` must be a valid duration, got "10"'));
+		});
+
+		it('names the right function and parameter for every validated argument', function () {
+			const date = new Date(2024, 0, 1);
+			const cases: Array<[() => unknown, Error]> = [
+				[
+					function () {
+						return helpers.addWeeks(date, 0.5);
+					},
+					new RangeError('addWeeks: `amount` must be an integer, got 0.5')
+				],
+				[
+					function () {
+						return helpers.addMonths(date, 0.5);
+					},
+					new RangeError('addMonths: `amount` must be an integer, got 0.5')
+				],
+				[
+					function () {
+						return helpers.addYears(date, 0.5);
+					},
+					new RangeError('addYears: `amount` must be an integer, got 0.5')
+				],
+				[
+					function () {
+						return helpers.addHours(date, NaN);
+					},
+					new RangeError('addHours: `amount` must be a finite number, got NaN')
+				],
+				[
+					function () {
+						return helpers.addMinutes(date, NaN);
+					},
+					new RangeError('addMinutes: `amount` must be a finite number, got NaN')
+				],
+				[
+					function () {
+						return helpers.addSeconds(date, NaN);
+					},
+					new RangeError('addSeconds: `amount` must be a finite number, got NaN')
+				],
+				[
+					function () {
+						return helpers.addBusinessDays(date, 0.5);
+					},
+					new RangeError('addBusinessDays: `amount` must be an integer, got 0.5')
+				],
+				[
+					function () {
+						return helpers.startOfWeek(date, -1 as any);
+					},
+					new RangeError('startOfWeek: `weekStartsOn` must be an integer between 0 and 6, got -1')
+				],
+				[
+					function () {
+						return helpers.daysInMonth(2024.5, 0);
+					},
+					new RangeError('daysInMonth: `year` must be an integer, got 2024.5')
+				],
+				[
+					function () {
+						return helpers.eachDayOfInterval(date, date, { step: 0 });
+					},
+					new RangeError('eachDayOfInterval: `step` must be a safe integer >= 1, got 0')
+				],
+				[
+					function () {
+						return helpers.formatDuration(Infinity);
+					},
+					new RangeError('formatDuration: `ms` must be a finite number, got Infinity')
+				],
+				[
+					function () {
+						return helpers.formatDuration(1, { units: 'h' as any });
+					},
+					new TypeError('formatDuration: `units` must be an array of duration units, got string')
+				],
+				[
+					function () {
+						return helpers.formatDuration(1, { units: [] });
+					},
+					new RangeError('formatDuration: `units` must not be empty')
+				],
+				[
+					function () {
+						return helpers.isBetween(date, date, date, '[[' as any);
+					},
+					new RangeError('isBetween: `inclusivity` must be one of [], (), [), (], got [[')
+				],
+				[
+					function () {
+						return helpers.parseDuration(5 as any);
+					},
+					new TypeError('parseDuration: `value` must be a string, got number')
+				],
+				[
+					function () {
+						return helpers.parseDuration(`1${'0'.repeat(400)}d`);
+					},
+					new RangeError('parseDuration: the duration is too large to be represented')
+				],
+				[
+					function () {
+						return helpers.addDays('2024-01-01' as any, 1);
+					},
+					new TypeError('Expected a Date or a timestamp number')
+				]
+			];
+			for (const [fn, error] of cases) expect(fn).toThrow(error);
+		});
+
+		it('quotes at most 50 characters of an invalid duration string', function () {
+			const fifty = `${'1'.repeat(49)}x`;
+			expect(function () {
+				helpers.parseDuration(fifty);
+			}).toThrow(new TypeError(`parseDuration: \`value\` must be a valid duration, got "${fifty}"`));
+			expect(function () {
+				helpers.parseDuration(`${fifty}y`);
+			}).toThrow(new TypeError(`parseDuration: \`value\` must be a valid duration, got "${fifty}…"`));
 		});
 	});
 });

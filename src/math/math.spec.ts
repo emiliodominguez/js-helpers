@@ -171,6 +171,12 @@ describe('Math helpers', function () {
 			expect(helpers.max([0, -0])).toBe(0);
 			expect(helpers.max([-0])).toBe(-0);
 			expect(helpers.max([-Infinity, Infinity])).toBe(Infinity);
+			// Only a zero may replace a -0 maximum, and a zero never replaces a positive maximum.
+			expect(helpers.max([-0, -5])).toBe(-0);
+			expect(helpers.max([5, 0])).toBe(5);
+			expect(helpers.min([0, 5])).toBe(0);
+			expect(helpers.min([0, -0, 5])).toBe(-0);
+			expect(helpers.min([-5, -0])).toBe(-5);
 		});
 
 		it('should work on very large arrays', function () {
@@ -237,6 +243,17 @@ describe('Math helpers', function () {
 			expect(helpers.log(1e-3, 10)).toBe(-3);
 			expect(helpers.log(2 ** 50, 2)).toBe(50);
 			expect(helpers.log(Math.E, Math.E)).toBe(1);
+		});
+
+		it('should only snap to an integer when base ** k is exactly the number', function () {
+			// Within 1e-9 of 4, but 3 ** 4 !== 81.0000001: the plain ratio is returned.
+			expect(helpers.log(81.0000001, 3)).toBe(Math.log(81.0000001) / Math.log(3));
+			// The snapping tolerance scales with k: a base close to 1 needs it for exact powers.
+			const base = 1 + 1e-8;
+			expect(helpers.log(Math.pow(base, 1000), base)).toBe(1000);
+			expect(helpers.log(Infinity, 3)).toBe(Infinity);
+			expect(helpers.log(0, 3)).toBe(-Infinity);
+			expect(helpers.log(-1, 3)).toBeNaN();
 		});
 
 		it('should handle edge values', function () {
@@ -311,6 +328,12 @@ describe('Math helpers', function () {
 			expect(helpers.randomBetween(-10, 10, constant(0.25))).toBe(-5);
 		});
 
+		it('should step below a maximum hit by rounding, including a zero maximum and a one-ulp range', function () {
+			expect(helpers.randomBetween(-Number.MIN_VALUE, 0, constant(0.75))).toBe(-Number.MIN_VALUE);
+			expect(helpers.randomBetween(1, 1 + Number.EPSILON, constant(ALMOST_ONE))).toBe(1);
+			expect(helpers.randomBetween(-1 - Number.EPSILON, -1, constant(ALMOST_ONE))).toBe(-1 - Number.EPSILON);
+		});
+
 		it('should never return max, even when rounding would', function () {
 			expect(helpers.randomBetween(1, 2, constant(ALMOST_ONE))).toBeLessThan(2);
 			expect(helpers.randomBetween(-2, -1, constant(ALMOST_ONE))).toBeLessThan(-1);
@@ -359,6 +382,11 @@ describe('Math helpers', function () {
 				expect(value).toBeGreaterThanOrEqual(1);
 				expect(value).toBeLessThanOrEqual(10);
 			}
+		});
+
+		it('should never return -0', function () {
+			expect(helpers.randomIntBetween(-1, -0, constant(ALMOST_ONE))).toBe(0);
+			expect(helpers.randomIntBetween(-0.5, 0, constant(0))).toBe(0);
 		});
 
 		it('should include both bounds', function () {
@@ -507,6 +535,19 @@ describe('Math helpers', function () {
 			expect(helpers.median([Number.MAX_VALUE, Number.MAX_VALUE])).toBe(Number.MAX_VALUE);
 		});
 
+		it('should not depend on the input order for the sign of a zero (regression: -0 vs 0 followed the input order)', function () {
+			expect(helpers.median([1, Infinity, 2])).toBe(2);
+			// Type 7: x[j] + g * (x[j + 1] - x[j]); the lerp form (1 - g) * x[j] + g * x[j + 1] gives 0.15000000000000002.
+			expect(helpers.quantile([0.1, 0.3], 0.25)).toBe(0.15);
+			expect(helpers.median([Infinity, -Infinity])).toBeNaN();
+			expect(helpers.quantile([0, Infinity], 1)).toBe(Infinity);
+			expect(helpers.median([0, -0, 5])).toBe(0);
+			expect(helpers.median([-0, 0, 5])).toBe(0);
+			expect(helpers.median([5, -0, -1])).toBe(-0);
+			expect(helpers.quantile([0, -0], 0.25)).toBe(-0);
+			expect(helpers.quantile([-0, 0], 0.25)).toBe(-0);
+		});
+
 		it('should sort numerically, not lexicographically', function () {
 			expect(helpers.median([10, 9, 100])).toBe(10);
 		});
@@ -554,6 +595,8 @@ describe('Math helpers', function () {
 		it('should compute the sample variance', function () {
 			expect(helpers.variance([1, 2, 3, 4], { sample: true })).toBeCloseTo(5 / 3, 12);
 			expect(helpers.variance([1, 2, 3, 4], { sample: false })).toBe(1.25);
+			expect(helpers.variance([], { sample: true })).toBeNaN();
+			expect(helpers.variance([3], { sample: true })).toBeNaN();
 		});
 
 		it('should be numerically stable for large offsets', function () {
@@ -802,6 +845,9 @@ describe('Math helpers', function () {
 		it('should compensate rounding errors', function () {
 			expect(helpers.cumulativeSum([1e100, 1, -1e100])).toEqual([1e100, 1e100, 1]);
 			expect(helpers.cumulativeSum(new Array(10).fill(0.1))[9]).toBe(1);
+			// The small term is lost when a much larger one is added after it: the compensation recovers it.
+			expect(helpers.cumulativeSum([1, 1e100, 1, -1e100])).toEqual([1, 1e100, 1e100, 2]);
+			expect(helpers.sum([1, 1e100, 1, -1e100])).toBe(2);
 		});
 
 		it('should accept any iterable and not mutate arrays', function () {
@@ -832,6 +878,15 @@ describe('Math helpers', function () {
 			expect(helpers.approximatelyEqual(1e-12, 0, { absolute: 1e-9 })).toBe(true);
 			expect(helpers.approximatelyEqual(5, 6, { relative: 0, absolute: 1 })).toBe(true);
 			expect(helpers.approximatelyEqual(5, 6, { relative: 0 })).toBe(false);
+		});
+
+		it('should scale the relative tolerance by the larger magnitude, inclusively, in both argument orders', function () {
+			expect(helpers.approximatelyEqual(1, 0.5, { relative: 0.5 })).toBe(true);
+			expect(helpers.approximatelyEqual(0.5, 1, { relative: 0.5 })).toBe(true);
+			expect(helpers.approximatelyEqual(1, 0.9, { relative: 0.1 })).toBe(true);
+			expect(helpers.approximatelyEqual(0.9, 1, { relative: 0.1 })).toBe(true);
+			expect(helpers.approximatelyEqual(1, 0.25, { relative: 0.5 })).toBe(false);
+			expect(helpers.approximatelyEqual(3, 4, { relative: 0, absolute: 1 })).toBe(true);
 		});
 
 		it('should treat NaN as never close and infinities as close only to themselves', function () {
@@ -925,6 +980,15 @@ describe('Math helpers', function () {
 	});
 
 	describe('formatBytes', function () {
+		it('should name every unit of both systems', function () {
+			const si = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+			const iec = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'];
+			for (let k = 0; k < si.length; k++) {
+				expect(helpers.formatBytes(1000 ** k)).toBe(`1 ${si[k]}`);
+				expect(helpers.formatBytes(1024 ** k, { base: 1024 })).toBe(`1 ${iec[k]}`);
+			}
+		});
+
 		it('should use SI units by default', function () {
 			expect(helpers.formatBytes(0)).toBe('0 B');
 			expect(helpers.formatBytes(512)).toBe('512 B');
@@ -1038,6 +1102,10 @@ describe('Math helpers', function () {
 			expect(helpers.nthRoot(3 ** 10, 10)).toBe(3);
 			expect(helpers.nthRoot(1e15, 5)).toBe(1000);
 			expect(helpers.nthRoot(7, 1)).toBe(7);
+			expect(helpers.nthRoot(-2.5, 1)).toBe(-2.5);
+			expect(helpers.nthRoot(0, 4)).toBe(0);
+			expect(helpers.nthRoot(-0, 4)).toBe(-0);
+			expect(helpers.nthRoot(-0, 5)).toBe(-0);
 		});
 
 		it('should return negative odd roots of negative numbers', function () {
@@ -1080,6 +1148,12 @@ describe('Math helpers', function () {
 			expect(helpers.roundToStep(7, 5)).toBe(5);
 			expect(helpers.roundToStep(8, 5)).toBe(10);
 			expect(helpers.roundToStep(123456.789, 0.01)).toBe(123456.79);
+		});
+
+		it('should break exact ties away from zero even when the step is not a binary fraction', function () {
+			// 7 / 0.56 is exactly 12.5, but 7 / 0.56 in binary floating point is 12.499999999999998.
+			expect(helpers.roundToStep(7, 0.56)).toBe(7.28);
+			expect(helpers.roundToStep(-7, 0.56)).toBe(-7.28);
 		});
 
 		it('should avoid binary floating-point artefacts', function () {
@@ -1135,6 +1209,138 @@ describe('Math helpers', function () {
 			expect(function () {
 				helpers.clamp(1, 2, 1);
 			}).toThrow(new RangeError('clamp: `minimum` must not be greater than `maximum`, got 2 and 1'));
+		});
+
+		it('names the right function and parameter for every validated argument', function () {
+			const cases: Array<[() => unknown, Error]> = [
+				[
+					function () {
+						return helpers.factorial(-1);
+					},
+					new RangeError('factorial: `number` must be an integer >= 0, got -1')
+				],
+				[
+					function () {
+						return helpers.lcm(1.5, 2);
+					},
+					new RangeError('lcm: `a` must be an integer, got 1.5')
+				],
+				[
+					function () {
+						return helpers.gcd('1' as any, 2);
+					},
+					new TypeError('gcd: `a` must be an integer, got string')
+				],
+				[
+					function () {
+						return helpers.randomBetween(NaN, 1);
+					},
+					new RangeError('randomBetween: `minimum` must be a finite number, got NaN')
+				],
+				[
+					function () {
+						return helpers.randomBetween(0, Infinity);
+					},
+					new RangeError('randomBetween: `maximum` must be a finite number, got Infinity')
+				],
+				[
+					function () {
+						return helpers.randomBetween(2, 1);
+					},
+					new RangeError('randomBetween: `minimum` must not be greater than `maximum`, got 2 and 1')
+				],
+				[
+					function () {
+						return helpers.randomIntBetween(NaN, 1);
+					},
+					new RangeError('randomIntBetween: `minimum` must be a finite number, got NaN')
+				],
+				[
+					function () {
+						return helpers.randomIntBetween(0, '1' as any);
+					},
+					new TypeError('randomIntBetween: `maximum` must be a finite number, got string')
+				],
+				[
+					function () {
+						return helpers.randomIntBetween(1.2, 1.8);
+					},
+					new RangeError('randomIntBetween: no integer exists in [1.2, 1.8]')
+				],
+				[
+					function () {
+						return helpers.quantile([1], 2);
+					},
+					new RangeError('quantile: `q` must be a number in [0, 1], got 2')
+				],
+				[
+					function () {
+						return helpers.percentile([1], 101);
+					},
+					new RangeError('percentile: `p` must be a number in [0, 100], got 101')
+				],
+				[
+					function () {
+						return helpers.percentile([1], -1);
+					},
+					new RangeError('percentile: `p` must be a number in [0, 100], got -1')
+				],
+				[
+					function () {
+						return helpers.approximatelyEqual(1, 1, { relative: -1 });
+					},
+					new RangeError('approximatelyEqual: `relative` must be a number >= 0, got -1')
+				],
+				[
+					function () {
+						return helpers.approximatelyEqual(1, 1, { absolute: NaN });
+					},
+					new RangeError('approximatelyEqual: `absolute` must be a number >= 0, got NaN')
+				],
+				[
+					function () {
+						return helpers.weightedAverage([1], [1, 2]);
+					},
+					new RangeError('weightedAverage: `values` and `weights` must have the same length, got 1 and 2')
+				],
+				[
+					function () {
+						return helpers.formatBytes(Infinity);
+					},
+					new RangeError('formatBytes: `bytes` must be a finite number, got Infinity')
+				],
+				[
+					function () {
+						return helpers.formatBytes(1, { decimals: -1 });
+					},
+					new RangeError('formatBytes: `decimals` must be an integer >= 0, got -1')
+				],
+				[
+					function () {
+						return helpers.formatBytes(1, { base: 1023 as any });
+					},
+					new RangeError('formatBytes: `base` must be 1000 or 1024, got 1023')
+				],
+				[
+					function () {
+						return helpers.ordinal(1.5);
+					},
+					new RangeError('ordinal: `n` must be an integer, got 1.5')
+				],
+				[
+					function () {
+						return helpers.nthRoot(8, 0);
+					},
+					new RangeError('nthRoot: `n` must be an integer >= 1, got 0')
+				],
+				[
+					function () {
+						return helpers.roundToStep(1, 0);
+					},
+					new RangeError('roundToStep: `step` must be a finite number > 0, got 0')
+				]
+			];
+			for (const [fn, error] of cases) expect(fn).toThrow(error);
 		});
 	});
 });

@@ -83,13 +83,13 @@ describe('random', function () {
 		it('should reject invalid seeds', function () {
 			expect(function () {
 				helpers.createRandom(NaN);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('createRandom: `seed` must be a finite number or a string, got NaN'));
 			expect(function () {
 				helpers.createRandom(Infinity);
 			}).toThrow(RangeError);
 			expect(function () {
 				helpers.createRandom(undefined as any);
-			}).toThrow(TypeError);
+			}).toThrow(new TypeError('createRandom: `seed` must be a finite number or a string, got undefined'));
 			expect(function () {
 				helpers.createRandom({} as any);
 			}).toThrow(TypeError);
@@ -138,6 +138,29 @@ describe('random', function () {
 				}
 			});
 
+			it('should reject an output exactly equal to the rejection limit (unbiasedness)', function () {
+				// sfc32 outputs a + b + d: these states make the next output(s) land exactly on the rejection limit.
+				const rng = helpers.createRandom('limit');
+				const reference = helpers.createRandom('limit');
+				function raw(): number {
+					return reference() * 2 ** 32;
+				}
+				// One 32-bit output: range 3 * 2 ** 30 rejects outputs >= 3 * 2 ** 30; the next output is 1.
+				rng.restore([3 * 2 ** 30, 0, 0, 0]);
+				expect(rng.int(0, 3 * 2 ** 30 - 1)).toBe(1);
+				// Two outputs (53 bits): range 3 * 2 ** 51 rejects values >= 3 * 2 ** 51 = (3 * 2 ** 30 >>> 11) * 2 ** 32 + 0.
+				const state = [3 * 2 ** 30 + 1, 0, 0, 2 ** 32 - 1] as const;
+				rng.restore(state);
+				reference.restore(state);
+				expect(raw()).toBe(3 * 2 ** 30);
+				expect(raw()).toBe(0);
+				// The following pairs are rejected while they are >= the limit (here the limit equals the range).
+				let expected: number;
+				do expected = Math.floor(raw() / 2 ** 11) * 2 ** 32 + raw();
+				while (expected >= 3 * 2 ** 51);
+				expect(rng.int(0, 3 * 2 ** 51 - 1)).toBe(expected);
+			});
+
 			it('should throw on invalid ranges', function () {
 				const rng = helpers.createRandom('int');
 				expect(function () {
@@ -158,6 +181,47 @@ describe('random', function () {
 				expect(function () {
 					rng.int(-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
 				}).toThrow(RangeError);
+				// A small span is not enough: both bounds must be safe integers.
+				expect(function () {
+					rng.int(2 ** 53, 2 ** 53 + 2);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(2 ** 53 - 2, 2 ** 53);
+				}).toThrow(RangeError);
+				expect(function () {
+					rng.int(-(2 ** 53), -(2 ** 53) + 2);
+				}).toThrow(RangeError);
+			});
+
+			it('should name the method and the parameter in error messages', function () {
+				const rng = helpers.createRandom('int');
+				const cases: Array<[() => unknown, Error]> = [
+					[
+						function () {
+							return rng.int(NaN, 1);
+						},
+						new RangeError('SeededRandom.int: `min` must be a finite number, got NaN')
+					],
+					[
+						function () {
+							return rng.int(0, '1' as any);
+						},
+						new TypeError('SeededRandom.int: `max` must be a finite number, got string')
+					],
+					[
+						function () {
+							return rng.int(1.2, 1.8);
+						},
+						new RangeError('SeededRandom.int: no integer exists in [1.2, 1.8]')
+					],
+					[
+						function () {
+							return rng.int(0, 2 ** 53);
+						},
+						new RangeError(`SeededRandom.int: [0, ${2 ** 53}] must lie within safe integers and span at most 2 ** 53 values`)
+					]
+				];
+				for (const [fn, error] of cases) expect(fn).toThrow(error);
 			});
 		});
 
@@ -252,8 +316,17 @@ describe('random', function () {
 				for (const snapshot of invalid) {
 					expect(function () {
 						rng.restore(snapshot as any);
-					}).toThrow(TypeError);
+					}).toThrow(new TypeError('SeededRandom.restore: `snapshot` must be an array of four unsigned 32-bit integers'));
 				}
+			});
+
+			it('should accept the extreme words 0 and 2 ** 32 - 1', function () {
+				const rng = helpers.createRandom('restore');
+				rng.restore([0, 0, 0, 0]);
+				expect(rng.state()).toEqual([0, 0, 0, 0]);
+				expect(rng()).toBe(0);
+				rng.restore([2 ** 32 - 1, 0, 2 ** 32 - 1, 0]);
+				expect(rng.state()).toEqual([2 ** 32 - 1, 0, 2 ** 32 - 1, 0]);
 			});
 		});
 	});
@@ -280,13 +353,25 @@ describe('random', function () {
 				return call[0].length;
 			});
 			expect(lengths).toEqual([65_536, 65_536, 5]);
+
+			// Exact multiples of the quota need no extra (empty) request, and zero bytes need none at all.
+			const exact = scriptedCrypto([]);
+			withCrypto(exact, function () {
+				helpers.randomBytes(65_536 * 2);
+				helpers.randomBytes(0);
+			});
+			expect(
+				exact.getRandomValues.mock.calls.map(function (call: any[]) {
+					return call[0].length;
+				})
+			).toEqual([65_536, 65_536]);
 		});
 
 		it('should reject invalid lengths', function () {
 			for (const length of [-1, 1.5, NaN, Infinity, 2 ** 53]) {
 				expect(function () {
 					helpers.randomBytes(length);
-				}).toThrow(RangeError);
+				}).toThrow(new RangeError(`randomBytes: \`length\` must be a safe integer >= 0, got ${length}`));
 			}
 		});
 	});
@@ -405,11 +490,22 @@ describe('random', function () {
 			expect(retry.getRandomValues).toHaveBeenCalledTimes(2);
 		});
 
+		it('should use the alphabet of each call when alternating alphabets, and keep validating them', function () {
+			for (let i = 0; i < 20; i++) {
+				expect(helpers.randomId(30, 'ab')).toMatch(/^[ab]{30}$/);
+				expect(helpers.randomId(30, 'xyz')).toMatch(/^[xyz]{30}$/);
+				expect(helpers.randomId(30)).toMatch(/^[A-Za-z0-9_-]{30}$/);
+				expect(function () {
+					helpers.randomId(5, 'aa');
+				}).toThrow(RangeError);
+			}
+		});
+
 		it('should reject invalid sizes and alphabets', function () {
 			for (const size of [-1, 1.5, NaN, Infinity]) {
 				expect(function () {
 					helpers.randomId(size);
-				}).toThrow(RangeError);
+				}).toThrow(new RangeError(`randomId: \`size\` must be a safe integer >= 0, got ${size}`));
 			}
 			const tooLong = Array.from({ length: 257 }, function (_, i) {
 				return String.fromCharCode(0x100 + i);
@@ -419,6 +515,12 @@ describe('random', function () {
 					helpers.randomId(5, alphabet);
 				}).toThrow(RangeError);
 			}
+			expect(function () {
+				helpers.randomId(5, tooLong);
+			}).toThrow(new RangeError('randomId: `alphabet` must contain between 2 and 256 characters, got 257'));
+			expect(function () {
+				helpers.randomId(5, 'abca');
+			}).toThrow(new RangeError('randomId: `alphabet` must not contain duplicate characters'));
 		});
 	});
 
@@ -432,13 +534,13 @@ describe('random', function () {
 			withCrypto(value, function () {
 				expect(function () {
 					helpers.randomUUID();
-				}).toThrow(/cryptographically secure/);
+				}).toThrow(/^randomUUID: no cryptographically secure/);
 				expect(function () {
 					helpers.randomBytes(8);
-				}).toThrow(/cryptographically secure/);
+				}).toThrow(/^randomBytes: no cryptographically secure/);
 				expect(function () {
 					helpers.randomId();
-				}).toThrow(/cryptographically secure/);
+				}).toThrow(/^randomId: no cryptographically secure/);
 				expect(function () {
 					helpers.randomId(0);
 				}).toThrow(Error);
@@ -512,7 +614,27 @@ describe('random', function () {
 			}
 			expect(function () {
 				helpers.weightedRandom(['a'], [1], constant(1));
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('weightedRandom: `random()` must return a number in [0, 1), got 1'));
+		});
+
+		it('should validate every weight, even when the total looks valid, and name the offending one', function () {
+			const cases: Array<[unknown, Error]> = [
+				[-1, new RangeError('weightedRandom: `weights[1]` must be a finite number >= 0, got -1')],
+				[Infinity, new RangeError('weightedRandom: `weights[1]` must be a finite number >= 0, got Infinity')],
+				[NaN, new RangeError('weightedRandom: `weights[1]` must be a finite number >= 0, got NaN')],
+				['x', new TypeError('weightedRandom: `weights[1]` must be a finite number >= 0, got string')]
+			];
+			for (const [weight, error] of cases) {
+				expect(function () {
+					helpers.weightedRandom(['a', 'b'], [2, weight as number], constant(0));
+				}).toThrow(error);
+			}
+			expect(function () {
+				helpers.weightedRandom(['a'], [1, 2]);
+			}).toThrow(new RangeError('weightedRandom: `items` and `weights` must have the same length, got 1 and 2'));
+			expect(function () {
+				helpers.weightedRandom(['a', 'b'], [0, 0]);
+			}).toThrow(new RangeError('weightedRandom: the total weight must be positive and finite, got 0'));
 		});
 	});
 
@@ -520,6 +642,16 @@ describe('random', function () {
 		it('should guard against log(0) when random() returns 0', function () {
 			expect(helpers.randomGaussian(5, 2, constant(0))).toBe(5);
 			expect(Number.isFinite(helpers.randomGaussian(0, 1, constant(1 - Number.EPSILON / 2)))).toBe(true);
+		});
+
+		it('should apply the Box–Muller transform to the two draws', function () {
+			const draws = [0.5, 0];
+			// u1 = 1 - 0.5, u2 = 0: mean + stdDev * sqrt(-2 ln 0.5) * cos(0).
+			expect(
+				helpers.randomGaussian(10, 2, function () {
+					return draws.shift() as number;
+				})
+			).toBeCloseTo(10 + 2 * Math.sqrt(2 * Math.LN2), 12);
 		});
 
 		it('should return the mean when stdDev is 0', function () {
@@ -558,7 +690,19 @@ describe('random', function () {
 			}
 			expect(function () {
 				helpers.randomGaussian(0, 1, constant(-0.1));
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('randomGaussian: `random()` must return a number in [0, 1), got -0.1'));
+			const secondDrawInvalid = [0.5, 1];
+			expect(function () {
+				helpers.randomGaussian(0, 1, function () {
+					return secondDrawInvalid.shift() as number;
+				});
+			}).toThrow(new RangeError('randomGaussian: `random()` must return a number in [0, 1), got 1'));
+			expect(function () {
+				helpers.randomGaussian(NaN);
+			}).toThrow(new RangeError('randomGaussian: `mean` must be a finite number, got NaN'));
+			expect(function () {
+				helpers.randomGaussian(0, -1);
+			}).toThrow(new RangeError('randomGaussian: `stdDev` must be a finite number >= 0, got -1'));
 		});
 	});
 
@@ -579,7 +723,10 @@ describe('random', function () {
 			}
 			expect(function () {
 				helpers.randomBoolean(0.5, constant(NaN));
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('randomBoolean: `random()` must return a number in [0, 1), got NaN'));
+			expect(function () {
+				helpers.randomBoolean(1.1);
+			}).toThrow(new RangeError('randomBoolean: `probability` must be a number in [0, 1], got 1.1'));
 		});
 	});
 });

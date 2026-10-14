@@ -55,6 +55,19 @@ describe('Color helpers (property-based)', function () {
 			);
 		});
 
+		it('should equal a per-channel parseInt reference for every digit count', function () {
+			fc.assert(
+				fc.property(fc.stringMatching(/^([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/), function (digits) {
+					const size = digits.length <= 4 ? 1 : 2;
+					function channel(index: number): number {
+						return parseInt(digits.slice(index * size, (index + 1) * size).repeat(3 - size), 16);
+					}
+					const alpha = digits.length === 4 || digits.length === 8 ? channel(3) / 255 : 1;
+					expect(helpers.parseHex(digits)).toEqual({ r: channel(0), g: channel(1), b: channel(2), a: alpha });
+				})
+			);
+		});
+
 		it('short forms should equal their doubled long forms', function () {
 			fc.assert(
 				fc.property(fc.stringMatching(/^[0-9a-f]{3,4}$/), function (digits) {

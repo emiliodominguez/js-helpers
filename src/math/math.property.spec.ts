@@ -63,6 +63,33 @@ describe('Math helpers (property-based)', function () {
 			);
 		});
 
+		it('should equal the decimal-string reference algorithm, ties and binary-inexact decimals included', function () {
+			// Reference: shift the decimal point in the string representation, round, shift back (no binary multiplication).
+			function shift(value: number, exponent: number): number {
+				const [mantissa, current = '0'] = String(value).split('e');
+				return Number(`${mantissa}e${Number(current) + exponent}`);
+			}
+			function reference(x: number, d: number): number {
+				const shifted = shift(Math.abs(x), d);
+				if (!Number.isFinite(shifted)) return x;
+				const rounded = shift(Math.round(shifted), -d);
+				return x < 0 || Object.is(x, -0) ? -rounded : rounded;
+			}
+			// Decimal literals such as 1.005 or 2.675 (k * 10^-e), half-way values, and arbitrary doubles of every magnitude.
+			const decimalLiteral = fc.tuple(fc.integer({ min: -1e9, max: 1e9 }), fc.integer({ min: 0, max: 12 })).map(function ([k, e]) {
+				return Number(`${k}e-${e}`);
+			});
+			const anyDouble = fc.double({ noNaN: true, noDefaultInfinity: true });
+			fc.assert(
+				fc.property(fc.oneof(decimalLiteral, anyDouble, finiteDouble), fc.integer({ min: -25, max: 25 }), function (x, d) {
+					expect(helpers.round(x, d)).toBe(reference(x, d));
+					const tie = x + 5 * 10 ** -(d + 1);
+					expect(helpers.round(tie, d)).toBe(reference(tie, d));
+				}),
+				{ numRuns: 2000 }
+			);
+		});
+
 		it('should be symmetric: round(-x, d) === -round(x, d)', function () {
 			fc.assert(
 				fc.property(finiteDouble, fc.integer({ min: -3, max: 6 }), function (x, d) {
@@ -243,6 +270,70 @@ describe('Math helpers (property-based)', function () {
 					expect(middle).toBeGreaterThanOrEqual(helpers.min(numbers));
 					expect(middle).toBeLessThanOrEqual(helpers.max(numbers));
 					expect(numbers).toEqual(copy);
+				})
+			);
+		});
+	});
+
+	describe('median / quantile with signed zeros', function () {
+		it('should not depend on the input order, even for the sign of a zero result', function () {
+			const signedArray = fc.array(fc.constantFrom(0, -0, 1, -1), { minLength: 1, maxLength: 9 });
+			fc.assert(
+				fc.property(
+					signedArray.chain(function (numbers) {
+						return fc.tuple(fc.constant(numbers), fc.shuffledSubarray(numbers, { minLength: numbers.length, maxLength: numbers.length }));
+					}),
+					function ([numbers, shuffled]) {
+						expect(Object.is(helpers.median(shuffled), helpers.median(numbers))).toBe(true);
+						expect(Object.is(helpers.quantile(shuffled, 0.25), helpers.quantile(numbers, 0.25))).toBe(true);
+					}
+				)
+			);
+		});
+	});
+
+	describe('quantile interpolation', function () {
+		it('should equal the type-7 formula x[j] + g * (x[j + 1] - x[j]) for finite inputs', function () {
+			fc.assert(
+				fc.property(finiteArray, unit, function (numbers, q) {
+					const sorted = numbers.slice().sort(function (a, b) {
+						return a - b;
+					});
+					const h = (sorted.length - 1) * q;
+					const j = Math.floor(h);
+					const low = sorted[j];
+					const high = sorted[Math.min(j + 1, sorted.length - 1)];
+					const expected = h === j || low === high ? low : Math.min(low + (h - j) * (high - low), high);
+					// `===`: the sign of a zero result is covered separately (the reference sort leaves -0 and 0 in input order).
+					expect(helpers.quantile(numbers, q) === expected).toBe(true);
+				})
+			);
+		});
+
+		it('should return the smallest value, with its sign, at q = 0', function () {
+			expect(helpers.quantile([-0, 1], 0)).toBe(-0);
+			expect(helpers.quantile([1, -0, 2], 0)).toBe(-0);
+		});
+	});
+
+	describe('log / nthRoot special cases', function () {
+		const positive = fc.double({ min: Number.MIN_VALUE, max: Number.MAX_VALUE, noNaN: true });
+
+		it('log should use Math.log10 / Math.log2 / Math.log for bases 10, 2 and e', function () {
+			fc.assert(
+				fc.property(positive, function (x) {
+					expect(helpers.log(x, 10)).toBe(Math.log10(x));
+					expect(helpers.log(x, 2)).toBe(Math.log2(x));
+					expect(helpers.log(x, Math.E)).toBe(Math.log(x));
+				})
+			);
+		});
+
+		it('nthRoot should use Math.sqrt / Math.cbrt for n = 2 / n = 3', function () {
+			fc.assert(
+				fc.property(fc.double({ noNaN: true }), function (x) {
+					expect(helpers.nthRoot(x, 2)).toBe(Math.sqrt(x));
+					expect(helpers.nthRoot(x, 3)).toBe(Math.cbrt(x));
 				})
 			);
 		});
