@@ -5,4 +5,4 @@ docs/reference
 *.log
 .DS_Store
 reports
-.stryker-tmp
+.stryker-tmp*
