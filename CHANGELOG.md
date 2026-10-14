@@ -121,15 +121,26 @@ Full review and rewrite: every module is strictly typed, documented with complet
         - `retry` now validates its `random` generator;
         - `formatOrdinal` and `pluralRule` errors named the wrong parameter.
 
+- **Competitive performance pass:**
+    - Every helper with an equivalent in es-toolkit, lodash, date-fns, mitt, fuse.js, nanoid or bezier-easing is benchmarked against it.
+    - Across 466 comparisons, the median ratio is 1.15× and 75% are at par or faster. Examples:
+        - `fuzzySearch` is ~30× faster than fuse.js; the date helpers are a median 2.45× faster than date-fns.
+        - Since the start of the performance work: `randomId` ~25×, `sumBy` 15–28×, `clone` 8–40×, the LRU cache 3–8×.
+    - Fixes from this pass:
+        - `cubicBezier` was off by up to 2.3e-4 next to vertical end tangents;
+        - the `end*` date functions threw on the last representable day.
+- **Published declarations are gated:** they must compile for a plain ES2022 consumer with `skipLibCheck` off, within a type-instantiation budget.
+
 ### Changed (breaking)
 
 See [Migrating from 1.x](./README.md#migrating-from-1x).
 
 - The package is renamed to `@emiliodominguez/js-helpers`, because `js-helpers` is taken on npm.
 - **Behaviour:**
-    - the `isDate`/`isRegExp`/`isMap`/`isSet`/`isWeakMap`/`isWeakSet` guards reject a genuine instance whose prototype was swapped to an unrelated object from the same realm (cross-realm instances still pass);
-        - non-number arguments to numeric parameters now throw `TypeError` instead of `RangeError`, and a few value errors moved from `TypeError` to `RangeError` (e.g. `sortBy` with an unknown `order`, `debounce` with both edges disabled);
-            - `modulo` is now a floored modulo;
-            - `countSubString` is case-sensitive;
-            - `hasProperty` only checks own properties;
-            - `round` rounds halves away from zero.
+    - `isError` decides same-realm objects with `instanceof`, so a plain object faking `Symbol.toStringTag` `'Error'` is no longer an error;
+        - the `isDate`/`isRegExp`/`isMap`/`isSet`/`isWeakMap`/`isWeakSet` guards reject a genuine instance whose prototype was swapped to an unrelated object from the same realm (cross-realm instances still pass);
+            - non-number arguments to numeric parameters now throw `TypeError` instead of `RangeError`, and a few value errors moved from `TypeError` to `RangeError` (e.g. `sortBy` with an unknown `order`, `debounce` with both edges disabled);
+                - `modulo` is now a floored modulo;
+                - `countSubString` is case-sensitive;
+                - `hasProperty` only checks own properties;
+                - `round` rounds halves away from zero.

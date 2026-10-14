@@ -276,7 +276,7 @@ class SearchBox {
 
 ## Size
 
-**About 37 kB gzipped for all modules combined.** Deep imports and tree-shaking reduce that to the helpers your application actually uses. The package has no runtime dependencies, and `yarn check:size` enforces its size budget.
+**About 39 kB gzipped for all modules combined.** Deep imports and tree-shaking reduce that to the helpers your application actually uses. The package has no runtime dependencies, and `yarn check:size` enforces its size budget.
 
 <details>
 <summary>See the size of each module</summary>
@@ -285,26 +285,54 @@ Sizes below are for the minified ESM build.
 
 | Module       | Minified | Gzipped |
 | ------------ | -------: | ------: |
-| `arrays`     |   8.9 kB |  3.4 kB |
-| `async`      |   6.4 kB |  2.5 kB |
-| `cache`      |   2.3 kB |  1.1 kB |
+| `arrays`     |   9.4 kB |  3.6 kB |
+| `async`      |   6.7 kB |  2.6 kB |
+| `cache`      |   2.5 kB |  1.1 kB |
 | `color`      |   5.3 kB |  2.4 kB |
-| `date`       |  10.5 kB |  3.7 kB |
+| `date`       |  10.4 kB |  3.7 kB |
 | `decorators` |   4.5 kB |  1.5 kB |
-| `easing`     |   4.3 kB |  2.0 kB |
-| `emitter`    |   2.0 kB |  1.0 kB |
-| `format`     |   3.9 kB |  1.5 kB |
-| `functions`  |   5.5 kB |  2.2 kB |
-| `guards`     |   4.3 kB |  1.5 kB |
-| `iterables`  |   5.3 kB |  1.7 kB |
+| `easing`     |   4.4 kB |  2.0 kB |
+| `emitter`    |   2.2 kB |  1.1 kB |
+| `format`     |   4.3 kB |  1.6 kB |
+| `functions`  |   5.6 kB |  2.3 kB |
+| `guards`     |   4.7 kB |  1.5 kB |
+| `iterables`  |   5.6 kB |  1.9 kB |
 | `math`       |   7.9 kB |  3.1 kB |
-| `objects`    |  10.8 kB |  3.7 kB |
-| `random`     |   4.8 kB |  2.2 kB |
-| `search`     |   2.5 kB |  1.3 kB |
-| `store`      |   1.4 kB |  0.7 kB |
-| `strings`    |   8.2 kB |  3.4 kB |
+| `objects`    |  11.9 kB |  4.0 kB |
+| `random`     |   5.4 kB |  2.4 kB |
+| `search`     |   3.7 kB |  1.8 kB |
+| `store`      |   1.7 kB |  0.8 kB |
+| `strings`    |   9.1 kB |  3.8 kB |
 | `url`        |   2.9 kB |  1.4 kB |
-| `validate`   |   5.5 kB |  2.3 kB |
+| `validate`   |   5.7 kB |  2.3 kB |
+
+</details>
+
+## Performance
+
+Every helper that has an equivalent in a popular library is benchmarked against it (`yarn build && yarn bench`). The latest idle-machine run compared 466 cases at 10, 1k and 100k items (Node 22, ratios above 1 mean js-helpers is faster):
+
+| Compared with | Cases | Median speed ratio | At par or faster |
+| ------------- | ----: | -----------------: | ---------------: |
+| lodash        |   204 |              1.60× |              86% |
+| es-toolkit    |   208 |              0.98× |              65% |
+| date-fns      |    21 |              2.45× |              90% |
+| fuse.js       |     7 |               ~30× |             100% |
+| mitt          |     7 |              0.93× |              57% |
+| nanoid        |     3 |              0.61× |               0% |
+
+<details>
+<summary>Where it is slower, and why</summary>
+
+Most remaining gaps exist because js-helpers does more work for correctness:
+
+- **`strings.reverse`, `truncate`, `getWords`:** they keep grapheme clusters intact, so emoji such as 👍🏽 and combining marks survive.
+- **`math.sum` and `math.round`:** `sum` uses compensated summation (`sum([0.1, 0.2, 0.3]) === 0.6`), and `round` is decimal-correct (`round(1.005, 2) === 1.01`).
+- **`isDate`, `isMap` and the other guards:** a brand check rejects fakes such as `Object.create(Date.prototype)` and accepts instances from other realms.
+- **`difference`, `flattenDeep`, `clone` of arrays:** they deduplicate, detect cycles, and keep holes and extra keys.
+- **`randomId`:** it reads the live `crypto` object on every call, so mocks and the "no CSPRNG → throw" rule always apply.
+
+Each remaining gap is tracked in the benchmark files, and the hot paths skip the extra work whenever it is provably unnecessary.
 
 </details>
 
