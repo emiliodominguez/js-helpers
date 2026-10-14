@@ -11,8 +11,8 @@ export default {
 	jsonReporter: { fileName: 'reports/mutation/mutation.json' },
 	htmlReporter: { fileName: 'reports/mutation/index.html' },
 	thresholds: { high: 90, low: 80, break: null },
-	concurrency: 6,
-	timeoutMS: 20000,
+	concurrency: 2,
+	timeoutMS: 5000,
 	tempDirName: '.stryker-tmp',
 	ignorePatterns: ['dist', 'coverage', 'docs', 'reports']
 };
