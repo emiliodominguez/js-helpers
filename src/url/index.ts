@@ -107,10 +107,10 @@ function isValueList(value: unknown): value is ReadonlyArray<unknown> {
  * @throws {RangeError} when `arrayFormat` is unknown or a `Date` is invalid
  * @throws {TypeError} when a value is not a string, number, boolean, bigint, `Date`, array of those, `null` or `undefined`
  * @example
- * buildQueryString({ q: 'hello world', page: 2, tags: ['a', 'b'] }); // 'q=hello%20world&page=2&tags=a&tags=b'
- * buildQueryString({ tags: ['a', 'b'] }, { arrayFormat: 'brackets' }); // 'tags[]=a&tags[]=b'
- * buildQueryString({ tags: ['a', 'b,c'] }, { arrayFormat: 'comma' }); // 'tags=a,b%2Cc'
- * buildQueryString({ b: 1, a: null, c: undefined }, { skipNull: false, sort: true }); // 'a&b=1'
+ * buildQueryString({ q: 'hello world', page: 2, tags: ['a', 'b'] }); // => 'q=hello%20world&page=2&tags=a&tags=b'
+ * buildQueryString({ tags: ['a', 'b'] }, { arrayFormat: 'brackets' }); // => 'tags[]=a&tags[]=b'
+ * buildQueryString({ tags: ['a', 'b,c'] }, { arrayFormat: 'comma' }); // => 'tags=a,b%2Cc'
+ * buildQueryString({ b: 1, a: null, c: undefined }, { skipNull: false, sort: true }); // => 'a&b=1'
  */
 export function buildQueryString(params: QueryParams, options: BuildQueryStringOptions = {}): string {
 	const { arrayFormat = 'repeat', skipNull = true, sort = false } = options;
@@ -169,8 +169,8 @@ export function buildQueryString(params: QueryParams, options: BuildQueryStringO
  * @param {string} query - The query string, with or without the leading `?`
  * @returns {ParsedQuery} The parsed parameters
  * @example
- * parseQueryString('?q=hello+world&tag=a&tag=b&empty'); // { q: 'hello world', tag: ['a', 'b'], empty: '' }
- * parseQueryString('ids[]=1'); // { ids: ['1'] }
+ * parseQueryString('?q=hello+world&tag=a&tag=b&empty'); // => { q: 'hello world', tag: ['a', 'b'], empty: '' }
+ * parseQueryString('ids[]=1'); // => { ids: ['1'] }
  */
 export function parseQueryString(query: string): ParsedQuery {
 	const hashIndex = query.indexOf('#');
@@ -220,9 +220,9 @@ function splitUrl(url: string): { base: string; query: string; hash: string } {
  * @throws {RangeError} see {@link buildQueryString}
  * @throws {TypeError} see {@link buildQueryString}
  * @example
- * withQuery('https://x.com/search?q=old&page=2#results', { q: 'new value', lang: 'en' }); // 'https://x.com/search?page=2&q=new%20value&lang=en#results'
- * withQuery('/list?page=2&sort=asc', { page: null }); // '/list?sort=asc'
- * withQuery('/list', {}); // '/list'
+ * withQuery('https://x.com/search?q=old&page=2#results', { q: 'new value', lang: 'en' }); // => 'https://x.com/search?page=2&q=new%20value&lang=en#results'
+ * withQuery('/list?page=2&sort=asc', { page: null }); // => '/list?sort=asc'
+ * withQuery('/list', {}); // => '/list'
  */
 export function withQuery(url: string, params: QueryParams, options: BuildQueryStringOptions = {}): string {
 	const { base, query, hash } = splitUrl(url);
@@ -258,10 +258,10 @@ export function withQuery(url: string, params: QueryParams, options: BuildQueryS
  * @returns {string} The joined URL (`''` when every part is empty)
  * @throws {TypeError} when a part is not a string
  * @example
- * joinUrl('https://api.example.com/', '/v1/', 'users', '42'); // 'https://api.example.com/v1/users/42'
- * joinUrl('/api', 'items/', '?page=2'); // '/api/items?page=2'
- * joinUrl('a', 'b/'); // 'a/b/'
- * joinUrl('//cdn.example.com', 'lib.js'); // '//cdn.example.com/lib.js'
+ * joinUrl('https://api.example.com/', '/v1/', 'users', '42'); // => 'https://api.example.com/v1/users/42'
+ * joinUrl('/api', 'items/', '?page=2'); // => '/api/items?page=2'
+ * joinUrl('a', 'b/'); // => 'a/b/'
+ * joinUrl('//cdn.example.com', 'lib.js'); // => '//cdn.example.com/lib.js'
  */
 export function joinUrl(...parts: string[]): string {
 	const nonEmpty = parts.filter(function (part: unknown): boolean {
@@ -309,9 +309,9 @@ export function joinUrl(...parts: string[]): string {
  * @param {string} key - The parameter name (`a` also matches `a[]`)
  * @returns {string | undefined} The first value, or `undefined` when the parameter is absent
  * @example
- * getQueryParam('https://x.com/?q=hello+world&q=2#top', 'q'); // 'hello world'
- * getQueryParam('/path?flag', 'flag'); // ''
- * getQueryParam('/path', 'q'); // undefined
+ * getQueryParam('https://x.com/?q=hello+world&q=2#top', 'q'); // => 'hello world'
+ * getQueryParam('/path?flag', 'flag'); // => ''
+ * getQueryParam('/path', 'q'); // => undefined
  */
 export function getQueryParam(url: string, key: string): string | undefined {
 	const { query } = splitUrl(url);
@@ -326,10 +326,10 @@ export function getQueryParam(url: string, key: string): string | undefined {
  * @param {string} string - The string to check
  * @returns {boolean} Whether the string is an absolute URL
  * @example
- * isAbsoluteUrl('https://example.com'); // true
- * isAbsoluteUrl('//cdn.example.com/lib.js'); // true
- * isAbsoluteUrl('/relative/path'); // false
- * isAbsoluteUrl('mailto:someone@example.com'); // false
+ * isAbsoluteUrl('https://example.com'); // => true
+ * isAbsoluteUrl('//cdn.example.com/lib.js'); // => true
+ * isAbsoluteUrl('/relative/path'); // => false
+ * isAbsoluteUrl('mailto:someone@example.com'); // => false
  */
 export function isAbsoluteUrl(string: string): boolean {
 	return /^[a-z][a-z\d+.-]*:\/\//i.test(string) || string.startsWith('//');

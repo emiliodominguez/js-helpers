@@ -159,8 +159,8 @@ function splitWords(string: string): string[] {
  * @param {string} string - The string to be reversed
  * @returns {string} The reversed string
  * @example
- * reverse('hello'); // 'olleh'
- * reverse('a👍🏽b'); // 'b👍🏽a'
+ * reverse('hello'); // => 'olleh'
+ * reverse('a👍🏽b'); // => 'b👍🏽a'
  */
 export function reverse(string: string): string {
 	return splitGraphemes(string).reverse().join('');
@@ -171,8 +171,8 @@ export function reverse(string: string): string {
  * @param {string} string - The string to be capitalized
  * @returns {string} The capitalized string
  * @example
- * capitalize('hello'); // 'Hello'
- * capitalize('élan'); // 'Élan'
+ * capitalize('hello'); // => 'Hello'
+ * capitalize('élan'); // => 'Élan'
  */
 export function capitalize(string: string): string {
 	const first = firstGrapheme(string);
@@ -185,7 +185,7 @@ export function capitalize(string: string): string {
  * @param {string} string - The string to be uncapitalized
  * @returns {string} The uncapitalized string
  * @example
- * uncapitalize('Hello World'); // 'hello World'
+ * uncapitalize('Hello World'); // => 'hello World'
  */
 export function uncapitalize(string: string): string {
 	const first = firstGrapheme(string);
@@ -214,8 +214,8 @@ function clampIndex(index: number, length: number): number {
  * @param {number} end - The end index of the substring (exclusive)
  * @returns {string} The extracted substring
  * @example
- * substring('Hello, World!', 7, 12); // 'World'
- * substring('Hello, World!', 12, 7); // ''
+ * substring('Hello, World!', 7, 12); // => 'World'
+ * substring('Hello, World!', 12, 7); // => ''
  */
 export function substring(string: string, start: number, end: number): string {
 	const from = clampIndex(start, string.length);
@@ -230,7 +230,7 @@ export function substring(string: string, start: number, end: number): string {
  * @param {string} subString - The substring to be searched for
  * @returns {boolean} Whether the string contains the specified substring
  * @example
- * includes('hello world', 'lo w'); // true
+ * includes('hello world', 'lo w'); // => true
  */
 export function includes(string: string, subString: string): boolean {
 	return string.includes(subString);
@@ -244,8 +244,8 @@ export function includes(string: string, subString: string): boolean {
  * @param {string} replaceValue - The replacement string
  * @returns {string} The string with all occurrences of the substring replaced
  * @example
- * replace('a.b.c', '.', '-'); // 'a-b-c'
- * replace('price: 5', '5', '$&0'); // 'price: $&0'
+ * replace('a.b.c', '.', '-'); // => 'a-b-c'
+ * replace('price: 5', '5', '$&0'); // => 'price: $&0'
  */
 export function replace(string: string, searchValue: string, replaceValue: string): string {
 	if (!searchValue) return string;
@@ -265,9 +265,9 @@ export function replace(string: string, searchValue: string, replaceValue: strin
  * @returns {string} The truncated string, or the original one when it has at most `length` graphemes
  * @throws {RangeError} when `length` is negative or not an integer
  * @example
- * truncate('hello world', 5); // 'hello...'
- * truncate('hello world', 5, '!'); // 'hello!'
- * truncate('👍🏽👍🏽👍🏽', 1); // '👍🏽...'
+ * truncate('hello world', 5); // => 'hello...'
+ * truncate('hello world', 5, '!'); // => 'hello!'
+ * truncate('👍🏽👍🏽👍🏽', 1); // => '👍🏽...'
  */
 export function truncate(string: string, length: number, suffix: string = '...'): string {
 	if (!Number.isInteger(length) || length < 0) throw new RangeError(`truncate: length must be a non-negative integer, received ${String(length)}`);
@@ -295,8 +295,8 @@ export function truncate(string: string, length: number, suffix: string = '...')
  * @returns {string} The repeated string
  * @throws {RangeError} when `times` is negative, not an integer, `NaN` or infinite
  * @example
- * repeat('ab', 3); // 'ababab'
- * repeat('ab', 0); // ''
+ * repeat('ab', 3); // => 'ababab'
+ * repeat('ab', 0); // => ''
  */
 export function repeat(string: string, times: number): string {
 	if (!Number.isInteger(times) || times < 0) throw new RangeError(`repeat: times must be a non-negative integer, received ${String(times)}`);
@@ -309,7 +309,7 @@ export function repeat(string: string, times: number): string {
  * @param {string} string - The string to be trimmed
  * @returns {string} The trimmed string
  * @example
- * trim('  hello world  '); // 'hello world'
+ * trim('  hello world  '); // => 'hello world'
  */
 export function trim(string: string): string {
 	return string.trim();
@@ -322,8 +322,8 @@ export function trim(string: string): string {
  * @param {string} string - The string to be converted to title case
  * @returns {string} The string in title case
  * @example
- * toTitleCase('hello  WORLD'); // 'Hello  World'
- * toTitleCase('élan vital, "quoted"'); // 'Élan Vital, "Quoted"'
+ * toTitleCase('hello  WORLD'); // => 'Hello  World'
+ * toTitleCase('élan vital, "quoted"'); // => 'Élan Vital, "Quoted"'
  */
 export function toTitleCase(string: string): string {
 	return string.replace(/\S+/g, function (word: string): string {
@@ -339,9 +339,9 @@ export function toTitleCase(string: string): string {
  * @param {string} string - The string to be converted to snake case
  * @returns {string} The string in snake case
  * @example
- * toSnakeCase('hello world'); // 'hello_world'
- * toSnakeCase('helloWorld'); // 'hello_world'
- * toSnakeCase('XMLHttpRequest'); // 'xml_http_request'
+ * toSnakeCase('hello world'); // => 'hello_world'
+ * toSnakeCase('helloWorld'); // => 'hello_world'
+ * toSnakeCase('XMLHttpRequest'); // => 'xml_http_request'
  */
 export function toSnakeCase(string: string): string {
 	return splitWords(string)
@@ -356,8 +356,8 @@ export function toSnakeCase(string: string): string {
  * @param {string} string - The string to be converted to kebab case
  * @returns {string} The string in kebab case
  * @example
- * toKebabCase('Hello World'); // 'hello-world'
- * toKebabCase('getHTTPResponse2Code'); // 'get-http-response2-code'
+ * toKebabCase('Hello World'); // => 'hello-world'
+ * toKebabCase('getHTTPResponse2Code'); // => 'get-http-response2-code'
  */
 export function toKebabCase(string: string): string {
 	return splitWords(string)
@@ -372,7 +372,7 @@ export function toKebabCase(string: string): string {
  * @param {string} string - The string to be converted to constant case
  * @returns {string} The string in constant case
  * @example
- * toConstantCase('maxRetryCount'); // 'MAX_RETRY_COUNT'
+ * toConstantCase('maxRetryCount'); // => 'MAX_RETRY_COUNT'
  */
 export function toConstantCase(string: string): string {
 	return splitWords(string)
@@ -389,8 +389,8 @@ export function toConstantCase(string: string): string {
  * @param {string} string - The string to be converted to camel case
  * @returns {string} The string in camel case
  * @example
- * toCamelCase('hello world'); // 'helloWorld'
- * toCamelCase('XMLHttpRequest'); // 'xmlHttpRequest'
+ * toCamelCase('hello world'); // => 'helloWorld'
+ * toCamelCase('XMLHttpRequest'); // => 'xmlHttpRequest'
  */
 export function toCamelCase(string: string): string {
 	return splitWords(string)
@@ -405,8 +405,8 @@ export function toCamelCase(string: string): string {
  * @param {string} string - The string to be converted to Pascal case
  * @returns {string} The string in Pascal case
  * @example
- * toPascalCase('hello world'); // 'HelloWorld'
- * toPascalCase('xml-http-request'); // 'XmlHttpRequest'
+ * toPascalCase('hello world'); // => 'HelloWorld'
+ * toPascalCase('xml-http-request'); // => 'XmlHttpRequest'
  */
 export function toPascalCase(string: string): string {
 	return splitWords(string).map(upperFirstLowerRest).join('');
@@ -418,7 +418,7 @@ export function toPascalCase(string: string): string {
  * @param {string} string - The string to clean
  * @returns {string} The string without diacritics
  * @example
- * removeDiacritics('Crème Brûlée à Málaga'); // 'Creme Brulee a Malaga'
+ * removeDiacritics('Crème Brûlée à Málaga'); // => 'Creme Brulee a Malaga'
  */
 export function removeDiacritics(string: string): string {
 	return string
@@ -439,8 +439,8 @@ const SLUG_TRANSLITERATIONS: Readonly<Record<string, string>> = { ß: 'ss', æ: 
  * @param {string} string - The string to be converted to a slug
  * @returns {string} The URL-friendly slug (possibly empty)
  * @example
- * toSlug('Café Society'); // 'cafe-society'
- * toSlug('  --Hello__World!!  '); // 'hello-world'
+ * toSlug('Café Society'); // => 'cafe-society'
+ * toSlug('  --Hello__World!!  '); // => 'hello-world'
  */
 export function toSlug(string: string): string {
 	return removeDiacritics(string.normalize('NFKD'))
@@ -463,10 +463,10 @@ const TRUTHY_STRINGS: ReadonlySet<string> = new Set(['true', '1', 'yes', 'y', 'o
  * @param {string} string - The string to be converted to a boolean
  * @returns {boolean} The converted boolean
  * @example
- * toBoolean(' TRUE '); // true
- * toBoolean('on'); // true
- * toBoolean('false'); // false
- * toBoolean('anything else'); // false
+ * toBoolean(' TRUE '); // => true
+ * toBoolean('on'); // => true
+ * toBoolean('false'); // => false
+ * toBoolean('anything else'); // => false
  */
 export function toBoolean(string: string): boolean {
 	return TRUTHY_STRINGS.has(string.trim().toLowerCase());
@@ -477,10 +477,10 @@ export function toBoolean(string: string): boolean {
  * @param {string} string - The string to be converted to a number
  * @returns {number} The converted number, or `NaN` when the string is blank or not numeric
  * @example
- * toNumber(' 42 '); // 42
- * toNumber('0x1f'); // 31
- * toNumber(''); // NaN
- * toNumber('12px'); // NaN
+ * toNumber(' 42 '); // => 42
+ * toNumber('0x1f'); // => 31
+ * toNumber(''); // => NaN
+ * toNumber('12px'); // => NaN
  */
 export function toNumber(string: string): number {
 	const trimmed = string.trim();
@@ -494,7 +494,7 @@ export function toNumber(string: string): number {
  * @param {string} subString - The substring to search for
  * @returns {boolean} Whether the string starts with the substring
  * @example
- * startsWith('hello world', 'hello'); // true
+ * startsWith('hello world', 'hello'); // => true
  */
 export function startsWith(string: string, subString: string): boolean {
 	return string.startsWith(subString);
@@ -506,7 +506,7 @@ export function startsWith(string: string, subString: string): boolean {
  * @param {string} subString - The substring to be searched for
  * @returns {boolean} Whether the string ends with the specified substring
  * @example
- * endsWith('hello world', 'world'); // true
+ * endsWith('hello world', 'world'); // => true
  */
 export function endsWith(string: string, subString: string): boolean {
 	return string.endsWith(subString);
@@ -522,10 +522,10 @@ export function endsWith(string: string, subString: string): boolean {
  * @param {CountSubStringOptions} [options={}] - Matching options
  * @returns {number} The number of occurrences
  * @example
- * countSubString('hello world, hello', 'hello'); // 2
- * countSubString('Hello hello', 'hello'); // 1
- * countSubString('Hello hello', 'hello', { ignoreCase: true }); // 2
- * countSubString('a.b.c', '.'); // 2
+ * countSubString('hello world, hello', 'hello'); // => 2
+ * countSubString('Hello hello', 'hello'); // => 1
+ * countSubString('Hello hello', 'hello', { ignoreCase: true }); // => 2
+ * countSubString('a.b.c', '.'); // => 2
  */
 export function countSubString(string: string, subString: string, options: CountSubStringOptions = {}): number {
 	if (subString === '') return 0;
@@ -548,8 +548,8 @@ export function countSubString(string: string, subString: string, options: Count
  * @param {string} string - The string to be checked
  * @returns {boolean} Whether the string is blank
  * @example
- * isEmpty('   '); // true
- * isEmpty(' a '); // false
+ * isEmpty('   '); // => true
+ * isEmpty(' a '); // => false
  */
 export function isEmpty(string: string): boolean {
 	return !string.trim().length;
@@ -561,7 +561,7 @@ export function isEmpty(string: string): boolean {
  * @param {string} string - The string to be split into words
  * @returns {string[]} The words in the string
  * @example
- * getWords("Don't stop, café 2024!"); // ["Don't", 'stop', 'café', '2024']
+ * getWords("Don't stop, café 2024!"); // => ["Don't", 'stop', 'café', '2024']
  */
 export function getWords(string: string): string[] {
 	return string.match(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu) ?? [];
@@ -573,9 +573,9 @@ export function getWords(string: string): string[] {
  * @param {IsPalindromeOptions} [options={}] - `ignoreCase` and `ignoreNonAlphanumeric` (both default to `false`)
  * @returns {boolean} Whether the string is a palindrome
  * @example
- * isPalindrome('racecar'); // true
- * isPalindrome('Racecar'); // false
- * isPalindrome('A man, a plan, a canal: Panama', { ignoreCase: true, ignoreNonAlphanumeric: true }); // true
+ * isPalindrome('racecar'); // => true
+ * isPalindrome('Racecar'); // => false
+ * isPalindrome('A man, a plan, a canal: Panama', { ignoreCase: true, ignoreNonAlphanumeric: true }); // => true
  */
 export function isPalindrome(string: string, options: IsPalindromeOptions = {}): boolean {
 	let candidate = options.ignoreNonAlphanumeric ? string.replace(/[^\p{L}\p{M}\p{N}]+/gu, '') : string;
@@ -591,8 +591,8 @@ export function isPalindrome(string: string, options: IsPalindromeOptions = {}):
  * @param {string} string - The string to escape
  * @returns {string} The escaped string
  * @example
- * escapeRegExp('1.5*(x)'); // '1\\.5\\*\\(x\\)'
- * new RegExp(escapeRegExp('a.b')).test('axb'); // false
+ * escapeRegExp('1.5*(x)'); // => '1\\.5\\*\\(x\\)'
+ * new RegExp(escapeRegExp('a.b')).test('axb'); // => false
  */
 export function escapeRegExp(string: string): string {
 	return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -608,7 +608,7 @@ const HTML_ESCAPES: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt
  * @param {string} string - The string to escape
  * @returns {string} The escaped string
  * @example
- * escapeHtml('<a href="x">Tom & Jerry\'s</a>'); // '&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;'
+ * escapeHtml('<a href="x">Tom & Jerry\'s</a>'); // => '&lt;a href=&quot;x&quot;&gt;Tom &amp; Jerry&#39;s&lt;/a&gt;'
  */
 export function escapeHtml(string: string): string {
 	return string.replace(/[&<>"']/g, function (char: string): string {
@@ -627,8 +627,8 @@ const HTML_UNESCAPES: Readonly<Record<string, string>> = { '&amp;': '&', '&lt;':
  * @param {string} string - The string to unescape
  * @returns {string} The unescaped string
  * @example
- * unescapeHtml('&lt;b&gt;Tom &amp; Jerry&#39;s&lt;/b&gt;'); // "<b>Tom & Jerry's</b>"
- * unescapeHtml('&amp;lt;'); // '&lt;'
+ * unescapeHtml('&lt;b&gt;Tom &amp; Jerry&#39;s&lt;/b&gt;'); // => "<b>Tom & Jerry's</b>"
+ * unescapeHtml('&amp;lt;'); // => '&lt;'
  */
 export function unescapeHtml(string: string): string {
 	return string.replace(/&(?:amp|lt|gt|quot|apos|#39|#[xX]27);/g, function (entity: string): string {
@@ -641,7 +641,7 @@ export function unescapeHtml(string: string): string {
  * @param {string} string - The string to normalize
  * @returns {string} The normalized string
  * @example
- * normalizeWhitespace('  hello \n\t world  '); // 'hello world'
+ * normalizeWhitespace('  hello \n\t world  '); // => 'hello world'
  */
 export function normalizeWhitespace(string: string): string {
 	return string.trim().replace(/\s+/g, ' ');
@@ -673,8 +673,8 @@ function resolvePath(source: unknown, path: string): unknown {
  * @param {InterpolationValues} values - The values to insert; nested objects and arrays are addressed with dots (`{items.0}`)
  * @returns {string} The interpolated string
  * @example
- * interpolate('Hello {user.name}, you have {count} messages', { user: { name: 'Ada' }, count: 3 }); // 'Hello Ada, you have 3 messages'
- * interpolate('Hi {missing}', {}); // 'Hi {missing}'
+ * interpolate('Hello {user.name}, you have {count} messages', { user: { name: 'Ada' }, count: 3 }); // => 'Hello Ada, you have 3 messages'
+ * interpolate('Hi {missing}', {}); // => 'Hi {missing}'
  */
 export function interpolate(template: string, values: InterpolationValues): string {
 	return template.replace(/\{([^{}]+)\}/g, function (placeholder: string, path: string): string {
@@ -706,9 +706,9 @@ function graphemeLength(string: string): number {
  * @param {string} b - The second string
  * @returns {number} The edit distance (a non-negative integer, `0` iff the strings are equal)
  * @example
- * levenshtein('kitten', 'sitting'); // 3
- * levenshtein('', 'abc'); // 3
- * levenshtein('😀a', '😃a'); // 1
+ * levenshtein('kitten', 'sitting'); // => 3
+ * levenshtein('', 'abc'); // => 3
+ * levenshtein('😀a', '😃a'); // => 1
  */
 export function levenshtein(a: string, b: string): number {
 	if (a === b) return 0;
@@ -763,10 +763,10 @@ export function levenshtein(a: string, b: string): number {
  * @param {string} b - The second string
  * @returns {number} A score in `[0, 1]`: `1` iff the strings are equal, `0` when every character must be changed
  * @example
- * similarity('kitten', 'sitting'); // 0.5714285714285714 (1 - 3 / 7)
- * similarity('abc', 'abc'); // 1
- * similarity('', ''); // 1
- * similarity('abc', 'xyz'); // 0
+ * similarity('kitten', 'sitting'); // => 0.5714285714285714 // 1 - 3 / 7
+ * similarity('abc', 'abc'); // => 1
+ * similarity('', ''); // => 1
+ * similarity('abc', 'xyz'); // => 0
  */
 export function similarity(a: string, b: string): number {
 	const maxLength = Math.max(Array.from(a).length, Array.from(b).length);
@@ -897,7 +897,7 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
  * @param {string} string - The text to dedent
  * @returns {string} The dedented text
  * @example
- * dedent('\n    a\n      b\n    c\n'); // 'a\n  b\nc'
+ * dedent('\n    a\n      b\n    c\n'); // => 'a\n  b\nc'
  */
 export function dedent(string: string): string;
 /**
@@ -910,7 +910,7 @@ export function dedent(string: string): string;
  * dedent`
  *     Hello ${name},
  *       welcome!
- * `; // 'Hello Ada,\n  welcome!'
+ * `; // => 'Hello Ada,\n  welcome!'
  */
 export function dedent(strings: TemplateStringsArray, ...values: unknown[]): string;
 /**
@@ -920,7 +920,7 @@ export function dedent(strings: TemplateStringsArray, ...values: unknown[]): str
  * @returns {string} The dedented text
  * @throws {TypeError} when `input` is neither a string nor a template strings array
  * @example
- * dedent('  a\n    b'); // 'a\n  b'
+ * dedent('  a\n    b'); // => 'a\n  b'
  */
 export function dedent(input: string | TemplateStringsArray, ...values: unknown[]): string {
 	if (typeof input === 'string') return dedentParts([input])[0];
@@ -944,8 +944,8 @@ export function dedent(input: string | TemplateStringsArray, ...values: unknown[
  * @param {string} string - The text to split
  * @returns {string[]} The lines (at least one)
  * @example
- * splitLines('a\r\nb\rc\nd'); // ['a', 'b', 'c', 'd']
- * splitLines('a\n'); // ['a', '']
+ * splitLines('a\r\nb\rc\nd'); // => ['a', 'b', 'c', 'd']
+ * splitLines('a\n'); // => ['a', '']
  */
 export function splitLines(string: string): string[] {
 	return string.split(/\r\n|\r|\n/);
@@ -975,9 +975,9 @@ export interface WordWrapOptions {
  * @returns {string} The wrapped text
  * @throws {RangeError} when `width` is less than 1, `NaN` or a non-integer finite number
  * @example
- * wordWrap('The quick brown fox jumps', 10); // 'The quick\nbrown fox\njumps'
- * wordWrap('abcdefghij xy', 4, { breakLongWords: true }); // 'abcd\nefgh\nij\nxy'
- * wordWrap('a b c', 3, { newline: '<br>' }); // 'a b<br>c'
+ * wordWrap('The quick brown fox jumps', 10); // => 'The quick\nbrown fox\njumps'
+ * wordWrap('abcdefghij xy', 4, { breakLongWords: true }); // => 'abcd\nefgh\nij\nxy'
+ * wordWrap('a b c', 3, { newline: '<br>' }); // => 'a b<br>c'
  */
 export function wordWrap(string: string, width: number, options: WordWrapOptions = {}): string {
 	if (!(width >= 1) || (!Number.isInteger(width) && width !== Infinity)) throw new RangeError(`wordWrap: width must be a positive integer, received ${String(width)}`);
@@ -1046,9 +1046,9 @@ export interface MaskOptions {
  * @returns {string} The masked string
  * @throws {RangeError} when `visibleStart` or `visibleEnd` is not a non-negative integer, or `char` is not exactly one grapheme
  * @example
- * mask('4111111111111111'); // '************1111'
- * mask('john.doe@mail.com', { visibleStart: 2, visibleEnd: 9, char: '•' }); // 'jo••••••@mail.com'
- * mask('👍🏽👍🏽👍🏽👍🏽👍🏽', { visibleEnd: 1 }); // '****👍🏽'
+ * mask('4111111111111111'); // => '************1111'
+ * mask('john.doe@mail.com', { visibleStart: 2, visibleEnd: 9, char: '•' }); // => 'jo••••••@mail.com'
+ * mask('👍🏽👍🏽👍🏽👍🏽👍🏽', { visibleEnd: 1 }); // => '****👍🏽'
  */
 export function mask(string: string, options: MaskOptions = {}): string {
 	const { visibleStart = 0, visibleEnd = 4, char = '*' } = options;
@@ -1088,7 +1088,7 @@ const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
  * @example
  * randomString(8); // e.g. 'aZ3kP0qx'
  * randomString(6, '0123456789'); // e.g. '402913'
- * randomString(3, 'ab', function () { return 0; }); // 'aaa'
+ * randomString(3, 'ab', function () { return 0; }); // => 'aaa'
  */
 export function randomString(length: number, alphabet: string = ALPHANUMERIC, random: RandomGenerator = Math.random): string {
 	if (!Number.isInteger(length) || length < 0) throw new RangeError(`randomString: length must be a non-negative integer, received ${String(length)}`);
@@ -1117,8 +1117,8 @@ export function randomString(length: number, alphabet: string = ALPHANUMERIC, ra
  * @param {string} string - The string to convert
  * @returns {string} The string in sentence case
  * @example
- * toSentenceCase('helloWorld-foo'); // 'Hello world foo'
- * toSentenceCase('SOME_CONSTANT_NAME'); // 'Some constant name'
+ * toSentenceCase('helloWorld-foo'); // => 'Hello world foo'
+ * toSentenceCase('SOME_CONSTANT_NAME'); // => 'Some constant name'
  */
 export function toSentenceCase(string: string): string {
 	return splitWords(string)
@@ -1136,9 +1136,9 @@ export function toSentenceCase(string: string): string {
  * @param {string} [plural=singular + 's'] - The plural form, for irregular plurals
  * @returns {string} `singular` or `plural`
  * @example
- * pluralize(1, 'item'); // 'item'
- * pluralize(3, 'item'); // 'items'
- * pluralize(0, 'child', 'children'); // 'children'
+ * pluralize(1, 'item'); // => 'item'
+ * pluralize(3, 'item'); // => 'items'
+ * pluralize(0, 'child', 'children'); // => 'children'
  */
 export function pluralize(count: number, singular: string, plural: string = singular + 's'): string {
 	return Math.abs(count) === 1 ? singular : plural;
@@ -1151,9 +1151,9 @@ export function pluralize(count: number, singular: string, plural: string = sing
  * @param {string} [plural=singular + 's'] - The plural form, for irregular plurals
  * @returns {string} `'<count> <word>'`
  * @example
- * formatCount(3, 'item'); // '3 items'
- * formatCount(1, 'item'); // '1 item'
- * formatCount(2, 'person', 'people'); // '2 people'
+ * formatCount(3, 'item'); // => '3 items'
+ * formatCount(1, 'item'); // => '1 item'
+ * formatCount(2, 'person', 'people'); // => '2 people'
  */
 export function formatCount(count: number, singular: string, plural: string = singular + 's'): string {
 	return `${String(count)} ${pluralize(count, singular, plural)}`;
@@ -1165,8 +1165,8 @@ export function formatCount(count: number, singular: string, plural: string = si
  * @param {string} prefix - The required prefix
  * @returns {string} A string that starts with `prefix`
  * @example
- * ensurePrefix('example.com', 'https://'); // 'https://example.com'
- * ensurePrefix('https://example.com', 'https://'); // 'https://example.com'
+ * ensurePrefix('example.com', 'https://'); // => 'https://example.com'
+ * ensurePrefix('https://example.com', 'https://'); // => 'https://example.com'
  */
 export function ensurePrefix(string: string, prefix: string): string {
 	return string.startsWith(prefix) ? string : prefix + string;
@@ -1178,8 +1178,8 @@ export function ensurePrefix(string: string, prefix: string): string {
  * @param {string} suffix - The required suffix
  * @returns {string} A string that ends with `suffix`
  * @example
- * ensureSuffix('path/to', '/'); // 'path/to/'
- * ensureSuffix('path/to/', '/'); // 'path/to/'
+ * ensureSuffix('path/to', '/'); // => 'path/to/'
+ * ensureSuffix('path/to/', '/'); // => 'path/to/'
  */
 export function ensureSuffix(string: string, suffix: string): string {
 	return string.endsWith(suffix) ? string : string + suffix;
@@ -1191,8 +1191,8 @@ export function ensureSuffix(string: string, suffix: string): string {
  * @param {string} prefix - The prefix to remove
  * @returns {string} The string without the prefix (unchanged when it does not start with it)
  * @example
- * stripPrefix('https://example.com', 'https://'); // 'example.com'
- * stripPrefix('//a', '/'); // '/a'
+ * stripPrefix('https://example.com', 'https://'); // => 'example.com'
+ * stripPrefix('//a', '/'); // => '/a'
  */
 export function stripPrefix(string: string, prefix: string): string {
 	return string.startsWith(prefix) ? string.slice(prefix.length) : string;
@@ -1204,8 +1204,8 @@ export function stripPrefix(string: string, prefix: string): string {
  * @param {string} suffix - The suffix to remove
  * @returns {string} The string without the suffix (unchanged when it does not end with it)
  * @example
- * stripSuffix('report.pdf', '.pdf'); // 'report'
- * stripSuffix('a//', '/'); // 'a/'
+ * stripSuffix('report.pdf', '.pdf'); // => 'report'
+ * stripSuffix('a//', '/'); // => 'a/'
  */
 export function stripSuffix(string: string, suffix: string): string {
 	return string.endsWith(suffix) ? string.slice(0, string.length - suffix.length) : string;

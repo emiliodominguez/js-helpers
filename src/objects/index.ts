@@ -279,7 +279,7 @@ function copyRegExp(value: RegExp): RegExp {
  * @param {...S} sources - The objects whose properties override the base, in order
  * @returns {MergeAll<T, S>} A new object with the merged properties
  * @example
- * merge({ a: 1, b: 2 }, { b: 'x' }, { c: true }); // { a: 1, b: 'x', c: true }
+ * merge({ a: 1, b: 2 }, { b: 'x' }, { c: true }); // => { a: 1, b: 'x', c: true }
  */
 export function merge<T extends object, S extends object[]>(target: T, ...sources: S): MergeAll<T, S> {
 	const result: object = {};
@@ -303,8 +303,8 @@ export function merge<T extends object, S extends object[]>(target: T, ...source
  * @param {T} value - The value to copy
  * @returns {T} The shallow copy
  * @example
- * clone([1, 2]); // [1, 2] (a new array)
- * clone(new Map([['a', 1]])); // a new Map with the same entries
+ * clone([1, 2]); // => [1, 2] // a new array
+ * clone(new Map([['a', 1]])); // => new Map([['a', 1]]) // a new Map with the same entries
  */
 export function clone<T>(value: T): T {
 	if (!isObject(value)) return value;
@@ -333,8 +333,8 @@ export function clone<T>(value: T): T {
  * @param {K} property - The property key to look for
  * @returns {boolean} Whether the object has that own property
  * @example
- * hasProperty({ a: 1 }, 'a'); // true
- * hasProperty({}, 'toString'); // false (inherited)
+ * hasProperty({ a: 1 }, 'a'); // => true
+ * hasProperty({}, 'toString'); // => false // inherited
  */
 export function hasProperty<T extends object, K extends PropertyKey>(object: T, property: K): object is T & Record<K, unknown> {
 	return hasOwn(object, property);
@@ -348,7 +348,7 @@ export function hasProperty<T extends object, K extends PropertyKey>(object: T, 
  * @param {K} property - The property key
  * @returns {T[K]} The property value
  * @example
- * getProperty({ a: 1 }, 'a'); // 1
+ * getProperty({ a: 1 }, 'a'); // => 1
  */
 export function getProperty<T, K extends keyof T>(object: T, property: K): T[K] {
 	return object[property];
@@ -365,7 +365,8 @@ export function getProperty<T, K extends keyof T>(object: T, property: K): T[K] 
  * @returns {void}
  * @example
  * const target = {};
- * setProperty(target, 'a', 1); // target is now { a: 1 }
+ * setProperty(target, 'a', 1);
+ * target; // => { a: 1 }
  */
 export function setProperty<T extends object, K extends PropertyKey, V>(object: T, property: K, value: V): void {
 	(object as Record<K, V>)[property] = value;
@@ -380,7 +381,8 @@ export function setProperty<T extends object, K extends PropertyKey, V>(object: 
  * @returns {void}
  * @example
  * const target = { a: 1, b: 2 };
- * deleteProperty(target, 'a'); // target is now { b: 2 }
+ * deleteProperty(target, 'a');
+ * target; // => { b: 2 }
  */
 export function deleteProperty<T, K extends keyof T>(object: T, property: K): void {
 	delete object[property];
@@ -393,8 +395,8 @@ export function deleteProperty<T, K extends keyof T>(object: T, property: K): vo
  * @param {T} object - The object to inspect
  * @returns {Array<keyof T>} The own property names
  * @example
- * getPropertyNames({ a: 1, b: 2 }); // ['a', 'b']
- * getPropertyNames([1]); // ['0', 'length']
+ * getPropertyNames({ a: 1, b: 2 }); // => ['a', 'b']
+ * getPropertyNames([1]); // => ['0', 'length']
  */
 export function getPropertyNames<T>(object: T): Array<keyof T> {
 	return Object.getOwnPropertyNames(object) as Array<keyof T>;
@@ -411,10 +413,10 @@ export function getPropertyNames<T>(object: T): Array<keyof T> {
  * @param {T} value - The value to check
  * @returns {boolean} Whether the value is empty
  * @example
- * isEmpty({}); // true
- * isEmpty([]); // true
- * isEmpty(new Map([[1, 1]])); // false
- * isEmpty('a'); // false
+ * isEmpty({}); // => true
+ * isEmpty([]); // => true
+ * isEmpty(new Map([[1, 1]])); // => false
+ * isEmpty('a'); // => false
  */
 export function isEmpty<T>(value: T): boolean {
 	if (value == null) return true;
@@ -433,7 +435,7 @@ export function isEmpty<T>(value: T): boolean {
  * @param {ReadonlyArray<K>} keys - The keys to keep
  * @returns {Pick<T, K>} A new object with only those keys
  * @example
- * pick({ a: 1, b: 2, c: 3 }, ['a', 'c']); // { a: 1, c: 3 }
+ * pick({ a: 1, b: 2, c: 3 }, ['a', 'c']); // => { a: 1, c: 3 }
  */
 export function pick<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Pick<T, K> {
 	const result = {} as Pick<T, K>;
@@ -452,8 +454,8 @@ export function pick<T extends object, K extends keyof T>(object: T, keys: Reado
  * @param {ReadonlyArray<K>} keys - The keys to drop
  * @returns {Omit<T, K>} A new object without those keys
  * @example
- * omit({ a: 1, b: 2, c: 3 }, ['b']); // { a: 1, c: 3 }
- * omit({ 1: 'a', 2: 'b' }, [1]); // { 2: 'b' }
+ * omit({ a: 1, b: 2, c: 3 }, ['b']); // => { a: 1, c: 3 }
+ * omit({ 1: 'a', 2: 'b' }, [1]); // => { 2: 'b' }
  */
 export function omit<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Omit<T, K> {
 	// Property keys are strings or symbols at runtime: numeric keys (`omit(o, [1])`) must match the string key `'1'`.
@@ -478,7 +480,7 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
  * @param {(value: T[keyof T], key: keyof T, object: T) => R} fn - Maps each value (receives the value, its key and the object)
  * @returns {{ [K in keyof T]: R }} A new object with mapped values
  * @example
- * mapValues({ a: 1, b: 2 }, function (n) { return n * 10; }); // { a: 10, b: 20 }
+ * mapValues({ a: 1, b: 2 }, function (n) { return n * 10; }); // => { a: 10, b: 20 }
  */
 export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => R): { [K in keyof T]: R } {
 	// For array types the mapped return type is an array type, so the runtime result must be an array too.
@@ -497,7 +499,7 @@ export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T]
  * @param {(value: T[keyof T], key: keyof T, object: T) => K} fn - Computes the new key (receives the value, its key and the object)
  * @returns {Record<K, T[keyof T]>} A new object with mapped keys
  * @example
- * mapKeys({ a: 1, b: 2 }, function (_v, k) { return String(k).toUpperCase(); }); // { A: 1, B: 2 }
+ * mapKeys({ a: 1, b: 2 }, function (_v, k) { return String(k).toUpperCase(); }); // => { A: 1, B: 2 }
  */
 export function mapKeys<T extends object, K extends PropertyKey>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => K): Record<K, T[keyof T]> {
 	const result = {} as Record<K, T[keyof T]>;
@@ -516,7 +518,7 @@ export function mapKeys<T extends object, K extends PropertyKey>(object: T, fn: 
  * @returns {Invert<T>} The inverted object
  * @throws {TypeError} when a value is not a string, number or symbol
  * @example
- * invert({ a: 'x', b: 'y' }); // { x: 'a', y: 'b' }
+ * invert({ a: 'x', b: 'y' }); // => { x: 'a', y: 'b' }
  */
 export function invert<T extends Record<PropertyKey, PropertyKey>>(object: T): Invert<T> {
 	const result = {} as Invert<T>;
@@ -624,8 +626,8 @@ function assignPath(target: object, segments: ReadonlyArray<string>, value: unkn
  * @param {P} keys - The dot-separated path
  * @returns {PathValue<T, P>} The value found at the path (or `undefined`)
  * @example
- * getFromObjectByKeys({ a: { b: [{ id: 1 }] } }, 'a.b.0.id'); // 1
- * getFromObjectByKeys({ a: {} as { x?: { y: number } } }, 'a.x.y'); // undefined
+ * getFromObjectByKeys({ a: { b: [{ id: 1 }] } }, 'a.b.0.id'); // => 1
+ * getFromObjectByKeys({ a: {} as { x?: { y: number } } }, 'a.x.y'); // => undefined
  */
 export function getFromObjectByKeys<T extends object, P extends NestedKeyOf<T>>(target: T, keys: P): PathValue<T, P>;
 /**
@@ -638,7 +640,7 @@ export function getFromObjectByKeys<T extends object, P extends NestedKeyOf<T>>(
  * @param {D} defaultValue - The value returned when the path resolves to `undefined`
  * @returns {Exclude<PathValue<T, P>, undefined> | D} The value found at the path, or `defaultValue`
  * @example
- * getFromObjectByKeys({ a: {} as { x?: number } }, 'a.x', 0); // 0
+ * getFromObjectByKeys({ a: {} as { x?: number } }, 'a.x', 0); // => 0
  */
 export function getFromObjectByKeys<T extends object, P extends NestedKeyOf<T>, D>(target: T, keys: P, defaultValue: D): Exclude<PathValue<T, P>, undefined> | D;
 /**
@@ -672,7 +674,7 @@ export function getFromObjectByKeys(target: object, keys: string, defaultValue?:
  * @throws {TypeError} when a segment is `__proto__`, `constructor` or `prototype` (prototype pollution guard)
  * @throws {TypeError} when an existing intermediate value is a primitive (it would have to be overwritten)
  * @example
- * setInObjectByKeys({}, 'a.list.0.id', 7); // { a: { list: [{ id: 7 }] } }
+ * setInObjectByKeys({}, 'a.list.0.id', 7); // => { a: { list: [{ id: 7 }] } }
  */
 export function setInObjectByKeys<T extends object>(target: T, path: string, value: unknown): T {
 	assignPath(target, parseWritablePath(path, '.'), value, path, '.');
@@ -752,8 +754,8 @@ function deepCloneWith(value: unknown, seen: WeakMap<object, unknown>): unknown 
  * @example
  * const original = { a: [1, { b: 2 }], when: new Date(0) };
  * const copy = deepClone(original);
- * copy.a !== original.a; // true
- * isEqual(copy, original); // true
+ * copy.a !== original.a; // => true
+ * isEqual(copy, original); // => true
  */
 export function deepClone<T>(value: T): T {
 	return deepCloneWith(value, new WeakMap()) as T;
@@ -803,7 +805,7 @@ function deepMergeInto(result: object, source: object, ancestors: Set<object>): 
  * @throws {TypeError} when the target or a source is not a plain object
  * @throws {TypeError} when an input contains a circular reference through plain objects
  * @example
- * deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }); // { a: { x: 1, y: 3 }, list: [9] }
+ * deepMerge({ a: { x: 1, y: 2 }, list: [1, 2] }, { a: { y: 3 }, list: [9] }); // => { a: { x: 1, y: 3 }, list: [9] }
  */
 export function deepMerge<T extends object, S extends object[]>(target: T, ...sources: S): DeepMergeAll<T, S> {
 	if (!isPlainObject(target)) throw new TypeError('deepMerge: target must be a plain object');
@@ -1006,9 +1008,9 @@ function equalWith(a: unknown, b: unknown, stack: ComparisonStack): boolean {
  * @param {unknown} b - Second value
  * @returns {boolean} Whether the values are deeply equal
  * @example
- * isEqual({ a: [1, { b: NaN }] }, { a: [1, { b: NaN }] }); // true
- * isEqual(new Set([1, 2]), new Set([2, 1])); // true
- * isEqual([1], { 0: 1 }); // false
+ * isEqual({ a: [1, { b: NaN }] }, { a: [1, { b: NaN }] }); // => true
+ * isEqual(new Set([1, 2]), new Set([2, 1])); // => true
+ * isEqual([1], { 0: 1 }); // => false
  */
 export function isEqual(a: unknown, b: unknown): boolean {
 	return equalWith(a, b, { left: [], right: [] });
@@ -1025,7 +1027,7 @@ export function isEqual(a: unknown, b: unknown): boolean {
  * @returns {DeepReadonly<T>} The same value, typed as deeply read-only
  * @example
  * const config = deepFreeze({ server: { port: 80 } });
- * Object.isFrozen(config.server); // true
+ * Object.isFrozen(config.server); // => true
  */
 export function deepFreeze<T>(object: T): DeepReadonly<T> {
 	const visited = new WeakSet<object>();
@@ -1090,7 +1092,7 @@ export type FromEntries<E extends readonly [PropertyKey, unknown]> = Simplify<{ 
  * @param {T} object - The object to inspect
  * @returns {Array<StringKeyOf<T>>} The own enumerable string keys, in `Object.keys` order
  * @example
- * typedKeys({ a: 1, b: 2 }); // ['a', 'b'] typed as ('a' | 'b')[]
+ * typedKeys({ a: 1, b: 2 }); // => ['a', 'b'] // typed as ('a' | 'b')[]
  */
 export function typedKeys<T extends object>(object: T): Array<StringKeyOf<T>> {
 	return Object.keys(object) as Array<StringKeyOf<T>>;
@@ -1103,7 +1105,7 @@ export function typedKeys<T extends object>(object: T): Array<StringKeyOf<T>> {
  * @param {T} object - The object to inspect
  * @returns {Array<EntryOf<T>>} The entries, in `Object.keys` order
  * @example
- * typedEntries({ a: 1, b: 'x' }); // [['a', 1], ['b', 'x']] typed as (['a', number] | ['b', string])[]
+ * typedEntries({ a: 1, b: 'x' }); // => [['a', 1], ['b', 'x']] // typed as (['a', number] | ['b', string])[]
  */
 export function typedEntries<T extends object>(object: T): Array<EntryOf<T>> {
 	return Object.entries(object) as Array<EntryOf<T>>;
@@ -1117,7 +1119,7 @@ export function typedEntries<T extends object>(object: T): Array<EntryOf<T>> {
  * @param {Iterable<E>} entries - The `[key, value]` pairs
  * @returns {FromEntries<E>} A new object
  * @example
- * typedFromEntries([['a', 1], ['b', 'x']] as Array<['a', number] | ['b', string]>); // { a: 1, b: 'x' } typed as { a: number; b: string }
+ * typedFromEntries([['a', 1], ['b', 'x']] as Array<['a', number] | ['b', string]>); // => { a: 1, b: 'x' } // typed as { a: number; b: string }
  */
 export function typedFromEntries<E extends readonly [PropertyKey, unknown]>(entries: Iterable<E>): FromEntries<E> {
 	const result = {};
@@ -1132,7 +1134,7 @@ export function typedFromEntries<E extends readonly [PropertyKey, unknown]>(entr
  * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is kept
  * @returns {Partial<T>} A new object with the selected properties
  * @example
- * pickBy({ a: 1, b: null, c: 3 }, function (value) { return value !== null; }); // { a: 1, c: 3 }
+ * pickBy({ a: 1, b: null, c: 3 }, function (value) { return value !== null; }); // => { a: 1, c: 3 }
  */
 export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
 	const result: Partial<T> = {};
@@ -1151,7 +1153,7 @@ export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T
  * @param {(value: T[keyof T], key: keyof T, object: T) => boolean} predicate - Decides whether a property is dropped
  * @returns {Partial<T>} A new object with the remaining properties
  * @example
- * omitBy({ a: 1, _b: 2 }, function (_value, key) { return String(key).startsWith('_'); }); // { a: 1 }
+ * omitBy({ a: 1, _b: 2 }, function (_value, key) { return String(key).startsWith('_'); }); // => { a: 1 }
  */
 export function omitBy<T extends object>(object: T, predicate: (value: T[keyof T], key: keyof T, object: T) => boolean): Partial<T> {
 	return pickBy(object, function (value, key, source) {
@@ -1175,7 +1177,7 @@ export type CompactObject<T> = Simplify<
  * @param {T} object - The source object
  * @returns {CompactObject<T>} A new object without `undefined` values
  * @example
- * compactObject({ a: 1, b: undefined, c: null }); // { a: 1, c: null }
+ * compactObject({ a: 1, b: undefined, c: null }); // => { a: 1, c: null }
  */
 export function compactObject<T extends object>(object: T): CompactObject<T> {
 	return pickBy(object, function (value) {
@@ -1259,8 +1261,8 @@ function flattenInto(source: object, prefix: string, separator: string, result: 
  * @throws {TypeError} when `separator` is not a string
  * @throws {RangeError} when `separator` is empty
  * @example
- * flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {} }); // { 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} }
- * flattenObject({ a: { b: 1 } }, { separator: '/' }); // { 'a/b': 1 }
+ * flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {} }); // => { 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} }
+ * flattenObject({ a: { b: 1 } }, { separator: '/' }); // => { 'a/b': 1 }
  */
 export function flattenObject(object: object, options: FlattenOptions = {}): Record<string, unknown> {
 	const separator = readSeparator('flattenObject', options);
@@ -1285,8 +1287,8 @@ export function flattenObject(object: object, options: FlattenOptions = {}): Rec
  * @throws {TypeError} when `separator` is not a string
  * @throws {RangeError} when `separator` is empty
  * @example
- * unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3 }); // { a: { b: 1, c: [2, { d: 3 }] } }
- * unflattenObject({ 'a/b': 1 }, { separator: '/' }); // { a: { b: 1 } }
+ * unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3 }); // => { a: { b: 1, c: [2, { d: 3 }] } }
+ * unflattenObject({ 'a/b': 1 }, { separator: '/' }); // => { a: { b: 1 } }
  */
 export function unflattenObject(record: Readonly<Record<string, unknown>>, options: FlattenOptions = {}): Record<string, unknown> {
 	const separator = readSeparator('unflattenObject', options);
@@ -1325,8 +1327,8 @@ function resolveParent(target: unknown, segments: ReadonlyArray<string>): object
  * @param {string} path - The dot-separated path, e.g. `'a.b.0'`
  * @returns {boolean} Whether every segment of the path is an own property
  * @example
- * hasInObjectByKeys({ a: { b: [undefined] } }, 'a.b.0'); // true
- * hasInObjectByKeys({ a: {} }, 'a.toString'); // false (inherited)
+ * hasInObjectByKeys({ a: { b: [undefined] } }, 'a.b.0'); // => true
+ * hasInObjectByKeys({ a: {} }, 'a.toString'); // => false // inherited
  */
 export function hasInObjectByKeys(target: object, path: string): boolean {
 	const segments = path.split('.');
@@ -1342,8 +1344,9 @@ export function hasInObjectByKeys(target: object, path: string): boolean {
  * @returns {boolean} `true` when an own property was found and deleted; `false` when the path does not exist or the property is non-configurable
  * @example
  * const config = { a: { b: 1, c: 2 } };
- * deleteFromObjectByKeys(config, 'a.b'); // true, config is now { a: { c: 2 } }
- * deleteFromObjectByKeys(config, 'a.x'); // false
+ * deleteFromObjectByKeys(config, 'a.b'); // => true
+ * config; // => { a: { c: 2 } }
+ * deleteFromObjectByKeys(config, 'a.x'); // => false
  */
 export function deleteFromObjectByKeys(target: object, path: string): boolean {
 	const segments = path.split('.');
@@ -1420,8 +1423,7 @@ function diffWalk(a: object, b: object, prefix: string, missing: string[], chang
  * @throws {TypeError} when `a` and `b` are not both plain objects or both arrays
  * @throws {TypeError} when a tree contains a circular reference
  * @example
- * diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 });
- * // { added: ['b.d.1', 'e'], removed: ['a'], changed: ['b.c'] }
+ * diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 }); // => { added: ['b.d.1', 'e'], removed: ['a'], changed: ['b.c'] }
  */
 export function diff(a: object, b: object): ObjectDiff {
 	if (!((Array.isArray(a) && Array.isArray(b)) || (isPlainObject(a) && isPlainObject(b)))) {

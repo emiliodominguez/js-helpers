@@ -101,8 +101,8 @@ function awaitItems<T>(iterable: AwaitableIterable<T>): AsyncIterable<T> {
  * @returns {IterableIterator<number>} An infinite iterator of numbers
  * @throws {RangeError} when `start` or `step` is not a finite number
  * @example
- * toArray(take(count(), 3)); // [0, 1, 2]
- * toArray(take(count(10, -5), 3)); // [10, 5, 0]
+ * toArray(take(count(), 3)); // => [0, 1, 2]
+ * toArray(take(count(10, -5), 3)); // => [10, 5, 0]
  */
 export function count(start = 0, step = 1): IterableIterator<number> {
 	if (!Number.isFinite(start) || !Number.isFinite(step)) {
@@ -121,8 +121,8 @@ export function count(start = 0, step = 1): IterableIterator<number> {
  * @returns {IterableIterator<T>} An iterator yielding `value` `times` times
  * @throws {RangeError} when `times` is negative, `NaN` or a non-integer finite number
  * @example
- * toArray(repeatValue('a', 3)); // ['a', 'a', 'a']
- * toArray(take(repeatValue(0), 2)); // [0, 0]
+ * toArray(repeatValue('a', 3)); // => ['a', 'a', 'a']
+ * toArray(take(repeatValue(0), 2)); // => [0, 0]
  */
 export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> {
 	assertCount('repeatValue', 'times', times, 0, true);
@@ -140,8 +140,8 @@ export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> 
  * @returns {IterableIterator<T>} An infinite iterator (or an empty one when the source is empty)
  * @throws {TypeError} when `iterable` is not iterable
  * @example
- * toArray(take(cycle([1, 2]), 5)); // [1, 2, 1, 2, 1]
- * toArray(cycle([])); // []
+ * toArray(take(cycle([1, 2]), 5)); // => [1, 2, 1, 2, 1]
+ * toArray(cycle([])); // => []
  */
 export function cycle<T>(iterable: Iterable<T>): IterableIterator<T> {
 	assertIterable('cycle', iterable);
@@ -166,7 +166,7 @@ export function cycle<T>(iterable: Iterable<T>): IterableIterator<T> {
  * @returns {IterableIterator<T>} An infinite iterator
  * @throws {TypeError} when `next` is not a function
  * @example
- * toArray(take(iterate(1, function (n) { return n * 2; }), 5)); // [1, 2, 4, 8, 16]
+ * toArray(take(iterate(1, function (n) { return n * 2; }), 5)); // => [1, 2, 4, 8, 16]
  */
 export function iterate<T>(seed: T, next: (value: T) => T): IterableIterator<T> {
 	assertFunction('iterate', 'next', next);
@@ -188,7 +188,7 @@ export function iterate<T>(seed: T, next: (value: T) => T): IterableIterator<T> 
  * @returns {IterableIterator<U>} An iterator of the mapped items
  * @throws {TypeError} when `iterable` is not iterable or `fn` is not a function
  * @example
- * toArray(map([1, 2, 3], function (n) { return n * 2; })); // [2, 4, 6]
+ * toArray(map([1, 2, 3], function (n) { return n * 2; })); // => [2, 4, 6]
  */
 export function map<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => U): IterableIterator<U> {
 	assertIterable('map', iterable);
@@ -208,7 +208,7 @@ export function map<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) =
  * @returns {IterableIterator<S>} An iterator of the items for which `predicate` returned `true`
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * toArray(filter([1, 'a', 2], function (v): v is number { return typeof v === 'number'; })); // [1, 2] typed as number[]
+ * toArray(filter([1, 'a', 2], function (v): v is number { return typeof v === 'number'; })); // => [1, 2] // typed as number[]
  */
 export function filter<T, S extends T>(iterable: Iterable<T>, predicate: (value: T, index: number) => value is S): IterableIterator<S>;
 /**
@@ -219,7 +219,7 @@ export function filter<T, S extends T>(iterable: Iterable<T>, predicate: (value:
  * @returns {IterableIterator<T>} An iterator of the items for which `predicate` returned `true`
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * toArray(filter([1, 2, 3, 4], function (n) { return n % 2 === 0; })); // [2, 4]
+ * toArray(filter([1, 2, 3, 4], function (n) { return n % 2 === 0; })); // => [2, 4]
  */
 export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T>;
 /**
@@ -230,7 +230,7 @@ export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: nu
  * @returns {IterableIterator<T>} An iterator of the items for which `predicate` returned `true`
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * toArray(filter([1, 2, 3, 4], function (n) { return n % 2 === 0; })); // [2, 4]
+ * toArray(filter([1, 2, 3, 4], function (n) { return n % 2 === 0; })); // => [2, 4]
  */
 export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('filter', iterable);
@@ -251,7 +251,7 @@ export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: nu
  * @returns {IterableIterator<U>} An iterator of the flattened items
  * @throws {TypeError} when `iterable` is not iterable, `fn` is not a function, or (while iterating) `fn` returns a non-iterable
  * @example
- * toArray(flatMap([1, 2], function (n) { return [n, n * 10]; })); // [1, 10, 2, 20]
+ * toArray(flatMap([1, 2], function (n) { return [n, n * 10]; })); // => [1, 10, 2, 20]
  */
 export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => Iterable<U>): IterableIterator<U> {
 	assertIterable('flatMap', iterable);
@@ -277,7 +277,7 @@ export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: numbe
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `n` is negative, `NaN` or a non-integer finite number
  * @example
- * toArray(take(count(), 3)); // [0, 1, 2]
+ * toArray(take(count(), 3)); // => [0, 1, 2]
  */
 export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('take', iterable);
@@ -301,7 +301,7 @@ export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `n` is negative or not an integer
  * @example
- * toArray(drop([1, 2, 3], 2)); // [3]
+ * toArray(drop([1, 2, 3], 2)); // => [3]
  */
 export function drop<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('drop', iterable);
@@ -323,7 +323,7 @@ export function drop<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
  * @returns {IterableIterator<T>} An iterator of the leading items that satisfy `predicate`
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * toArray(takeWhile(count(1), function (n) { return n < 4; })); // [1, 2, 3]
+ * toArray(takeWhile(count(1), function (n) { return n < 4; })); // => [1, 2, 3]
  */
 export function takeWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('takeWhile', iterable);
@@ -346,7 +346,7 @@ export function takeWhile<T>(iterable: Iterable<T>, predicate: (value: T, index:
  * @returns {IterableIterator<T>} An iterator of the items from the first one failing `predicate`
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * toArray(dropWhile([1, 2, 3, 1], function (n) { return n < 2; })); // [2, 3, 1]
+ * toArray(dropWhile([1, 2, 3, 1], function (n) { return n < 2; })); // => [2, 3, 1]
  */
 export function dropWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('dropWhile', iterable);
@@ -372,7 +372,7 @@ export function dropWhile<T>(iterable: Iterable<T>, predicate: (value: T, index:
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `size` is not a positive integer
  * @example
- * toArray(chunk([1, 2, 3, 4, 5], 2)); // [[1, 2], [3, 4], [5]]
+ * toArray(chunk([1, 2, 3, 4, 5], 2)); // => [[1, 2], [3, 4], [5]]
  */
 export function chunk<T>(iterable: Iterable<T>, size: number): IterableIterator<T[]> {
 	assertIterable('chunk', iterable);
@@ -403,8 +403,8 @@ export function chunk<T>(iterable: Iterable<T>, size: number): IterableIterator<
  * @throws {TypeError} when `iterable` is not iterable
  * @throws {RangeError} when `size` or `step` is not a positive integer
  * @example
- * toArray(windowed([1, 2, 3, 4], 2)); // [[1, 2], [2, 3], [3, 4]]
- * toArray(windowed([1, 2, 3, 4, 5], 2, 2)); // [[1, 2], [3, 4]]
+ * toArray(windowed([1, 2, 3, 4], 2)); // => [[1, 2], [2, 3], [3, 4]]
+ * toArray(windowed([1, 2, 3, 4, 5], 2, 2)); // => [[1, 2], [3, 4]]
  */
 export function windowed<T>(iterable: Iterable<T>, size: number, step = 1): IterableIterator<T[]> {
 	assertIterable('windowed', iterable);
@@ -458,8 +458,8 @@ function closeIterators(iterators: ReadonlyArray<Iterator<unknown>>, skip: numbe
  * @returns {IterableIterator<ZippedValues<T>>} An iterator of tuples; empty when called without iterables
  * @throws {TypeError} when an argument is not iterable
  * @example
- * toArray(zip([1, 2, 3], 'ab')); // [[1, 'a'], [2, 'b']] typed as [number, string][]
- * toArray(zip(count(), ['a', 'b'])); // [[0, 'a'], [1, 'b']]
+ * toArray(zip([1, 2, 3], 'ab')); // => [[1, 'a'], [2, 'b']] // typed as [number, string][]
+ * toArray(zip(count(), ['a', 'b'])); // => [[0, 'a'], [1, 'b']]
  */
 export function zip<T extends Array<Iterable<unknown>>>(...iterables: T): IterableIterator<ZippedValues<T>> {
 	for (const iterable of iterables) assertIterable('zip', iterable, 'iterables');
@@ -497,7 +497,7 @@ export function zip<T extends Array<Iterable<unknown>>>(...iterables: T): Iterab
  * @returns {IterableIterator<[number, T]>} An iterator of `[index, value]` tuples
  * @throws {TypeError} when `iterable` is not iterable
  * @example
- * toArray(enumerate(['a', 'b'])); // [[0, 'a'], [1, 'b']]
+ * toArray(enumerate(['a', 'b'])); // => [[0, 'a'], [1, 'b']]
  */
 export function enumerate<T>(iterable: Iterable<T>): IterableIterator<[number, T]> {
 	assertIterable('enumerate', iterable);
@@ -516,8 +516,8 @@ export function enumerate<T>(iterable: Iterable<T>): IterableIterator<[number, T
  * @returns {IterableIterator<T>} An iterator of the first item for each distinct key
  * @throws {TypeError} when `iterable` is not iterable or `keyFn` is given but is not a function
  * @example
- * toArray(unique([1, 2, 1, 3, 2])); // [1, 2, 3]
- * toArray(unique(['a', 'B', 'A'], function (s) { return s.toLowerCase(); })); // ['a', 'B']
+ * toArray(unique([1, 2, 1, 3, 2])); // => [1, 2, 3]
+ * toArray(unique(['a', 'B', 'A'], function (s) { return s.toLowerCase(); })); // => ['a', 'B']
  */
 export function unique<T>(iterable: Iterable<T>, keyFn?: (value: T, index: number) => unknown): IterableIterator<T> {
 	assertIterable('unique', iterable);
@@ -546,7 +546,7 @@ export function unique<T>(iterable: Iterable<T>, keyFn?: (value: T, index: numbe
  * @returns {IterableIterator<A>} An iterator of the successive accumulators
  * @throws {TypeError} when `iterable` is not iterable or `reducer` is not a function
  * @example
- * toArray(scan([1, 2, 3], function (sum, n) { return sum + n; }, 0)); // [1, 3, 6]
+ * toArray(scan([1, 2, 3], function (sum, n) { return sum + n; }, 0)); // => [1, 3, 6]
  */
 export function scan<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, initial: A): IterableIterator<A> {
 	assertIterable('scan', iterable);
@@ -568,7 +568,7 @@ export function scan<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, valu
  * @returns {IterableIterator<T>} An iterator over all the items, in order
  * @throws {TypeError} when an argument is not iterable
  * @example
- * toArray(concat([1, 2], new Set([3]), 'ab')); // [1, 2, 3, 'a', 'b']
+ * toArray(concat([1, 2], new Set([3]), 'ab')); // => [1, 2, 3, 'a', 'b']
  */
 export function concat<T>(...iterables: Array<Iterable<T>>): IterableIterator<T> {
 	for (const iterable of iterables) assertIterable('concat', iterable, 'iterables');
@@ -586,7 +586,9 @@ export function concat<T>(...iterables: Array<Iterable<T>>): IterableIterator<T>
  * @returns {IterableIterator<T>} An iterator of the same items
  * @throws {TypeError} when `iterable` is not iterable or `fn` is not a function
  * @example
- * toArray(tap([1, 2], function (n) { seen.push(n); })); // [1, 2], and seen is [1, 2]
+ * const seen: number[] = [];
+ * toArray(tap([1, 2], function (n) { seen.push(n); })); // => [1, 2]
+ * seen; // => [1, 2]
  */
 export function tap<T>(iterable: Iterable<T>, fn: (value: T, index: number) => void): IterableIterator<T> {
 	assertIterable('tap', iterable);
@@ -611,7 +613,7 @@ export function tap<T>(iterable: Iterable<T>, fn: (value: T, index: number) => v
  * @returns {T[]} A new array with every item
  * @throws {TypeError} when `iterable` is not iterable
  * @example
- * toArray(map(new Set([1, 2]), function (n) { return n + 1; })); // [2, 3]
+ * toArray(map(new Set([1, 2]), function (n) { return n + 1; })); // => [2, 3]
  */
 export function toArray<T>(iterable: Iterable<T>): T[] {
 	assertIterable('toArray', iterable);
@@ -628,7 +630,7 @@ export function toArray<T>(iterable: Iterable<T>): T[] {
  * @returns {A} The final accumulator (`initial` for an empty iterable)
  * @throws {TypeError} when `iterable` is not iterable or `reducer` is not a function
  * @example
- * reduce([1, 2, 3], function (sum, n) { return sum + n; }, 10); // 16
+ * reduce([1, 2, 3], function (sum, n) { return sum + n; }, 10); // => 16
  */
 export function reduce<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, initial: A): A;
 /**
@@ -640,7 +642,7 @@ export function reduce<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, va
  * @returns {T} The final accumulator
  * @throws {TypeError} when `iterable` is not iterable, `reducer` is not a function, or the iterable is empty
  * @example
- * reduce([1, 2, 3], function (max, n) { return Math.max(max, n); }); // 3
+ * reduce([1, 2, 3], function (max, n) { return Math.max(max, n); }); // => 3
  */
 export function reduce<T>(iterable: Iterable<T>, reducer: (accumulator: T, value: T, index: number) => T): T;
 /**
@@ -653,7 +655,7 @@ export function reduce<T>(iterable: Iterable<T>, reducer: (accumulator: T, value
  * @returns {A} The final accumulator
  * @throws {TypeError} when `iterable` is not iterable, `reducer` is not a function, or the iterable is empty and no initial value is given
  * @example
- * reduce([1, 2, 3], function (sum, n) { return sum + n; }, 0); // 6
+ * reduce([1, 2, 3], function (sum, n) { return sum + n; }, 0); // => 6
  */
 export function reduce<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, ...initial: [] | [A]): A {
 	assertIterable('reduce', iterable);
@@ -681,8 +683,8 @@ export function reduce<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, va
  * @returns {T | undefined} The first item, or `undefined` when the iterable is empty
  * @throws {TypeError} when `iterable` is not iterable
  * @example
- * first(count(5)); // 5
- * first([]); // undefined
+ * first(count(5)); // => 5
+ * first([]); // => undefined
  */
 export function first<T>(iterable: Iterable<T>): T | undefined {
 	assertIterable('first', iterable);
@@ -697,7 +699,7 @@ export function first<T>(iterable: Iterable<T>): T | undefined {
  * @returns {T | undefined} The last item, or `undefined` when the iterable is empty
  * @throws {TypeError} when `iterable` is not iterable
  * @example
- * last(take(count(), 4)); // 3
+ * last(take(count(), 4)); // => 3
  */
 export function last<T>(iterable: Iterable<T>): T | undefined {
 	assertIterable('last', iterable);
@@ -715,7 +717,7 @@ export function last<T>(iterable: Iterable<T>): T | undefined {
  * @returns {S | undefined} The first matching item, or `undefined` when none matches
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * find([1, 'a'], function (v): v is string { return typeof v === 'string'; }); // 'a' typed as string | undefined
+ * find([1, 'a'], function (v): v is string { return typeof v === 'string'; }); // => 'a' // typed as string | undefined
  */
 export function find<T, S extends T>(iterable: Iterable<T>, predicate: (value: T, index: number) => value is S): S | undefined;
 /**
@@ -726,7 +728,7 @@ export function find<T, S extends T>(iterable: Iterable<T>, predicate: (value: T
  * @returns {T | undefined} The first matching item, or `undefined` when none matches
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * find(count(1), function (n) { return n % 7 === 0; }); // 7
+ * find(count(1), function (n) { return n % 7 === 0; }); // => 7
  */
 export function find<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): T | undefined;
 /**
@@ -737,7 +739,7 @@ export function find<T>(iterable: Iterable<T>, predicate: (value: T, index: numb
  * @returns {T | undefined} The first matching item, or `undefined` when none matches
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * find([1, 2, 3], function (n) { return n > 1; }); // 2
+ * find([1, 2, 3], function (n) { return n > 1; }); // => 2
  */
 export function find<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): T | undefined {
 	assertIterable('find', iterable);
@@ -755,7 +757,7 @@ export function find<T>(iterable: Iterable<T>, predicate: (value: T, index: numb
  * @returns {boolean} Whether any item matches (`false` for an empty iterable)
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * some(count(), function (n) { return n > 100; }); // true
+ * some(count(), function (n) { return n > 100; }); // => true
  */
 export function some<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): boolean {
 	assertIterable('some', iterable);
@@ -773,7 +775,7 @@ export function some<T>(iterable: Iterable<T>, predicate: (value: T, index: numb
  * @returns {boolean} Whether all items match (`true` for an empty iterable)
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is not a function
  * @example
- * every([2, 4], function (n) { return n % 2 === 0; }); // true
+ * every([2, 4], function (n) { return n % 2 === 0; }); // => true
  */
 export function every<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): boolean {
 	assertIterable('every', iterable);
@@ -792,8 +794,8 @@ export function every<T>(iterable: Iterable<T>, predicate: (value: T, index: num
  * @returns {number} The number of (matching) items
  * @throws {TypeError} when `iterable` is not iterable or `predicate` is given but is not a function
  * @example
- * countItems(new Set([1, 2, 3])); // 3
- * countItems([1, 2, 3], function (n) { return n > 1; }); // 2
+ * countItems(new Set([1, 2, 3])); // => 3
+ * countItems([1, 2, 3], function (n) { return n > 1; }); // => 2
  */
 export function countItems<T>(iterable: Iterable<T>, predicate?: (value: T, index: number) => boolean): number {
 	assertIterable('countItems', iterable);
@@ -817,7 +819,7 @@ export function countItems<T>(iterable: Iterable<T>, predicate?: (value: T, inde
  * @returns {AsyncIterableIterator<U>} An async iterator of the mapped items
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable, or `fn` is not a function
  * @example
- * await toArrayAsync(mapAsync([1, 2], async function (n) { return n * 2; })); // [2, 4]
+ * await toArrayAsync(mapAsync([1, 2], async function (n) { return n * 2; })); // => [2, 4]
  */
 export function mapAsync<T, U>(iterable: AwaitableIterable<T>, fn: (value: T, index: number) => U | PromiseLike<U>): AsyncIterableIterator<U> {
 	assertAwaitableIterable('mapAsync', iterable);
@@ -837,7 +839,7 @@ export function mapAsync<T, U>(iterable: AwaitableIterable<T>, fn: (value: T, in
  * @returns {AsyncIterableIterator<S>} An async iterator of the kept items
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable, or `predicate` is not a function
  * @example
- * await toArrayAsync(filterAsync([1, 'a'], function (v): v is number { return typeof v === 'number'; })); // [1]
+ * await toArrayAsync(filterAsync([1, 'a'], function (v): v is number { return typeof v === 'number'; })); // => [1]
  */
 export function filterAsync<T, S extends T>(iterable: AwaitableIterable<T>, predicate: (value: T, index: number) => value is S): AsyncIterableIterator<S>;
 /**
@@ -848,7 +850,7 @@ export function filterAsync<T, S extends T>(iterable: AwaitableIterable<T>, pred
  * @returns {AsyncIterableIterator<T>} An async iterator of the kept items
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable, or `predicate` is not a function
  * @example
- * await toArrayAsync(filterAsync([1, 2, 3], async function (n) { return n > 1; })); // [2, 3]
+ * await toArrayAsync(filterAsync([1, 2, 3], async function (n) { return n > 1; })); // => [2, 3]
  */
 export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value: T, index: number) => boolean | PromiseLike<boolean>): AsyncIterableIterator<T>;
 /**
@@ -859,7 +861,7 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
  * @returns {AsyncIterableIterator<T>} An async iterator of the kept items
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable, or `predicate` is not a function
  * @example
- * await toArrayAsync(filterAsync([1, 2, 3], async function (n) { return n > 1; })); // [2, 3]
+ * await toArrayAsync(filterAsync([1, 2, 3], async function (n) { return n > 1; })); // => [2, 3]
  */
 export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value: T, index: number) => boolean | PromiseLike<boolean>): AsyncIterableIterator<T> {
 	assertAwaitableIterable('filterAsync', iterable);
@@ -879,7 +881,7 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable
  * @throws {RangeError} when `n` is negative, `NaN` or a non-integer finite number
  * @example
- * await toArrayAsync(takeAsync(count(), 2)); // [0, 1]
+ * await toArrayAsync(takeAsync(count(), 2)); // => [0, 1]
  */
 export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIterableIterator<T> {
 	assertAwaitableIterable('takeAsync', iterable);
@@ -903,7 +905,7 @@ export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIt
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable
  * @throws {RangeError} when `size` is not a positive integer
  * @example
- * await toArrayAsync(chunkAsync([1, 2, 3], 2)); // [[1, 2], [3]]
+ * await toArrayAsync(chunkAsync([1, 2, 3], 2)); // => [[1, 2], [3]]
  */
 export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): AsyncIterableIterator<T[]> {
 	assertAwaitableIterable('chunkAsync', iterable);
@@ -930,8 +932,8 @@ export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): Asy
  * @returns {Promise<T[]>} A promise of a new array with every (awaited) item
  * @throws {TypeError} when `iterable` is neither async iterable nor iterable
  * @example
- * await toArrayAsync(mapAsync([1, 2], function (n) { return n + 1; })); // [2, 3]
- * await toArrayAsync([Promise.resolve(1), 2]); // [1, 2]
+ * await toArrayAsync(mapAsync([1, 2], function (n) { return n + 1; })); // => [2, 3]
+ * await toArrayAsync([Promise.resolve(1), 2]); // => [1, 2]
  */
 export function toArrayAsync<T>(iterable: AwaitableIterable<T>): Promise<T[]> {
 	assertAwaitableIterable('toArrayAsync', iterable);

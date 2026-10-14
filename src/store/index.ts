@@ -238,9 +238,12 @@ function derive<S, T>(source: ReadonlyStore<S>, selector: (state: S) => T, equal
  * @example
  * const counter = createStore({ count: 0, step: 1 });
  * const count = counter.select(function (s) { return s.count; });
- * count.subscribe(function () { console.log('count is', count.getState()); });
- * counter.setState(function (s) { return { ...s, count: s.count + s.step }; }); // logs "count is 1"
- * counter.setState(function (s) { return { ...s, step: 2 }; }); // count unchanged: no log
+ * const seen: number[] = [];
+ * count.subscribe(function () { seen.push(count.getState()); });
+ * counter.setState(function (s) { return { ...s, count: s.count + s.step }; }); // count changed: notifies
+ * counter.setState(function (s) { return { ...s, step: 2 }; }); // count unchanged: no notification
+ * seen; // => [1]
+ * counter.getState(); // => { count: 1, step: 2 }
  * // React: const value = useSyncExternalStore(count.subscribe, count.getState);
  */
 export function createStore<S>(initialState: S, options: StoreOptions<S> = {}): Store<S> {

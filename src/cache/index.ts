@@ -124,17 +124,25 @@ function assertTTL(ttl: number | undefined): void {
  * @example
  * const cache = createLRUCache<string, number>({ max: 2 });
  * cache.set('a', 1).set('b', 2);
- * cache.get('a'); // 1 ('a' is now the most recently used)
- * cache.set('c', 3); // evicts 'b'
- * [...cache.keys()]; // ['c', 'a']
+ * cache.get('a'); // => 1 // 'a' is now the most recently used
+ * cache.set('c', 3); // evicts 'b', the least recently used
+ * cache.has('b'); // => false
+ * [...cache.keys()]; // => ['c', 'a'] // most recently used first
  * @example
- * // TTL-only cache: unbounded size, entries expire after one minute (5 s for 'otp')
- * const sessions = createLRUCache<string, string>({ max: Infinity, ttl: 60_000 });
+ * // TTL-only cache: unbounded size, entries expire after one minute (5 s for 'otp'); `now` is injectable for tests
+ * let clock = 0;
+ * const sessions = createLRUCache<string, string>({ max: Infinity, ttl: 60_000, now: function () { return clock; } });
  * sessions.set('otp', '123456', { ttl: 5_000 });
- * setInterval(function () { sessions.prune(); }, 60_000); // optional: reclaim memory of untouched expired entries
+ * sessions.set('user', 'ada');
+ * clock = 5_000;
+ * sessions.get('otp'); // => undefined
+ * sessions.get('user'); // => 'ada'
+ * sessions.prune(); // optional (e.g. on an interval): reclaims the memory of expired entries nobody looked up
  * @example
  * // Bounded memoization
- * const slowSquare = memoize(function (n: number): number { return n * n; }, { cache: createLRUCache({ max: 100 }) });
+ * import { memoize } from '@emiliodominguez/js-helpers/functions';
+ * const square = memoize(function (n: number): number { return n * n; }, { cache: createLRUCache({ max: 100 }) });
+ * square(4); // => 16
  */
 export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOptions<K, V>): LRUCache<K, V> {
 	if (typeof options !== 'object' || options === null) throw new TypeError('createLRUCache: options must be an object');

@@ -127,11 +127,15 @@ function assertHandler(caller: string, value: unknown): asserts value is AnyFunc
  * @throws {RangeError} (as a rejection) from `waitFor` when `timeout` is neither a number between `0` and `2^31 - 1` nor `Infinity`
  * @example
  * const events = createEmitter<{ ready: void; message: { text: string } }>();
- * const stop = events.on('message', function (msg) { console.log(msg.text); });
+ * const received: string[] = [];
+ * const stop = events.on('message', function (msg) { received.push(msg.text); });
  * events.emit('ready');
  * events.emit('message', { text: 'hi' });
  * stop();
- * const next = await events.waitFor('message', { timeout: 1000 });
+ * events.emit('message', { text: 'unheard' });
+ * received; // => ['hi']
+ * setTimeout(function () { events.emit('message', { text: 'later' }); }, 10);
+ * await events.waitFor('message', { timeout: 1000 }); // => { text: 'later' }
  */
 export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	const registry = new Map<PropertyKey, Registration[]>();

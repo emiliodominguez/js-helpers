@@ -105,7 +105,7 @@ const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; larg
  * @throws {TypeError} when the value is not a number
  * @throws {RangeError} when the value is `NaN`
  * @example
- * readChannel('toRgba', 'r', 12); // 12
+ * readChannel('toRgba', 'r', 12); // => 12
  */
 function readChannel(name: string, channel: string, value: unknown): number {
 	if (typeof value !== 'number') throw new TypeError(`${name}: channel "${channel}" must be a number, received ${typeof value}`);
@@ -118,7 +118,7 @@ function readChannel(name: string, channel: string, value: unknown): number {
  * @param {number} value - The channel value
  * @returns {number} An integer in `[0, 255]`
  * @example
- * toByte(255.6); // 255
+ * toByte(255.6); // => 255
  */
 function toByte(value: number): number {
 	return Math.round(clamp(value, 0, 255)) + 0;
@@ -129,7 +129,7 @@ function toByte(value: number): number {
  * @param {number} value - An integer in `[0, 255]`
  * @returns {string} Two hex digits
  * @example
- * hexByte(10); // '0a'
+ * hexByte(10); // => '0a'
  */
 function hexByte(value: number): string {
 	return value.toString(16).padStart(2, '0');
@@ -140,7 +140,7 @@ function hexByte(value: number): string {
  * @param {number} value - Channel in `[0, 255]`
  * @returns {number} Linear channel in `[0, 1]`
  * @example
- * linearChannel(255); // 1
+ * linearChannel(255); // => 1
  */
 function linearChannel(value: number): number {
 	const unit = value / 255;
@@ -154,9 +154,9 @@ function linearChannel(value: number): number {
  * @returns {Rgba} The colour, with alpha `1` when the string has no alpha digits
  * @throws {TypeError} when `hex` is not a string or not a valid hex colour
  * @example
- * parseHex('#ff8000'); // { r: 255, g: 128, b: 0, a: 1 }
- * parseHex('0F0'); // { r: 0, g: 255, b: 0, a: 1 }
- * parseHex('#00000080'); // { r: 0, g: 0, b: 0, a: 0.5019607843137255 }
+ * parseHex('#ff8000'); // => { r: 255, g: 128, b: 0, a: 1 }
+ * parseHex('0F0'); // => { r: 0, g: 255, b: 0, a: 1 }
+ * parseHex('#00000080'); // => { r: 0, g: 0, b: 0, a: 0.5019607843137255 }
  */
 export function parseHex(hex: string): Rgba {
 	if (typeof hex !== 'string') throw new TypeError(`parseHex: expected a string, received ${typeof hex}`);
@@ -188,9 +188,9 @@ export function parseHex(hex: string): Rgba {
  * @throws {TypeError} when `input` is neither a string nor an object, is an invalid hex string, or has a non-numeric channel
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * toRgba('#fff'); // { r: 255, g: 255, b: 255, a: 1 }
- * toRgba({ r: 300, g: 12.4, b: -5 }); // { r: 255, g: 12, b: 0, a: 1 }
- * toRgba({ r: 0, g: 0, b: 0, a: 0.5 }); // { r: 0, g: 0, b: 0, a: 0.5 }
+ * toRgba('#fff'); // => { r: 255, g: 255, b: 255, a: 1 }
+ * toRgba({ r: 300, g: 12.4, b: -5 }); // => { r: 255, g: 12, b: 0, a: 1 }
+ * toRgba({ r: 0, g: 0, b: 0, a: 0.5 }); // => { r: 0, g: 0, b: 0, a: 0.5 }
  */
 export function toRgba(input: ColorInput): Rgba {
 	if (typeof input === 'string') return parseHex(input);
@@ -215,10 +215,10 @@ export function toRgba(input: ColorInput): Rgba {
  * @throws {TypeError} when `color` is not a valid colour (see {@link toRgba})
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * toHex({ r: 255, g: 128, b: 0 }); // '#ff8000'
- * toHex({ r: 0, g: 0, b: 0, a: 0.5 }); // '#00000080'
- * toHex('#ABC', { alpha: true }); // '#aabbccff'
- * toHex({ r: 0, g: 0, b: 0, a: 0.5 }, { alpha: false }); // '#000000'
+ * toHex({ r: 255, g: 128, b: 0 }); // => '#ff8000'
+ * toHex({ r: 0, g: 0, b: 0, a: 0.5 }); // => '#00000080'
+ * toHex('#ABC', { alpha: true }); // => '#aabbccff'
+ * toHex({ r: 0, g: 0, b: 0, a: 0.5 }, { alpha: false }); // => '#000000'
  */
 export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
 	const { r, g, b, a } = toRgba(color);
@@ -234,8 +234,8 @@ export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
  * @throws {TypeError} when `color` is not a valid colour (see {@link toRgba})
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * rgbToHsl({ r: 255, g: 0, b: 0 }); // { h: 0, s: 100, l: 50 }
- * rgbToHsl('#808080'); // { h: 0, s: 0, l: 50.19607843137255 }
+ * rgbToHsl({ r: 255, g: 0, b: 0 }); // => { h: 0, s: 100, l: 50 }
+ * rgbToHsl('#808080'); // => { h: 0, s: 0, l: 50.19607843137255 }
  */
 export function rgbToHsl(color: ColorInput): Hsl {
 	const rgba = toRgba(color);
@@ -264,9 +264,9 @@ export function rgbToHsl(color: ColorInput): Hsl {
  * @throws {TypeError} when `hsl` is not an object or a component is not a number
  * @throws {RangeError} when a component is `NaN` or the hue is infinite
  * @example
- * hslToRgb({ h: 0, s: 100, l: 50 }); // { r: 255, g: 0, b: 0 }
- * hslToRgb({ h: 120, s: 100, l: 25 }); // { r: 0, g: 128, b: 0 }
- * hslToRgb({ h: -120, s: 100, l: 50 }); // { r: 0, g: 0, b: 255 }
+ * hslToRgb({ h: 0, s: 100, l: 50 }); // => { r: 255, g: 0, b: 0 }
+ * hslToRgb({ h: 120, s: 100, l: 25 }); // => { r: 0, g: 128, b: 0 }
+ * hslToRgb({ h: -120, s: 100, l: 50 }); // => { r: 0, g: 0, b: 255 }
  */
 export function hslToRgb(hsl: Hsl): Rgb {
 	if (typeof hsl !== 'object' || hsl === null) throw new TypeError(`hslToRgb: expected an { h, s, l } object, received ${hsl === null ? 'null' : typeof hsl}`);
@@ -303,9 +303,9 @@ export function hslToRgb(hsl: Hsl): Rgb {
  * @throws {TypeError} when a colour is invalid (see {@link toRgba})
  * @throws {RangeError} when `weight` is not in `[0, 1]` or a channel is `NaN`
  * @example
- * mix('#000000', '#ffffff'); // { r: 128, g: 128, b: 128, a: 1 }
- * mix('#ff0000', '#0000ff', 0.25); // { r: 191, g: 0, b: 64, a: 1 }
- * mix({ r: 0, g: 0, b: 0, a: 0 }, '#000', 0.5); // { r: 0, g: 0, b: 0, a: 0.5 }
+ * mix('#000000', '#ffffff'); // => { r: 128, g: 128, b: 128, a: 1 }
+ * mix('#ff0000', '#0000ff', 0.25); // => { r: 191, g: 0, b: 64, a: 1 }
+ * mix({ r: 0, g: 0, b: 0, a: 0 }, '#000', 0.5); // => { r: 0, g: 0, b: 0, a: 0.5 }
  */
 export function mix(colorA: ColorInput, colorB: ColorInput, weight = 0.5): Rgba {
 	if (!(weight >= 0 && weight <= 1)) throw new RangeError(`mix: weight must be in [0, 1], received ${weight}`);
@@ -358,9 +358,9 @@ function assertAmount(name: string, amount: number): void {
  * @throws {TypeError} when `color` is invalid (see {@link toRgba})
  * @throws {RangeError} when `amount` is not in `[0, 100]` or a channel is `NaN`
  * @example
- * lighten('#000000', 50); // { r: 128, g: 128, b: 128, a: 1 }
- * lighten('#ff0000', 20); // { r: 255, g: 102, b: 102, a: 1 }
- * lighten('#ffffff', 10); // { r: 255, g: 255, b: 255, a: 1 }
+ * lighten('#000000', 50); // => { r: 128, g: 128, b: 128, a: 1 }
+ * lighten('#ff0000', 20); // => { r: 255, g: 102, b: 102, a: 1 }
+ * lighten('#ffffff', 10); // => { r: 255, g: 255, b: 255, a: 1 }
  */
 export function lighten(color: ColorInput, amount: number): Rgba {
 	assertAmount('lighten', amount);
@@ -376,8 +376,8 @@ export function lighten(color: ColorInput, amount: number): Rgba {
  * @throws {TypeError} when `color` is invalid (see {@link toRgba})
  * @throws {RangeError} when `amount` is not in `[0, 100]` or a channel is `NaN`
  * @example
- * darken('#ffffff', 50); // { r: 128, g: 128, b: 128, a: 1 }
- * darken('#ff0000', 20); // { r: 153, g: 0, b: 0, a: 1 }
+ * darken('#ffffff', 50); // => { r: 128, g: 128, b: 128, a: 1 }
+ * darken('#ff0000', 20); // => { r: 153, g: 0, b: 0, a: 1 }
  */
 export function darken(color: ColorInput, amount: number): Rgba {
 	assertAmount('darken', amount);
@@ -392,7 +392,7 @@ export function darken(color: ColorInput, amount: number): Rgba {
  * @throws {TypeError} when `color` is invalid (see {@link toRgba})
  * @throws {RangeError} when `alpha` is not in `[0, 1]` or a channel is `NaN`
  * @example
- * withAlpha('#ff0000', 0.5); // { r: 255, g: 0, b: 0, a: 0.5 }
+ * withAlpha('#ff0000', 0.5); // => { r: 255, g: 0, b: 0, a: 0.5 }
  */
 export function withAlpha(color: ColorInput, alpha: number): Rgba {
 	if (!(alpha >= 0 && alpha <= 1)) throw new RangeError(`withAlpha: alpha must be in [0, 1], received ${alpha}`);
@@ -408,9 +408,9 @@ export function withAlpha(color: ColorInput, alpha: number): Rgba {
  * @throws {TypeError} when `color` is invalid (see {@link toRgba})
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * relativeLuminance('#ffffff'); // 1
- * relativeLuminance('#000000'); // 0
- * relativeLuminance('#ff0000'); // 0.2126
+ * relativeLuminance('#ffffff'); // => 1
+ * relativeLuminance('#000000'); // => 0
+ * relativeLuminance('#ff0000'); // => 0.2126
  */
 export function relativeLuminance(color: ColorInput): number {
 	const { r, g, b } = toRgba(color);
@@ -426,9 +426,9 @@ export function relativeLuminance(color: ColorInput): number {
  * @throws {TypeError} when a colour is invalid (see {@link toRgba})
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * contrastRatio('#000', '#fff'); // 21
- * contrastRatio('#777', '#fff'); // 4.4778…
- * contrastRatio('#abc', '#abc'); // 1
+ * contrastRatio('#000', '#fff'); // => 21
+ * contrastRatio('#777', '#fff').toFixed(4); // => '4.4781'
+ * contrastRatio('#abc', '#abc'); // => 1
  */
 export function contrastRatio(a: ColorInput, b: ColorInput): number {
 	const first = relativeLuminance(a);
@@ -447,9 +447,9 @@ export function contrastRatio(a: ColorInput, b: ColorInput): number {
  * @throws {TypeError} when a colour is invalid (see {@link toRgba})
  * @throws {RangeError} when a channel is `NaN`
  * @example
- * getReadableTextColor('#1e3a8a'); // '#ffffff'
- * getReadableTextColor('#fde68a'); // '#000000'
- * getReadableTextColor('#222', { light: '#eee', dark: '#333' }); // '#eee'
+ * getReadableTextColor('#1e3a8a'); // => '#ffffff'
+ * getReadableTextColor('#fde68a'); // => '#000000'
+ * getReadableTextColor('#222', { light: '#eee', dark: '#333' }); // => '#eee'
  */
 export function getReadableTextColor<L extends ColorInput = '#ffffff', D extends ColorInput = '#000000'>(
 	background: ColorInput,
@@ -470,10 +470,10 @@ export function getReadableTextColor<L extends ColorInput = '#ffffff', D extends
  * @throws {TypeError} when a colour is invalid (see {@link toRgba})
  * @throws {RangeError} when `level` is not `'AA'` or `'AAA'`, or a channel is `NaN`
  * @example
- * meetsContrast('#767676', '#ffffff'); // true (4.54:1)
- * meetsContrast('#777777', '#ffffff'); // false (4.48:1)
- * meetsContrast('#777777', '#ffffff', { largeText: true }); // true
- * meetsContrast('#767676', '#ffffff', { level: 'AAA' }); // false
+ * meetsContrast('#767676', '#ffffff'); // => true // 4.54:1
+ * meetsContrast('#777777', '#ffffff'); // => false // 4.48:1
+ * meetsContrast('#777777', '#ffffff', { largeText: true }); // => true
+ * meetsContrast('#767676', '#ffffff', { level: 'AAA' }); // => false
  */
 export function meetsContrast(foreground: ColorInput, background: ColorInput, options: MeetsContrastOptions = {}): boolean {
 	const { level = 'AA', largeText = false } = options;

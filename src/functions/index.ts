@@ -89,7 +89,7 @@ function assertFunction(caller: string, value: unknown): asserts value is AnyFun
  * @example
  * const user = { name: 'Ada' };
  * function greet(this: { name: string }, greeting: string): string { return `${greeting}, ${this.name}`; }
- * bind(greet, user)('Hi'); // 'Hi, Ada'
+ * bind(greet, user)('Hi'); // => 'Hi, Ada'
  */
 export function bind<T, A extends unknown[], R>(fn: (this: T, ...args: A) => R, thisArg: T): (...args: A) => R {
 	assertFunction('bind', fn);
@@ -110,7 +110,7 @@ export function bind<T, A extends unknown[], R>(fn: (this: T, ...args: A) => R, 
  * @throws {TypeError} when `fn` is not a function
  * @example
  * function add(a: number, b: number): number { return a + b; }
- * partial(add, 1)(2); // 3
+ * partial(add, 1)(2); // => 3
  */
 export function partial<A extends unknown[], B extends unknown[], R>(fn: (...args: [...A, ...B]) => R, ...args: A): (...rest: B) => R {
 	assertFunction('partial', fn);
@@ -146,9 +146,9 @@ type CurryStep<A extends unknown[], R> = [] extends A ? R : Curried<A, R>;
  * @template A - The (tuple) parameter types still expected
  * @template R - The final return type
  * @example
- * declare const add3: Curried<[number, number, number], number>;
- * add3(1)(2)(3); // number
- * add3(1, 2)(3); // number
+ * const add3: Curried<[number, number, number], number> = curry(function (a: number, b: number, c: number): number { return a + b + c; });
+ * add3(1)(2)(3); // => 6 // typed as number
+ * add3(1, 2)(3); // => 6 // typed as number
  */
 export type Curried<A extends unknown[], R> = number extends A['length']
 	? (...args: A) => unknown
@@ -171,10 +171,10 @@ export type Curried<A extends unknown[], R> = number extends A['length']
  * @throws {RangeError} when `arity` is negative or not an integer
  * @example
  * const add3 = curry(function (a: number, b: number, c: number): number { return a + b + c; });
- * add3(1)(2)(3); // 6
- * add3(1, 2)(3); // 6
+ * add3(1)(2)(3); // => 6
+ * add3(1, 2)(3); // => 6
  * const sum = function (...nums: number[]): number { return nums.reduce(function (a, b) { return a + b; }, 0); };
- * curry<[number, number], number>(sum, 2)(1)(2); // 3
+ * curry<[number, number], number>(sum, 2)(1)(2); // => 3
  */
 export function curry<A extends unknown[], R>(fn: (...args: A) => R, arity: number = fn.length): Curried<A, R> {
 	assertFunction('curry', fn);
@@ -214,8 +214,8 @@ export function curry<A extends unknown[], R>(fn: (...args: A) => R, arity: numb
  * @example
  * function inc(x: number): number { return x + 1; }
  * function double(x: number): number { return x * 2; }
- * compose(double, inc)(3); // 8
- * compose()(5); // 5
+ * compose(double, inc)(3); // => 8
+ * compose()(5); // => 5
  */
 export function compose(): <T>(value: T) => T;
 export function compose<A extends unknown[], R>(f1: (...args: A) => R): (...args: A) => R;
@@ -259,7 +259,7 @@ export function compose(...fns: AnyFunction[]): (...args: unknown[]) => unknown 
  * @example
  * function inc(x: number): number { return x + 1; }
  * function double(x: number): number { return x * 2; }
- * pipe(double, inc)(3); // 7
+ * pipe(double, inc)(3); // => 7
  */
 export function pipe(): <T>(value: T) => T;
 export function pipe<A extends unknown[], R>(f1: (...args: A) => R): (...args: A) => R;
@@ -365,9 +365,9 @@ export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, unkn
  * @returns {unknown} The cache key
  * @throws {TypeError} when the arguments contain a circular structure
  * @example
- * defaultMemoizeKey(1); // 1
- * defaultMemoizeKey('a', 2); // '["a",2]'
- * defaultMemoizeKey(NaN, 2); // '["NaN",2]'
+ * defaultMemoizeKey(1); // => 1
+ * defaultMemoizeKey('a', 2); // => '["a",2]'
+ * defaultMemoizeKey(NaN, 2); // => '["NaN",2]'
  */
 export function defaultMemoizeKey(...args: unknown[]): unknown {
 	if (args.length === 1) {
@@ -408,9 +408,9 @@ export function defaultMemoizeKey(...args: unknown[]): unknown {
  * @throws {TypeError} when `fn` or `options.resolver` is not a function
  * @example
  * const square = memoize(function (n: number): number { return n * n; });
- * square(3); // 9 (computed)
- * square(3); // 9 (cached)
- * square.cache.size; // 1
+ * square(3); // => 9 // computed
+ * square(3); // => 9 // cached
+ * square.cache.size; // => 1
  * square.clear();
  */
 export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, unknown> = Map<unknown, ReturnType<F>>>(
@@ -492,8 +492,16 @@ export interface Throttled<F extends AnyFunction> {
  * @throws {TypeError} when `fn` is not a function, or when both `leading` and `trailing` are `false`
  * @throws {RangeError} when `wait` is negative, `NaN` or infinite
  * @example
- * const onScroll = throttle(function (y: number): void { console.log(y); }, 100, { trailing: true });
- * window.addEventListener('scroll', function () { onScroll(window.scrollY); });
+ * import { sleep } from '@emiliodominguez/js-helpers/async';
+ * const positions: number[] = [];
+ * const onScroll = throttle(function (y: number): void { positions.push(y); }, 20, { trailing: true });
+ * onScroll(10); // leading edge: runs now
+ * onScroll(20);
+ * onScroll(30);
+ * positions; // => [10]
+ * await sleep(50);
+ * positions; // => [10, 30] // trailing edge: runs with the latest arguments
+ * // In a browser: window.addEventListener('scroll', function () { onScroll(window.scrollY); });
  */
 export function throttle<F extends AnyFunction>(fn: F, wait: number, options: ThrottleOptions = {}): Throttled<F> {
 	assertFunction('throttle', fn);
@@ -639,9 +647,18 @@ export interface Debounced<F extends AnyFunction> {
  * @throws {TypeError} when `fn` is not a function, or when both `leading` and `trailing` are `false`
  * @throws {RangeError} when `wait` or `maxWait` is negative, `NaN` or infinite
  * @example
- * const save = debounce(function (text: string): void { api.save(text); }, 300);
- * input.addEventListener('input', function () { save(input.value); });
- * window.addEventListener('beforeunload', function () { save.flush(); });
+ * import { sleep } from '@emiliodominguez/js-helpers/async';
+ * const saved: string[] = [];
+ * const save = debounce(function (text: string): void { saved.push(text); }, 20);
+ * save('h');
+ * save('he');
+ * save('hey');
+ * saved; // => []
+ * await sleep(50);
+ * saved; // => ['hey'] // one call, with the latest arguments
+ * save('bye');
+ * save.flush(); // runs the pending call now (e.g. on 'beforeunload')
+ * saved; // => ['hey', 'bye']
  */
 export function debounce<F extends AnyFunction>(fn: F, wait: number, options: DebounceOptions = {}): Debounced<F> {
 	assertFunction('debounce', fn);
@@ -813,9 +830,11 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
  * @returns {F} A function that invokes `fn` at most once
  * @throws {TypeError} when `fn` is not a function
  * @example
- * const init = once(function (): number { console.log('init'); return 42; });
- * init(); // logs 'init', returns 42
- * init(); // returns 42
+ * let runs = 0;
+ * const init = once(function (): number { runs++; return 42; });
+ * init(); // => 42
+ * init(); // => 42 // the first result, without running the function again
+ * runs; // => 1
  */
 export function once<F extends AnyFunction>(fn: F): F {
 	assertFunction('once', fn);
@@ -851,7 +870,7 @@ export function once<F extends AnyFunction>(fn: F): F {
  * @throws {RangeError} when `n` is not a non-negative integer
  * @example
  * const f = before(3, function (x: number): number { return x * 2; });
- * [f(1), f(2), f(3)]; // [2, 4, 4]
+ * [f(1), f(2), f(3)]; // => [2, 4, 4]
  */
 export function before<F extends AnyFunction>(n: number, fn: F): (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined {
 	assertCount('before', 'n', n);
@@ -881,8 +900,8 @@ export function before<F extends AnyFunction>(n: number, fn: F): (this: ThisPara
  * @throws {RangeError} when `n` is not a non-negative integer
  * @example
  * const done = after(2, function (): string { return 'all loaded'; });
- * done(); // undefined
- * done(); // 'all loaded'
+ * done(); // => undefined
+ * done(); // => 'all loaded'
  */
 export function after<F extends AnyFunction>(n: number, fn: F): (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined {
 	assertCount('after', 'n', n);
@@ -907,7 +926,7 @@ export function after<F extends AnyFunction>(n: number, fn: F): (this: ThisParam
  * @throws {TypeError} when `predicate` is not a function
  * @example
  * const isOdd = negate(function (n: number): boolean { return n % 2 === 0; });
- * [1, 2, 3].filter(isOdd); // [1, 3]
+ * [1, 2, 3].filter(isOdd); // => [1, 3]
  */
 export function negate<A extends unknown[], T = unknown>(predicate: (this: T, ...args: A) => unknown): (this: T, ...args: A) => boolean {
 	assertFunction('negate', predicate);
@@ -923,7 +942,7 @@ export function negate<A extends unknown[], T = unknown>(predicate: (this: T, ..
  * @param {T} value - Any value
  * @returns {T} `value`
  * @example
- * [1, 0, 2].filter(identity); // [1, 2]
+ * [1, 0, 2].filter(identity); // => [1, 2]
  */
 export function identity<T>(value: T): T {
 	return value;
@@ -934,7 +953,9 @@ export function identity<T>(value: T): T {
  * @param {...unknown} _args - Ignored
  * @returns {void}
  * @example
- * promise.catch(noop);
+ * const promise = Promise.reject(new Error('ignored'));
+ * promise.catch(noop); // swallows the rejection
+ * noop(1, 2, 3); // => undefined
  */
 export function noop(..._args: unknown[]): void {
 	// Intentionally empty.
@@ -950,8 +971,9 @@ export function noop(..._args: unknown[]): void {
  * produces `[undefined, undefined]`, which is indistinguishable from a successful `undefined` result.
  * @template T - The success value type
  * @example
- * const [error, data] = attempt(JSON.parse, text);
- * if (error !== undefined) console.error(error); else use(data);
+ * const [error, data]: Result<{ ok: boolean }> = attempt(JSON.parse, '{"ok":true}');
+ * error; // => undefined
+ * data; // => { ok: true }
  */
 export type Result<T> = [error: unknown, result: undefined] | [error: undefined, result: T];
 
@@ -965,8 +987,10 @@ export type Result<T> = [error: unknown, result: undefined] | [error: undefined,
  * @param {...A} args - The arguments to call it with
  * @returns {Result<R>} `[undefined, result]` on success, `[error, undefined]` when `fn` threw
  * @example
- * attempt(JSON.parse, '{"a":1}'); // [undefined, { a: 1 }]
- * attempt(JSON.parse, '{'); // [SyntaxError, undefined]
+ * attempt(JSON.parse, '{"a":1}'); // => [undefined, { a: 1 }]
+ * const [error, value] = attempt(JSON.parse, '{');
+ * error instanceof SyntaxError; // => true
+ * value; // => undefined
  */
 export function attempt<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Result<R> {
 	try {
@@ -987,8 +1011,8 @@ export function attempt<A extends unknown[], R>(fn: (...args: A) => R, ...args: 
  * @throws {RangeError} when `n` is not an integer between `0` and `2^32 - 1`
  * @throws {TypeError} when `fn` is not a function
  * @example
- * times(3, function (i) { return i * i; }); // [0, 1, 4]
- * times(0, Math.random); // []
+ * times(3, function (i) { return i * i; }); // => [0, 1, 4]
+ * times(0, Math.random); // => []
  */
 export function times<R>(n: number, fn: (index: number) => R): R[] {
 	assertCount('times', 'n', n);
@@ -1020,7 +1044,7 @@ export type Reverse<T extends unknown[]> = number extends T['length'] ? T : T ex
  * @throws {TypeError} when `fn` is not a function
  * @example
  * function divide(a: number, b: number): number { return a / b; }
- * flip(divide)(2, 10); // 5
+ * flip(divide)(2, 10); // => 5
  */
 export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: Reverse<A>) => R {
 	assertFunction('flip', fn);
@@ -1041,7 +1065,7 @@ export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: R
  * @returns {(arg: T) => R} A function accepting (and forwarding) a single argument
  * @throws {TypeError} when `fn` is not a function
  * @example
- * ['1', '2', '3'].map(unary(parseInt)); // [1, 2, 3] (instead of [1, NaN, NaN])
+ * ['1', '2', '3'].map(unary(parseInt)); // => [1, 2, 3] // instead of [1, NaN, NaN]
  */
 export function unary<T, R>(fn: (arg: T) => R): (arg: T) => R {
 	assertFunction('unary', fn);
@@ -1058,7 +1082,7 @@ export function unary<T, R>(fn: (arg: T) => R): (arg: T) => R {
  * @returns {(...args: unknown[]) => T} A function returning `value`
  * @example
  * const zero = constant(0);
- * [1, 2].map(zero); // [0, 0]
+ * [1, 2].map(zero); // => [0, 0]
  */
 export function constant<T>(value: T): (..._args: unknown[]) => T {
 	return function constantValue(): T {
@@ -1072,7 +1096,7 @@ export function constant<T>(value: T): (..._args: unknown[]) => T {
  * @param {ReadonlyArray<unknown>} previous - The cached arguments
  * @returns {boolean} `true` when both lists hold the same values
  * @example
- * shallowEqualArgs([1, NaN], [1, NaN]); // true
+ * shallowEqualArgs([1, NaN], [1, NaN]); // => true
  */
 export function shallowEqualArgs(next: ReadonlyArray<unknown>, previous: ReadonlyArray<unknown>): boolean {
 	if (next.length !== previous.length) return false;
@@ -1115,9 +1139,9 @@ export type MemoizedLast<F extends AnyFunction> = F & {
  * @throws {TypeError} when `fn` or `isEqual` is not a function
  * @example
  * const area = memoizeLast(function (w: number, h: number): number { return w * h; });
- * area(2, 3); // 6 (computed)
- * area(2, 3); // 6 (cached)
- * area(3, 3); // 9 (computed, replaces the cache)
+ * area(2, 3); // => 6 // computed
+ * area(2, 3); // => 6 // cached
+ * area(3, 3); // => 9 // computed, replaces the cache
  */
 export function memoizeLast<F extends AnyFunction>(fn: F, isEqual: (next: Parameters<F>, previous: Parameters<F>) => boolean = shallowEqualArgs): MemoizedLast<F> {
 	assertFunction('memoizeLast', fn);

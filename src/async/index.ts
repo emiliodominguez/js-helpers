@@ -11,7 +11,10 @@ const MAX_TIMEOUT = 2 ** 31 - 1;
 /**
  * Error used to reject operations cancelled through an abort signal that carries no `reason`.
  * @example
- * try { await sleep(1000, { signal }); } catch (error) { if (error instanceof AbortError) { ... } }
+ * const controller = new AbortController();
+ * controller.abort(new AbortError('cancelled by the user'));
+ * await sleep(1000, { signal: controller.signal }); // throws AbortError
+ * new AbortError().message; // => 'The operation was aborted.'
  */
 export class AbortError extends Error {
 	override name = 'AbortError';
@@ -27,7 +30,11 @@ export class AbortError extends Error {
 /**
  * Error used by {@link withTimeout} when the wrapped promise does not settle in time.
  * @example
- * try { await withTimeout(fetchData(), 5000); } catch (error) { if (error instanceof TimeoutError) { ... } }
+ * try {
+ *   await withTimeout(new Promise(function () {}), 10);
+ * } catch (error) {
+ *   error instanceof TimeoutError; // => true
+ * }
  */
 export class TimeoutError extends Error {
 	override name = 'TimeoutError';
@@ -111,9 +118,9 @@ function assertDelay(caller: string, name: string, value: number): void {
  * @template T - The resolved value type
  * @returns {Deferred<T>} The promise and its `resolve`/`reject` functions
  * @example
- * const ready = createDeferred<void>();
- * socket.once('open', function () { ready.resolve(); });
- * await ready.promise;
+ * const ready = createDeferred<string>();
+ * setTimeout(function () { ready.resolve('open'); }, 10);
+ * await ready.promise; // => 'open'
  */
 export function createDeferred<T>(): Deferred<T> {
 	let resolve!: (value: T | PromiseLike<T>) => void;
@@ -134,10 +141,11 @@ export function createDeferred<T>(): Deferred<T> {
  * @returns {Promise<void>} A promise resolving after the delay
  * @throws {RangeError} (as a rejection) when `ms` is negative, `NaN` or larger than `2^31 - 1`
  * @example
- * await sleep(250);
+ * await sleep(10); // resolves after ~10 ms
  * const controller = new AbortController();
  * const nap = sleep(10_000, { signal: controller.signal });
- * controller.abort(); // nap rejects
+ * controller.abort(); // clears the timer
+ * await nap; // throws AbortError
  */
 export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
 	return new Promise<void>(function (resolve, reject) {
@@ -179,7 +187,8 @@ export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
  * @throws {TimeoutError} (as a rejection) when `promise` does not settle within `ms` milliseconds
  * @throws {RangeError} (as a rejection) when `ms` is negative, `NaN` or larger than `2^31 - 1`
  * @example
- * const data = await withTimeout(fetch(url), 5000, 'fetch took too long');
+ * await withTimeout(Promise.resolve('data'), 5000); // => 'data'
+ * await withTimeout(new Promise(function () {}), 10, 'took too long'); // throws TimeoutError
  */
 export function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, message?: string): Promise<T> {
 	return new Promise<T>(function (resolve, reject) {
@@ -215,7 +224,10 @@ export function withTimeout<T>(promise: PromiseLike<T> | T, ms: number, message?
  * `factor` is not a finite number > 0, or `maxDelay` is negative or `NaN`
  * @throws {unknown} (as a rejection) the last error of `fn`, or the abort reason of `signal`
  * @example
- * const user = await retry(function () { return api.getUser(id); }, { retries: 5, delay: 100, maxDelay: 2000, jitter: true });
+ * let calls = 0;
+ * function flaky(): Promise<string> { calls++; return calls < 3 ? Promise.reject(new Error('busy')) : Promise.resolve('ok'); }
+ * await retry(flaky, { retries: 5, delay: 10, maxDelay: 2000, jitter: true }); // => 'ok'
+ * calls; // => 3
  */
 export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options: RetryOptions = {}, random: RandomGenerator = Math.random): Promise<T> {
 	const { retries = 3, delay = 0, factor = 2, maxDelay = Infinity, jitter = false, shouldRetry, onRetry, signal } = options;
@@ -261,7 +273,8 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
  * @throws {RangeError} (as a rejection) when `concurrency` is not an integer >= 1 or `Infinity`
  * @throws {unknown} (as a rejection) the first error thrown or rejected by `mapper`
  * @example
- * const pages = await mapWithConcurrency(urls, function (url) { return fetch(url).then(function (r) { return r.text(); }); }, 4);
+ * async function size(name: string): Promise<number> { await sleep(5); return name.length; }
+ * await mapWithConcurrency(['a', 'bb', 'ccc'], size, 2); // => [1, 2, 3] // in input order, at most 2 running at once
  */
 export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item: T, index: number) => Promise<R> | R, concurrency = Infinity): Promise<R[]> {
 	if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency >= 1))) {
@@ -323,8 +336,10 @@ function assertFunction(caller: string, name: string, value: unknown): asserts v
  * @param {PromiseLike<T> | (() => PromiseLike<T> | T)} fnOrPromise - A promise, or a function to call (with no arguments)
  * @returns {Promise<Result<T>>} `[undefined, value]` on success, `[error, undefined]` on failure
  * @example
- * const [error, user] = await attemptAsync(fetchUser(id));
- * const [readError, text] = await attemptAsync(function () { return fs.promises.readFile(path, 'utf8'); });
+ * await attemptAsync(Promise.resolve(42)); // => [undefined, 42]
+ * const [error, value] = await attemptAsync(function () { return JSON.parse('{'); });
+ * error instanceof SyntaxError; // => true
+ * value; // => undefined
  */
 export async function attemptAsync<T>(fnOrPromise: PromiseLike<T> | (() => PromiseLike<T> | T)): Promise<Result<T>> {
 	try {
@@ -377,7 +392,11 @@ interface LimiterTask {
  * @throws {RangeError} when `concurrency` is not an integer >= 1 or `Infinity`
  * @example
  * const limit = createLimiter(2);
- * const pages = await Promise.all(urls.map(function (url) { return limit(fetchText, url); }));
+ * async function double(n: number): Promise<number> { await sleep(5); return n * 2; }
+ * const results = Promise.all([1, 2, 3].map(function (n) { return limit(double, n); }));
+ * limit.activeCount; // => 2
+ * limit.pendingCount; // => 1
+ * await results; // => [2, 4, 6]
  */
 export function createLimiter(concurrency: number, options: LimiterOptions = {}): Limiter {
 	if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency >= 1))) {
@@ -514,7 +533,10 @@ export interface PollOptions {
  * @throws {TypeError} (as a rejection) when `check` is not a function
  * @throws {unknown} (as a rejection) the error thrown or rejected by `check`, or the abort reason of `signal`
  * @example
- * const element = await pollUntil(function () { return document.querySelector('#app'); }, { interval: 50, timeout: 5000 });
+ * let status = 'loading';
+ * setTimeout(function () { status = 'ready'; }, 30);
+ * await pollUntil(function () { return status === 'ready' && status; }, { interval: 10, timeout: 5000 }); // => 'ready'
+ * await pollUntil(function () { return false; }, { interval: 10, timeout: 50 }); // throws TimeoutError
  */
 export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptions = {}): Promise<Truthy<Awaited<T>>> {
 	return new Promise<Truthy<Awaited<T>>>(function (resolve, reject) {
@@ -638,7 +660,7 @@ function zipObject(keys: PropertyKey[], values: unknown[]): Record<PropertyKey, 
  * @returns {Promise<{ [K in keyof T]: Awaited<T[K]> }>} The awaited values, keyed like `obj`
  * @throws {TypeError} (as a rejection) when `obj` is not a non-array object
  * @example
- * const { user, posts } = await promiseAllObject({ user: getUser(id), posts: getPosts(id) });
+ * await promiseAllObject({ user: Promise.resolve('Ada'), posts: sleep(5).then(function () { return [1, 2]; }) }); // => { user: 'Ada', posts: [1, 2] }
  */
 export async function promiseAllObject<T extends object>(obj: T): Promise<{ -readonly [K in keyof T]: Awaited<T[K]> }> {
 	const keys = objectKeys('promiseAllObject', obj);
@@ -660,8 +682,8 @@ export async function promiseAllObject<T extends object>(obj: T): Promise<{ -rea
  * @throws {TypeError} (as a rejection) when `obj` is not a non-array object
  * @example
  * const results = await promiseAllSettledObject({ a: Promise.resolve(1), b: Promise.reject(new Error('x')) });
- * results.a; // { status: 'fulfilled', value: 1 }
- * results.b; // { status: 'rejected', reason: Error('x') }
+ * results.a; // => { status: 'fulfilled', value: 1 }
+ * results.b; // => { status: 'rejected', reason: Error('x') }
  */
 export async function promiseAllSettledObject<T extends object>(obj: T): Promise<{ -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }> {
 	const keys = objectKeys('promiseAllSettledObject', obj);
@@ -697,8 +719,12 @@ export interface DebouncedAsync<F extends (...args: never[]) => unknown> {
  * @throws {TypeError} when `fn` is not a function
  * @throws {RangeError} when `wait` is negative, `NaN` or larger than `2^31 - 1`
  * @example
- * const search = debounceAsync(function (query: string) { return api.search(query); }, 300);
- * input.addEventListener('input', async function () { render(await search(input.value)); });
+ * const queries: string[] = [];
+ * const search = debounceAsync(async function (query: string) { queries.push(query); return `results for ${query}`; }, 20);
+ * const first = search('a');
+ * const second = search('ab');
+ * await Promise.all([first, second]); // => ['results for ab', 'results for ab']
+ * queries; // => ['ab'] // one call for the whole burst
  */
 export function debounceAsync<F extends (...args: never[]) => unknown>(fn: F, wait: number): DebouncedAsync<F> {
 	assertFunction('debounceAsync', 'fn', fn);
@@ -766,7 +792,10 @@ export function debounceAsync<F extends (...args: never[]) => unknown>(fn: F, wa
  * @throws {TypeError} (as a rejection) when a task is not a function
  * @throws {unknown} (as a rejection) the first error thrown or rejected by a task
  * @example
- * const [a, b] = await sequence([function () { return migrate(1); }, function () { return migrate(2); }]);
+ * const log: string[] = [];
+ * async function migrate(version: number): Promise<number> { await sleep(10 - version); log.push(`v${version}`); return version; }
+ * await sequence([function () { return migrate(1); }, function () { return migrate(2); }]); // => [1, 2]
+ * log; // => ['v1', 'v2'] // each task starts after the previous one settled
  */
 export async function sequence<T>(tasks: Iterable<() => PromiseLike<T> | T>): Promise<T[]> {
 	const results: T[] = [];

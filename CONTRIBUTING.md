@@ -43,3 +43,21 @@ yarn test src/strings             # a single module
 yarn test:coverage                # with coverage thresholds
 TZ=Australia/Lord_Howe yarn test src/date
 ```
+
+### Executable examples
+
+Every `@example` of the exported API is run by `yarn test:docs` (`scripts/doctest.mjs`, optionally restricted to modules: `yarn test:docs strings date`) against the current sources, so examples can't drift from the code:
+
+```ts
+chunk([1, 2, 3], 2); // => [[1, 2], [3]]
+square(3); // => 9 // anything after a second `//` is a note
+const copy = deepClone(original); // => original
+await withTimeout(Promise.resolve(1), 100); // => 1
+range(0, 1, 0); // throws RangeError
+```
+
+- `expr; // => expected` asserts that `expr` deep-equals the JS expression `expected`: `Object.is` for primitives (`NaN` matches, `-0` ≠ `0`), structural comparison for arrays, objects, `Map`, `Set`, `Date`, `RegExp` and typed arrays (null-prototype objects match object literals). `await` works: each block runs in its own async function, in strict mode.
+- `expr; // throws ErrorName` asserts that `expr` throws (with `await`, rejects) an error with that `name`.
+- Any other comment is prose and isn't checked: use it for random values or the current time.
+- The module's exports are in scope; use `import { x } from '@emiliodominguez/js-helpers/<module>'` lines for other modules. `@decorator` syntax works (TC39 standard decorators).
+- Blocks must be self-contained. Dates use local constructors (`new Date(2024, 0, 31)`) so examples pass in every time zone. A block that can't run (DOM, network, placeholders) starts with `// doctest: skip`.

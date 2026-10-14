@@ -212,7 +212,8 @@ function createMethodDecorator(decoratorName: string, wrap: MethodWrapper): Univ
  *   url: string = 'https://example.com';
  * }
  * const config = new Config();
- * config.url = 'x'; // TypeError: Cannot assign to read only property 'url'
+ * config.url; // => 'https://example.com'
+ * config.url = 'x'; // throws TypeError (in strict mode: cannot assign to read only property 'url')
  * ```
  */
 export function readonly(targetOrValue: object, keyOrContext: string | symbol, descriptor?: undefined): void;
@@ -336,10 +337,12 @@ function wrapLog(method: UnknownMethod, name: string): UnknownMethod {
  * @throws {TypeError} when applied to something other than a method
  * @example
  * ```ts
- * class Api {
+ * class Calculator {
  *   @log
- *   get(id: number): Promise<User> { ... }
+ *   double(n: number): number { return n * 2; }
  * }
+ * new Calculator().double(21); // => 42
+ * // logs "double method called with arguments: [ 21 ]", then "double method returned: 42"
  * ```
  */
 export function log<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
@@ -394,9 +397,13 @@ function wrapMemoize(method: UnknownMethod): UnknownMethod {
  * @example
  * ```ts
  * class Calculator {
+ *   calls = 0;
  *   @memoize
- *   fibonacci(n: number): number { return n < 2 ? n : this.fibonacci(n - 1) + this.fibonacci(n - 2); }
+ *   fibonacci(n: number): number { this.calls++; return n < 2 ? n : this.fibonacci(n - 1) + this.fibonacci(n - 2); }
  * }
+ * const calculator = new Calculator();
+ * calculator.fibonacci(40); // => 102334155
+ * calculator.calls; // => 41 // each n computed once
  * ```
  */
 export function memoize<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
@@ -439,8 +446,10 @@ export function memoize(targetOrValue: unknown, keyOrContext: unknown, descripto
  *   @bound
  *   increment(): void { this.count++; }
  * }
- * const { increment } = new Counter();
- * increment(); // works
+ * const counter = new Counter();
+ * const { increment } = counter;
+ * increment(); // `this` is still `counter`
+ * counter.count; // => 1
  * ```
  */
 export function bound<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
@@ -524,10 +533,17 @@ export function bound(targetOrValue: unknown, keyOrContext: unknown, descriptor?
  * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
  * @example
  * ```ts
+ * import { sleep } from '@emiliodominguez/js-helpers/async';
  * class Search {
- *   @debounced(300)
- *   query(text: string): void { ... }
+ *   queries: string[] = [];
+ *   @debounced(20)
+ *   query(text: string): void { this.queries.push(text); }
  * }
+ * const search = new Search();
+ * search.query('a');
+ * search.query('ab');
+ * await sleep(50);
+ * search.queries; // => ['ab']
  * ```
  */
 export function debounced(wait: number, options?: DebounceOptions): UniversalMethodDecorator {
@@ -561,10 +577,19 @@ export function debounced(wait: number, options?: DebounceOptions): UniversalMet
  * @throws {TypeError} when both `leading` and `trailing` are `false`, or when applied to something other than a method
  * @example
  * ```ts
+ * import { sleep } from '@emiliodominguez/js-helpers/async';
  * class Tracker {
- *   @throttled(1000, { trailing: true })
- *   onScroll(y: number): void { ... }
+ *   positions: number[] = [];
+ *   @throttled(20, { trailing: true })
+ *   onScroll(y: number): void { this.positions.push(y); }
  * }
+ * const tracker = new Tracker();
+ * tracker.onScroll(1); // leading edge: runs now
+ * tracker.onScroll(2);
+ * tracker.onScroll(3);
+ * tracker.positions; // => [1]
+ * await sleep(50);
+ * tracker.positions; // => [1, 3] // trailing edge: runs with the latest arguments
  * ```
  */
 export function throttled(wait: number, options?: ThrottleOptions): UniversalMethodDecorator {
@@ -597,9 +622,13 @@ export function throttled(wait: number, options?: ThrottleOptions): UniversalMet
  * @example
  * ```ts
  * class Client {
+ *   list(): string[] { return ['a', 'b']; }
  *   @deprecated('Client.fetchAll is deprecated, use Client.list instead.')
- *   fetchAll(): Item[] { return this.list(); }
+ *   fetchAll(): string[] { return this.list(); }
  * }
+ * const client = new Client();
+ * client.fetchAll(); // => ['a', 'b'] // and warns once with console.warn
+ * client.fetchAll(); // => ['a', 'b'] // no second warning
  * ```
  */
 export function deprecated(message?: string): UniversalMethodDecorator {
@@ -657,9 +686,14 @@ function wrapOnce(method: UnknownMethod): UnknownMethod {
  * @example
  * ```ts
  * class Connection {
+ *   opened = 0;
  *   @once
- *   connect(): Promise<void> { return this.socket.open(); }
+ *   connect(): number { return ++this.opened; }
  * }
+ * const connection = new Connection();
+ * connection.connect(); // => 1
+ * connection.connect(); // => 1 // the first result, without running the method again
+ * connection.opened; // => 1
  * ```
  */
 export function once<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
@@ -687,9 +721,17 @@ export function once(targetOrValue: unknown, keyOrContext: unknown, descriptor?:
  * @example
  * ```ts
  * class Api {
- *   @retryable({ retries: 3, delay: 200, jitter: true })
- *   getUser(id: string): Promise<User> { return this.http.get(`/users/${id}`); }
+ *   attempts = 0;
+ *   @retryable({ retries: 3, delay: 10, jitter: true })
+ *   async getUser(id: string): Promise<string> {
+ *     this.attempts++;
+ *     if (this.attempts < 3) throw new Error('flaky network');
+ *     return `user ${id}`;
+ *   }
  * }
+ * const api = new Api();
+ * await api.getUser('42'); // => 'user 42'
+ * api.attempts; // => 3
  * ```
  */
 export function retryable(options: RetryOptions = {}, random: RandomGenerator = Math.random): AsyncMethodDecorator {
@@ -723,9 +765,10 @@ export function retryable(options: RetryOptions = {}, random: RandomGenerator = 
  * @example
  * ```ts
  * class Api {
- *   @timeout(5000)
- *   fetchReport(): Promise<Report> { ... }
+ *   @timeout(20)
+ *   fetchReport(): Promise<string> { return new Promise(function () {}); }
  * }
+ * await new Api().fetchReport(); // throws TimeoutError
  * ```
  */
 export function timeout(ms: number, message?: string): AsyncMethodDecorator {

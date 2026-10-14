@@ -94,10 +94,10 @@ function checkWeakSet(target: object): void {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a non-null, non-function object
  * @example
- * isObject({}); // true
- * isObject([]); // true
- * isObject(null); // false
- * isObject(function () {}); // false
+ * isObject({}); // => true
+ * isObject([]); // => true
+ * isObject(null); // => false
+ * isObject(function () {}); // => false
  */
 export function isObject(value: unknown): value is object {
 	return value !== null && typeof value === 'object';
@@ -108,8 +108,8 @@ export function isObject(value: unknown): value is object {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is an array
  * @example
- * isArray([1, 2]); // true
- * isArray('ab'); // false
+ * isArray([1, 2]); // => true
+ * isArray('ab'); // => false
  */
 export function isArray(value: unknown): value is unknown[] {
 	return Array.isArray(value);
@@ -120,8 +120,8 @@ export function isArray(value: unknown): value is unknown[] {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a function
  * @example
- * isFunction(Math.max); // true
- * isFunction({}); // false
+ * isFunction(Math.max); // => true
+ * isFunction({}); // => false
  */
 export function isFunction(value: unknown): value is AnyFunction {
 	return typeof value === 'function';
@@ -132,8 +132,8 @@ export function isFunction(value: unknown): value is AnyFunction {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a string
  * @example
- * isString('hello'); // true
- * isString(new String('hello')); // false
+ * isString('hello'); // => true
+ * isString(new String('hello')); // => false
  */
 export function isString(value: unknown): value is string {
 	return typeof value === 'string';
@@ -145,9 +145,9 @@ export function isString(value: unknown): value is string {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a number
  * @example
- * isNumber(42); // true
- * isNumber(NaN); // true
- * isNumber('42'); // false
+ * isNumber(42); // => true
+ * isNumber(NaN); // => true
+ * isNumber('42'); // => false
  */
 export function isNumber(value: unknown): value is number {
 	return typeof value === 'number';
@@ -158,8 +158,8 @@ export function isNumber(value: unknown): value is number {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is `true` or `false`
  * @example
- * isBoolean(false); // true
- * isBoolean(0); // false
+ * isBoolean(false); // => true
+ * isBoolean(0); // => false
  */
 export function isBoolean(value: unknown): value is boolean {
 	return typeof value === 'boolean';
@@ -170,8 +170,8 @@ export function isBoolean(value: unknown): value is boolean {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is `undefined`
  * @example
- * isUndefined(undefined); // true
- * isUndefined(null); // false
+ * isUndefined(undefined); // => true
+ * isUndefined(null); // => false
  */
 export function isUndefined(value: unknown): value is undefined {
 	return value === undefined;
@@ -182,8 +182,8 @@ export function isUndefined(value: unknown): value is undefined {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is `null`
  * @example
- * isNull(null); // true
- * isNull(undefined); // false
+ * isNull(null); // => true
+ * isNull(undefined); // => false
  */
 export function isNull(value: unknown): value is null {
 	return value === null;
@@ -194,8 +194,8 @@ export function isNull(value: unknown): value is null {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a symbol
  * @example
- * isSymbol(Symbol.iterator); // true
- * isSymbol('symbol'); // false
+ * isSymbol(Symbol.iterator); // => true
+ * isSymbol('symbol'); // => false
  */
 export function isSymbol(value: unknown): value is symbol {
 	return typeof value === 'symbol';
@@ -206,8 +206,8 @@ export function isSymbol(value: unknown): value is symbol {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a bigint
  * @example
- * isBigInt(10n); // true
- * isBigInt(10); // false
+ * isBigInt(10n); // => true
+ * isBigInt(10); // => false
  */
 export function isBigInt(value: unknown): value is bigint {
 	return typeof value === 'bigint';
@@ -220,9 +220,9 @@ export function isBigInt(value: unknown): value is bigint {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a promise or thenable
  * @example
- * isPromise(Promise.resolve(1)); // true
- * isPromise({ then: function () {} }); // true
- * isPromise({ then: 1 }); // false
+ * isPromise(Promise.resolve(1)); // => true
+ * isPromise({ then: function () {} }); // => true
+ * isPromise({ then: 1 }); // => false
  */
 export function isPromise(value: unknown): value is PromiseLike<unknown> {
 	if (value instanceof Promise) return true;
@@ -237,8 +237,8 @@ export function isPromise(value: unknown): value is PromiseLike<unknown> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a regular expression
  * @example
- * isRegExp(/a/g); // true
- * isRegExp('/a/'); // false
+ * isRegExp(/a/g); // => true
+ * isRegExp('/a/'); // => false
  */
 export function isRegExp(value: unknown): value is RegExp {
 	return hasBrand(value, checkRegExp);
@@ -251,8 +251,8 @@ export function isRegExp(value: unknown): value is RegExp {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is an error
  * @example
- * isError(new TypeError('x')); // true
- * isError({ message: 'x' }); // false
+ * isError(new TypeError('x')); // => true
+ * isError({ message: 'x' }); // => false
  */
 export function isError(value: unknown): value is Error {
 	return value instanceof Error || (isObject(value) && getTag(value) === '[object Error]');
@@ -266,9 +266,9 @@ export function isError(value: unknown): value is Error {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Date
  * @example
- * isDate(new Date()); // true
- * isDate(new Date('invalid')); // true
- * isDate(Date.now()); // false
+ * isDate(new Date()); // => true
+ * isDate(new Date('invalid')); // => true
+ * isDate(Date.now()); // => false
  */
 export function isDate(value: unknown): value is Date {
 	return hasBrand(value, checkDate);
@@ -280,8 +280,8 @@ export function isDate(value: unknown): value is Date {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Map
  * @example
- * isMap(new Map()); // true
- * isMap(new WeakMap()); // false
+ * isMap(new Map()); // => true
+ * isMap(new WeakMap()); // => false
  */
 export function isMap(value: unknown): value is Map<unknown, unknown> {
 	return hasBrand(value, checkMap);
@@ -293,8 +293,8 @@ export function isMap(value: unknown): value is Map<unknown, unknown> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a Set
  * @example
- * isSet(new Set()); // true
- * isSet([]); // false
+ * isSet(new Set()); // => true
+ * isSet([]); // => false
  */
 export function isSet(value: unknown): value is Set<unknown> {
 	return hasBrand(value, checkSet);
@@ -306,8 +306,8 @@ export function isSet(value: unknown): value is Set<unknown> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a WeakMap
  * @example
- * isWeakMap(new WeakMap()); // true
- * isWeakMap(new Map()); // false
+ * isWeakMap(new WeakMap()); // => true
+ * isWeakMap(new Map()); // => false
  */
 export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
 	return hasBrand(value, checkWeakMap);
@@ -319,8 +319,8 @@ export function isWeakMap(value: unknown): value is WeakMap<object, unknown> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a WeakSet
  * @example
- * isWeakSet(new WeakSet()); // true
- * isWeakSet(new Set()); // false
+ * isWeakSet(new WeakSet()); // => true
+ * isWeakSet(new Set()); // => false
  */
 export function isWeakSet(value: unknown): value is WeakSet<object> {
 	return hasBrand(value, checkWeakSet);
@@ -331,9 +331,9 @@ export function isWeakSet(value: unknown): value is WeakSet<object> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is nullish
  * @example
- * isNil(null); // true
- * isNil(undefined); // true
- * isNil(0); // false
+ * isNil(null); // => true
+ * isNil(undefined); // => true
+ * isNil(0); // => false
  */
 export function isNil(value: unknown): value is null | undefined {
 	return value === null || value === undefined;
@@ -346,7 +346,7 @@ export function isNil(value: unknown): value is null | undefined {
  * @param {T} value - The value to check
  * @returns {boolean} Whether the value is not nullish
  * @example
- * [1, null, 2, undefined].filter(isDefined); // [1, 2] typed as number[]
+ * [1, null, 2, undefined].filter(isDefined); // => [1, 2] // typed as number[]
  */
 export function isDefined<T>(value: T): value is NonNullable<T> {
 	return value !== null && value !== undefined;
@@ -359,10 +359,10 @@ export function isDefined<T>(value: T): value is NonNullable<T> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a plain object
  * @example
- * isPlainObject({ a: 1 }); // true
- * isPlainObject(Object.create(null)); // true
- * isPlainObject(new Date()); // false
- * isPlainObject([]); // false
+ * isPlainObject({ a: 1 }); // => true
+ * isPlainObject(Object.create(null)); // => true
+ * isPlainObject(new Date()); // => false
+ * isPlainObject([]); // => false
  */
 export function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
 	if (!isObject(value)) return false;
@@ -376,9 +376,9 @@ export function isPlainObject(value: unknown): value is Record<PropertyKey, unkn
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a primitive
  * @example
- * isPrimitive('a'); // true
- * isPrimitive(null); // true
- * isPrimitive({}); // false
+ * isPrimitive('a'); // => true
+ * isPrimitive(null); // => true
+ * isPrimitive({}); // => false
  */
 export function isPrimitive(value: unknown): value is Primitive {
 	return value === null || (typeof value !== 'object' && typeof value !== 'function');
@@ -390,10 +390,10 @@ export function isPrimitive(value: unknown): value is Primitive {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is iterable
  * @example
- * isIterable([1]); // true
- * isIterable('abc'); // true
- * isIterable(new Map()); // true
- * isIterable({}); // false
+ * isIterable([1]); // => true
+ * isIterable('abc'); // => true
+ * isIterable(new Map()); // => true
+ * isIterable({}); // => false
  */
 export function isIterable(value: unknown): value is Iterable<unknown> {
 	return value != null && typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function';
@@ -404,8 +404,8 @@ export function isIterable(value: unknown): value is Iterable<unknown> {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is async iterable
  * @example
- * isAsyncIterable((async function* () {})()); // true
- * isAsyncIterable([1]); // false
+ * isAsyncIterable((async function* () {})()); // => true
+ * isAsyncIterable([1]); // => false
  */
 export function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
 	return value != null && typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function';
@@ -416,9 +416,9 @@ export function isAsyncIterable(value: unknown): value is AsyncIterable<unknown>
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a finite number
  * @example
- * isFiniteNumber(1.5); // true
- * isFiniteNumber(Infinity); // false
- * isFiniteNumber('1'); // false
+ * isFiniteNumber(1.5); // => true
+ * isFiniteNumber(Infinity); // => false
+ * isFiniteNumber('1'); // => false
  */
 export function isFiniteNumber(value: unknown): value is number {
 	return Number.isFinite(value);
@@ -429,9 +429,9 @@ export function isFiniteNumber(value: unknown): value is number {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is an integer
  * @example
- * isInteger(3); // true
- * isInteger(3.5); // false
- * isInteger(3n); // false (bigints are not numbers)
+ * isInteger(3); // => true
+ * isInteger(3.5); // => false
+ * isInteger(3n); // => false // bigints are not numbers
  */
 export function isInteger(value: unknown): value is number {
 	return Number.isInteger(value);
@@ -516,10 +516,10 @@ function describe(value: unknown): string {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a non-empty string
  * @example
- * isNonEmptyString('a'); // true
- * isNonEmptyString(' '); // true
- * isNonEmptyString(''); // false
- * isNonEmptyString(new String('a')); // false
+ * isNonEmptyString('a'); // => true
+ * isNonEmptyString(' '); // => true
+ * isNonEmptyString(''); // => false
+ * isNonEmptyString(new String('a')); // => false
  */
 export function isNonEmptyString(value: unknown): value is string {
 	return typeof value === 'string' && value.length > 0;
@@ -552,9 +552,9 @@ export function isNonEmptyArray<T>(value: ReadonlyArray<T> | null | undefined): 
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a non-empty array
  * @example
- * isNonEmptyArray([1]); // true
- * isNonEmptyArray([]); // false
- * isNonEmptyArray('a'); // false
+ * isNonEmptyArray([1]); // => true
+ * isNonEmptyArray([]); // => false
+ * isNonEmptyArray('a'); // => false
  */
 export function isNonEmptyArray(value: unknown): value is [unknown, ...unknown[]];
 /**
@@ -562,7 +562,7 @@ export function isNonEmptyArray(value: unknown): value is [unknown, ...unknown[]
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a non-empty array
  * @example
- * isNonEmptyArray([0]); // true
+ * isNonEmptyArray([0]); // => true
  */
 export function isNonEmptyArray(value: unknown): value is [unknown, ...unknown[]] {
 	return Array.isArray(value) && value.length > 0;
@@ -579,9 +579,9 @@ export function isNonEmptyArray(value: unknown): value is [unknown, ...unknown[]
  * @throws {TypeError} when `object` is `null` or `undefined`
  * @example
  * const colors = { red: '#f00', blue: '#00f' };
- * isKeyOf(colors, 'red'); // true, key: 'red' | 'blue'
- * isKeyOf(colors, 'toString'); // false (inherited)
- * isKeyOf(colors, 42); // false
+ * isKeyOf(colors, 'red'); // => true // narrows the key to 'red' | 'blue'
+ * isKeyOf(colors, 'toString'); // => false // inherited
+ * isKeyOf(colors, 42); // => false
  */
 export function isKeyOf<T extends object>(object: T, key: unknown): key is keyof T {
 	if (object === null || object === undefined) throw new TypeError('object must not be null or undefined');
@@ -600,8 +600,8 @@ export function isKeyOf<T extends object>(object: T, key: unknown): key is keyof
  * @throws {TypeError} when `values` is not an array
  * @example
  * const isDirection = isOneOf(['up', 'down']);
- * isDirection('up'); // true, narrows to 'up' | 'down'
- * isDirection('left'); // false
+ * isDirection('up'); // => true // narrows to 'up' | 'down'
+ * isDirection('left'); // => false
  */
 export function isOneOf<const T extends ReadonlyArray<unknown>>(values: T): (value: unknown) => value is T[number] {
 	if (!Array.isArray(values)) throw new TypeError('values must be an array');
@@ -623,8 +623,8 @@ export function isOneOf<const T extends ReadonlyArray<unknown>>(values: T): (val
  * @example
  * class User {}
  * const isUser = isInstanceOf(User);
- * isUser(new User()); // true
- * isUser({}); // false
+ * isUser(new User()); // => true
+ * isUser({}); // => false
  */
 export function isInstanceOf<T>(constructor: abstract new (...args: never[]) => T): (value: unknown) => value is T {
 	assertFunction(constructor, 'constructor');
@@ -659,9 +659,9 @@ function isInstanceofTarget(candidate: unknown): boolean {
  * @throws {TypeError} when `guard` is not a function
  * @example
  * const isStringArray = isArrayOf(isString);
- * isStringArray(['a', 'b']); // true
- * isStringArray(['a', 1]); // false
- * isStringArray([]); // true
+ * isStringArray(['a', 'b']); // => true
+ * isStringArray(['a', 1]); // => false
+ * isStringArray([]); // => true
  */
 export function isArrayOf<T>(guard: Guard<T>): (value: unknown) => value is T[] {
 	assertFunction(guard, 'guard');
@@ -687,9 +687,9 @@ export function isArrayOf<T>(guard: Guard<T>): (value: unknown) => value is T[] 
  * @throws {TypeError} when `guard` is not a function
  * @example
  * const isScores = isRecordOf(isFiniteNumber);
- * isScores({ alice: 3, bob: 5 }); // true
- * isScores({ alice: '3' }); // false
- * isScores(new Map()); // false (not a plain object)
+ * isScores({ alice: 3, bob: 5 }); // => true
+ * isScores({ alice: '3' }); // => false
+ * isScores(new Map()); // => false // not a plain object
  */
 export function isRecordOf<T>(guard: Guard<T>): (value: unknown) => value is Record<PropertyKey, T> {
 	assertFunction(guard, 'guard');
@@ -711,9 +711,9 @@ export function isRecordOf<T>(guard: Guard<T>): (value: unknown) => value is Rec
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is a typed array
  * @example
- * isTypedArray(new Uint8Array(2)); // true
- * isTypedArray(new DataView(new ArrayBuffer(2))); // false
- * isTypedArray([1, 2]); // false
+ * isTypedArray(new Uint8Array(2)); // => true
+ * isTypedArray(new DataView(new ArrayBuffer(2))); // => false
+ * isTypedArray([1, 2]); // => false
  */
 export function isTypedArray(value: unknown): value is TypedArray {
 	const name = typedArrayTagGetter.call(value);
@@ -727,9 +727,9 @@ export function isTypedArray(value: unknown): value is TypedArray {
  * @param {unknown} value - The value to check
  * @returns {boolean} Whether the value is an ArrayBuffer
  * @example
- * isArrayBuffer(new ArrayBuffer(8)); // true
- * isArrayBuffer(new Uint8Array(8)); // false
- * isArrayBuffer(new Uint8Array(8).buffer); // true
+ * isArrayBuffer(new ArrayBuffer(8)); // => true
+ * isArrayBuffer(new Uint8Array(8)); // => false
+ * isArrayBuffer(new Uint8Array(8).buffer); // => true
  */
 export function isArrayBuffer(value: unknown): value is ArrayBuffer {
 	return hasBrand(value, checkArrayBuffer);
@@ -741,7 +741,7 @@ export function isArrayBuffer(value: unknown): value is ArrayBuffer {
  * try {
  *   assert(false, 'boom');
  * } catch (error) {
- *   error instanceof AssertionError; // true
+ *   error instanceof AssertionError; // => true
  * }
  */
 export class AssertionError extends Error {
@@ -766,6 +766,8 @@ export class AssertionError extends Error {
  *   assert(b !== 0, 'Division by zero');
  *   return a / b;
  * }
+ * divide(6, 3); // => 2
+ * divide(1, 0); // throws AssertionError
  */
 export function assert(condition: unknown, message?: string): asserts condition {
 	if (!condition) throw new AssertionError(message);
@@ -779,9 +781,11 @@ export function assert(condition: unknown, message?: string): asserts condition 
  * @returns {void}
  * @throws {AssertionError} when `value` is `null` or `undefined`
  * @example
- * const element: HTMLElement | null = document.getElementById('app');
- * assertDefined(element, '#app is missing');
- * element.focus(); // element: HTMLElement
+ * const users = new Map([['ada', { name: 'Ada' }]]);
+ * const user = users.get('ada'); // { name: string } | undefined
+ * assertDefined(user, 'ada is missing');
+ * user.name; // => 'Ada' // user is now { name: string }
+ * assertDefined(users.get('bob'), 'bob is missing'); // throws AssertionError
  */
 export function assertDefined<T>(value: T, message?: string): asserts value is NonNullable<T> {
 	if (value === null || value === undefined) throw new AssertionError(message ?? `Expected value to be defined, received ${String(value)}`);
@@ -804,6 +808,8 @@ export function assertDefined<T>(value: T, message?: string): asserts value is N
  *     default: return assertNever(shape);
  *   }
  * }
+ * area({ kind: 'square', size: 3 }); // => 9
+ * area(JSON.parse('{ "kind": "triangle" }')); // throws AssertionError (data the types did not anticipate)
  */
 export function assertNever(value: never, message?: string): never {
 	throw new AssertionError(message ?? `Unexpected value: ${describe(value)}`);

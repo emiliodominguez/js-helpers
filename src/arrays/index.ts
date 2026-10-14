@@ -84,8 +84,8 @@ function isArray<T>(value: T | ReadonlyArray<T>): value is ReadonlyArray<T> {
  * @param {T} value - The value to look for
  * @returns {boolean} Whether the value is in the array
  * @example
- * contains([1, 2, 3], 2); // true
- * contains([NaN], NaN); // true
+ * contains([1, 2, 3], 2); // => true
+ * contains([NaN], NaN); // => true
  */
 export function contains<T>(array: ReadonlyArray<T>, value: T): boolean {
 	return array.includes(value);
@@ -97,8 +97,8 @@ export function contains<T>(array: ReadonlyArray<T>, value: T): boolean {
  * @param {ReadonlyArray<T>} array - The array to be processed
  * @returns {T | undefined} The first item, or `undefined` when the array is empty
  * @example
- * first([1, 2, 3]); // 1
- * first([]); // undefined
+ * first([1, 2, 3]); // => 1
+ * first([]); // => undefined
  */
 export function first<T>(array: ReadonlyArray<T>): T | undefined {
 	return array[0];
@@ -110,8 +110,8 @@ export function first<T>(array: ReadonlyArray<T>): T | undefined {
  * @param {ReadonlyArray<T>} array - The array to be processed
  * @returns {T | undefined} The last item, or `undefined` when the array is empty
  * @example
- * last([1, 2, 3]); // 3
- * last([]); // undefined
+ * last([1, 2, 3]); // => 3
+ * last([]); // => undefined
  */
 export function last<T>(array: ReadonlyArray<T>): T | undefined {
 	return array[array.length - 1];
@@ -123,8 +123,8 @@ export function last<T>(array: ReadonlyArray<T>): T | undefined {
  * @param {ReadonlyArray<T | ReadonlyArray<T>>} array - The array to be flattened
  * @returns {T[]} A new, one-level-flattened array
  * @example
- * flatten([[1, 2], 3, [4]]); // [1, 2, 3, 4]
- * flatten([[1, [2]]]); // [1, [2]]
+ * flatten([[1, 2], 3, [4]]); // => [1, 2, 3, 4]
+ * flatten([[1, [2]]]); // => [1, [2]]
  */
 export function flatten<T>(array: ReadonlyArray<T | ReadonlyArray<T>>): T[] {
 	const result: T[] = [];
@@ -150,7 +150,7 @@ export function flatten<T>(array: ReadonlyArray<T | ReadonlyArray<T>>): T[] {
  * @returns {Array<FlatDeep<T>>} A new array containing every non-array leaf, in depth-first order
  * @throws {TypeError} when the array contains itself (directly or through nested arrays)
  * @example
- * flattenDeep([1, [2, [3, [4]]]]); // [1, 2, 3, 4]
+ * flattenDeep([1, [2, [3, [4]]]]); // => [1, 2, 3, 4]
  */
 export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
 	const result: Array<FlatDeep<T>> = [];
@@ -191,7 +191,7 @@ export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
  * @param {T[]} result - The output array (mutated)
  * @returns {T[]} `result`
  * @example
- * appendUnseen([1, 1, 2], new Set(), []); // [1, 2]
+ * appendUnseen([1, 1, 2], new Set(), []); // => [1, 2]
  */
 function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
 	for (const value of values) {
@@ -209,7 +209,7 @@ function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
  * @param {Iterable<T>} iterable - The iterable to be processed
  * @returns {T[]} A new array with duplicates removed, in first-appearance order
  * @example
- * removeDuplicates([1, 2, 2, 3, 1]); // [1, 2, 3]
+ * removeDuplicates([1, 2, 2, 3, 1]); // => [1, 2, 3]
  */
 export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
 	return appendUnseen(iterable, new Set<T>(), []);
@@ -223,7 +223,7 @@ export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
  * @param {Iterable<T>} b - The second iterable
  * @returns {T[]} The unique values of both iterables, in first-appearance order
  * @example
- * union([1, 2, 3], [3, 4, 5]); // [1, 2, 3, 4, 5]
+ * union([1, 2, 3], [3, 4, 5]); // => [1, 2, 3, 4, 5]
  */
 export function union<T>(a: Iterable<T>, b: Iterable<T>): T[] {
 	const seen = new Set<T>();
@@ -238,7 +238,7 @@ export function union<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * @param {Iterable<T>} b - The second iterable
  * @returns {T[]} The unique common values, in order of first appearance in `a`
  * @example
- * intersection([1, 2, 3], [2, 3, 4]); // [2, 3]
+ * intersection([1, 2, 3], [2, 3, 4]); // => [2, 3]
  */
 export function intersection<T>(a: Iterable<T>, b: Iterable<T>): T[] {
 	const remaining = new Set<T>(b);
@@ -258,7 +258,7 @@ export function intersection<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * @param {Iterable<T>} b - The iterable of values to exclude
  * @returns {T[]} The unique values of `a` missing from `b`, in first-appearance order
  * @example
- * difference([1, 2, 3, 1], [2, 3, 4]); // [1]
+ * difference([1, 2, 3, 1], [2, 3, 4]); // => [1]
  */
 export function difference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
 	const excluded = new Set<T>(b);
@@ -281,7 +281,7 @@ export function difference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * @param {Iterable<T>} b - The second iterable
  * @returns {T[]} The values only in `a` (first-appearance order), followed by the values only in `b`
  * @example
- * symmetricDifference([1, 2, 3], [3, 4]); // [1, 2, 4]
+ * symmetricDifference([1, 2, 3], [3, 4]); // => [1, 2, 4]
  */
 export function symmetricDifference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
 	const uniqueA = removeDuplicates(a);
@@ -306,8 +306,8 @@ export function symmetricDifference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * @param {Iterable<T>} superset - The candidate superset
  * @returns {boolean} Whether `subset` ⊆ `superset`
  * @example
- * isSubset([1, 2], [3, 2, 1]); // true
- * isSubset([1, 4], [1, 2, 3]); // false
+ * isSubset([1, 2], [3, 2, 1]); // => true
+ * isSubset([1, 4], [1, 2, 3]); // => false
  */
 export function isSubset<T>(subset: Iterable<T>, superset: Iterable<T>): boolean {
 	const set = new Set<T>(superset);
@@ -325,7 +325,7 @@ export function isSubset<T>(subset: Iterable<T>, superset: Iterable<T>): boolean
  * @returns {T[][]} A new array of chunks (empty when the input is empty)
  * @throws {RangeError} when `size` is not a positive integer
  * @example
- * chunk([1, 2, 3, 4, 5], 2); // [[1, 2], [3, 4], [5]]
+ * chunk([1, 2, 3, 4, 5], 2); // => [[1, 2], [3, 4], [5]]
  */
 export function chunk<T>(array: ReadonlyArray<T>, size: number): T[][] {
 	assertInteger('chunk', 'size', size, 1);
@@ -342,7 +342,7 @@ export function chunk<T>(array: ReadonlyArray<T>, size: number): T[][] {
  * @param {ReadonlyArray<T>} array - The array to compact
  * @returns {Array<Exclude<T, Falsy>>} A new array containing only the truthy values
  * @example
- * compact([0, 1, false, 2, '', 3, null, NaN]); // [1, 2, 3]
+ * compact([0, 1, false, 2, '', 3, null, NaN]); // => [1, 2, 3]
  */
 export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
 	return array.filter(function (value): value is Exclude<T, Falsy> {
@@ -363,11 +363,11 @@ export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
  * @returns {number[]} The generated numbers
  * @throws {RangeError} when an argument is not finite, `step` is 0, or the result would exceed the maximum array length
  * @example
- * range(5); // [0, 1, 2, 3, 4]
- * range(2, 8, 2); // [2, 4, 6]
- * range(5, 0, -2); // [5, 3, 1]
- * range(0, 5, -1); // []
- * range(0, 2.1, 0.3); // [0, 0.3, 0.6, 0.8999999999999999, 1.2, 1.5, 1.7999999999999998] (7 items, 2.1 excluded)
+ * range(5); // => [0, 1, 2, 3, 4]
+ * range(2, 8, 2); // => [2, 4, 6]
+ * range(5, 0, -2); // => [5, 3, 1]
+ * range(0, 5, -1); // => []
+ * range(0, 2.1, 0.3); // => [0, 0.3, 0.6, 0.8999999999999999, 1.2, 1.5, 1.7999999999999998] // 7 items, 2.1 excluded
  */
 export function range(start: number, end?: number, step = 1): number[] {
 	const from = end === undefined ? 0 : start;
@@ -396,7 +396,7 @@ export function range(start: number, end?: number, step = 1): number[] {
  * @param {...ReadonlyArray<unknown>} arrays - The arrays to zip
  * @returns {Array<Zipped<T>>} A new array of tuples; empty when called without arrays
  * @example
- * zip([1, 2, 3], ['a', 'b']); // [[1, 'a'], [2, 'b']] typed as [number, string][]
+ * zip([1, 2, 3], ['a', 'b']); // => [[1, 'a'], [2, 'b']] // typed as [number, string][]
  */
 export function zip<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Array<Zipped<T>> {
 	if (arrays.length === 0) return [];
@@ -421,7 +421,7 @@ export function zip<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Arra
  * @param {(item: T, index: number) => K} keyFn - Returns the group key of an item
  * @returns {Partial<Record<K, T[]>>} An object mapping each key to the items that produced it
  * @example
- * groupBy([1, 2, 3, 4], function (n) { return n % 2 === 0 ? 'even' : 'odd'; }); // { odd: [1, 3], even: [2, 4] }
+ * groupBy([1, 2, 3, 4], function (n) { return n % 2 === 0 ? 'even' : 'odd'; }); // => { odd: [1, 3], even: [2, 4] }
  */
 export function groupBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Partial<Record<K, T[]>> {
 	const groups = Object.create(null) as Partial<Record<K, T[]>>;
@@ -444,7 +444,7 @@ export function groupBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn
  * @param {(item: T, index: number) => K} keyFn - Returns the key of an item
  * @returns {Record<K, T>} An object mapping each key to the last item that produced it
  * @example
- * keyBy([{ id: 'a', v: 1 }, { id: 'a', v: 2 }], function (o) { return o.id; }); // { a: { id: 'a', v: 2 } }
+ * keyBy([{ id: 'a', v: 1 }, { id: 'a', v: 2 }], function (o) { return o.id; }); // => { a: { id: 'a', v: 2 } }
  */
 export function keyBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Record<K, T> {
 	const result = Object.create(null) as Record<K, T>;
@@ -463,7 +463,7 @@ export function keyBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: 
  * @param {(item: T, index: number) => K} keyFn - Returns the key of an item
  * @returns {Record<K, number>} An object mapping each key to the number of items that produced it
  * @example
- * countBy(['one', 'two', 'three'], function (s) { return s.length; }); // { 3: 2, 5: 1 }
+ * countBy(['one', 'two', 'three'], function (s) { return s.length; }); // => { 3: 2, 5: 1 }
  */
 export function countBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => K): Record<K, number> {
 	const counts = Object.create(null) as Record<K, number>;
@@ -482,7 +482,7 @@ export function countBy<T, K extends PropertyKey>(array: ReadonlyArray<T>, keyFn
  * @param {(item: T, index: number) => item is S} predicate - Type guard deciding which side an item goes to
  * @returns {[S[], Exclude<T, S>[]]} `[matching, nonMatching]`
  * @example
- * partition([1, 'a', 2], function (v): v is number { return typeof v === 'number'; }); // [[1, 2], ['a']]
+ * partition([1, 'a', 2], function (v): v is number { return typeof v === 'number'; }); // => [[1, 2], ['a']]
  */
 export function partition<T, S extends T>(array: ReadonlyArray<T>, predicate: (item: T, index: number) => item is S): [S[], Exclude<T, S>[]];
 /**
@@ -492,7 +492,7 @@ export function partition<T, S extends T>(array: ReadonlyArray<T>, predicate: (i
  * @param {(item: T, index: number) => boolean} predicate - Decides which side an item goes to
  * @returns {[T[], T[]]} `[matching, nonMatching]`
  * @example
- * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // [[2, 4], [1, 3]]
+ * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // => [[2, 4], [1, 3]]
  */
 export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index: number) => boolean): [T[], T[]];
 /**
@@ -502,7 +502,7 @@ export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index
  * @param {(item: T, index: number) => boolean} predicate - Decides which side an item goes to
  * @returns {[T[], T[]]} `[matching, nonMatching]`
  * @example
- * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // [[2, 4], [1, 3]]
+ * partition([1, 2, 3, 4], function (n) { return n % 2 === 0; }); // => [[2, 4], [1, 3]]
  */
 export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index: number) => boolean): [T[], T[]] {
 	const matching: T[] = [];
@@ -521,7 +521,7 @@ export function partition<T>(array: ReadonlyArray<T>, predicate: (item: T, index
  * @param {(item: T, index: number) => unknown} keyFn - Returns the identity key of an item
  * @returns {T[]} A new array with one item per distinct key, in first-appearance order
  * @example
- * uniqueBy([{ id: 1, v: 'a' }, { id: 1, v: 'b' }, { id: 2, v: 'c' }], function (o) { return o.id; }); // [{ id: 1, v: 'a' }, { id: 2, v: 'c' }]
+ * uniqueBy([{ id: 1, v: 'a' }, { id: 1, v: 'b' }, { id: 2, v: 'c' }], function (o) { return o.id; }); // => [{ id: 1, v: 'a' }, { id: 2, v: 'c' }]
  */
 export function uniqueBy<T>(array: ReadonlyArray<T>, keyFn: (item: T, index: number) => unknown): T[] {
 	const seen = new Set<unknown>();
@@ -577,8 +577,8 @@ function compareKeys(a: number | string | bigint, b: number | string | bigint): 
  * @returns {T[]} A new sorted array
  * @throws {TypeError} when `order` is neither `'asc'` nor `'desc'`
  * @example
- * sortBy([{ n: 'b' }, { n: 'a' }], function (o) { return o.n; }); // [{ n: 'a' }, { n: 'b' }]
- * sortBy([1, 3, 2], function (n) { return n; }, 'desc'); // [3, 2, 1]
+ * sortBy([{ n: 'b' }, { n: 'a' }], function (o) { return o.n; }); // => [{ n: 'a' }, { n: 'b' }]
+ * sortBy([1, 3, 2], function (n) { return n; }, 'desc'); // => [3, 2, 1]
  */
 export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, order: SortOrder = 'asc'): T[] {
 	if (order !== 'asc' && order !== 'desc') throw new TypeError(`sortBy: \`order\` must be 'asc' or 'desc', got ${String(order)}`);
@@ -630,7 +630,7 @@ export function shuffle<T>(array: ReadonlyArray<T>, random: RandomGenerator = Ma
  * @throws {RangeError} when `random()` returns a value outside `[0, 1)`
  * @example
  * sample(['a', 'b', 'c']); // e.g. 'b'
- * sample([]); // undefined
+ * sample([]); // => undefined
  */
 export function sample<T>(array: ReadonlyArray<T>, random: RandomGenerator = Math.random): T | undefined {
 	if (array.length === 0) return undefined;
@@ -645,7 +645,7 @@ export function sample<T>(array: ReadonlyArray<T>, random: RandomGenerator = Mat
  * @returns {T[]} A new array with at most `n` items
  * @throws {RangeError} when `n` is negative or not an integer
  * @example
- * take([1, 2, 3], 2); // [1, 2]
+ * take([1, 2, 3], 2); // => [1, 2]
  */
 export function take<T>(array: ReadonlyArray<T>, n: number): T[] {
 	assertInteger('take', 'n', n, 0);
@@ -660,7 +660,7 @@ export function take<T>(array: ReadonlyArray<T>, n: number): T[] {
  * @returns {T[]} A new array with the remaining items
  * @throws {RangeError} when `n` is negative or not an integer
  * @example
- * drop([1, 2, 3], 2); // [3]
+ * drop([1, 2, 3], 2); // => [3]
  */
 export function drop<T>(array: ReadonlyArray<T>, n: number): T[] {
 	assertInteger('drop', 'n', n, 0);
@@ -688,8 +688,8 @@ export type Comparator<T> = (a: T, b: T) => number;
  * @param {ReadonlyArray<T>} tuples - The tuples to split
  * @returns {Unzipped<T> | []} One fresh array per tuple position, or `[]` when there are no tuples
  * @example
- * unzip([[1, 'a'], [2, 'b']] as [number, string][]); // [[1, 2], ['a', 'b']] typed as [number[], string[]] | []
- * unzip([]); // []
+ * unzip([[1, 'a'], [2, 'b']] as [number, string][]); // => [[1, 2], ['a', 'b']] // typed as [number[], string[]] | []
+ * unzip([]); // => []
  */
 export function unzip<T extends ReadonlyArray<unknown>>(tuples: ReadonlyArray<T>): Unzipped<T> | [] {
 	if (tuples.length === 0) return [];
@@ -715,9 +715,9 @@ export function unzip<T extends ReadonlyArray<unknown>>(tuples: ReadonlyArray<T>
  * @returns {T[][]} A new array of windows (each window is a fresh array)
  * @throws {RangeError} when `size` or `step` is not a positive integer
  * @example
- * windowed([1, 2, 3, 4], 2); // [[1, 2], [2, 3], [3, 4]]
- * windowed([1, 2, 3, 4, 5], 2, 2); // [[1, 2], [3, 4]]
- * windowed([1, 2], 3); // []
+ * windowed([1, 2, 3, 4], 2); // => [[1, 2], [2, 3], [3, 4]]
+ * windowed([1, 2, 3, 4, 5], 2, 2); // => [[1, 2], [3, 4]]
+ * windowed([1, 2], 3); // => []
  */
 export function windowed<T>(array: ReadonlyArray<T>, size: number, step = 1): T[][] {
 	assertInteger('windowed', 'size', size, 1);
@@ -735,8 +735,8 @@ export function windowed<T>(array: ReadonlyArray<T>, size: number, step = 1): T[
  * @param {ReadonlyArray<T>} array - The source array
  * @returns {Array<[T, T]>} A new array of `length - 1` pairs
  * @example
- * pairwise([1, 2, 3]); // [[1, 2], [2, 3]]
- * pairwise([1]); // []
+ * pairwise([1, 2, 3]); // => [[1, 2], [2, 3]]
+ * pairwise([1]); // => []
  */
 export function pairwise<T>(array: ReadonlyArray<T>): Array<[T, T]> {
 	const result: Array<[T, T]> = [];
@@ -777,8 +777,9 @@ function extremeBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number
  * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
  * @returns {T | undefined} The first item with the smallest key, or `undefined` when the array is empty or every key is `NaN`
  * @example
- * minBy([{ n: 3 }, { n: 1 }, { n: 1 }], function (o) { return o.n; }); // the first { n: 1 }
- * minBy([NaN, 2], function (n) { return n; }); // 2
+ * const items = [{ n: 3 }, { n: 1 }, { n: 1 }];
+ * minBy(items, function (o) { return o.n; }) === items[1]; // => true // ties keep the first
+ * minBy([NaN, 2], function (n) { return n; }); // => 2
  */
 export function minBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
 	return extremeBy(array, selector, -1);
@@ -794,8 +795,8 @@ export function minBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  * @param {(item: T, index: number) => SortKey} selector - Returns the key of an item
  * @returns {T | undefined} The first item with the largest key, or `undefined` when the array is empty or every key is `NaN`
  * @example
- * maxBy([{ n: 3 }, { n: 7 }], function (o) { return o.n; }); // { n: 7 }
- * maxBy(['b', 'a', 'B'], function (s) { return s; }); // 'b'
+ * maxBy([{ n: 3 }, { n: 7 }], function (o) { return o.n; }); // => { n: 7 }
+ * maxBy(['b', 'a', 'B'], function (s) { return s; }); // => 'b'
  */
 export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey): T | undefined {
 	return extremeBy(array, selector, 1);
@@ -810,7 +811,7 @@ export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  * @param {(item: T, index: number) => number} selector - Returns the number contributed by an item
  * @returns {number} The total (`0` for an empty array)
  * @example
- * sumBy([{ price: 0.1 }, { price: 0.2 }, { price: 0.3 }], function (o) { return o.price; }); // 0.6
+ * sumBy([{ price: 0.1 }, { price: 0.2 }, { price: 0.3 }], function (o) { return o.price; }); // => 0.6
  */
 export function sumBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => number): number {
 	return sum(Array.from(array, selector));
@@ -847,8 +848,8 @@ function resolveIndex(caller: string, name: string, index: number, length: numbe
  * @returns {T[]} A new array, a permutation of the input
  * @throws {RangeError} when `from` or `to` is not an integer or is out of range (any index is out of range for an empty array)
  * @example
- * move(['a', 'b', 'c', 'd'], 0, 2); // ['b', 'c', 'a', 'd']
- * move(['a', 'b', 'c'], -1, 0); // ['c', 'a', 'b']
+ * move(['a', 'b', 'c', 'd'], 0, 2); // => ['b', 'c', 'a', 'd']
+ * move(['a', 'b', 'c'], -1, 0); // => ['c', 'a', 'b']
  */
 export function move<T>(array: ReadonlyArray<T>, from: number, to: number): T[] {
 	const source = resolveIndex('move', 'from', from, array.length, false);
@@ -870,9 +871,9 @@ export function move<T>(array: ReadonlyArray<T>, from: number, to: number): T[] 
  * @returns {T[]} A new array of length `array.length + items.length`
  * @throws {RangeError} when `index` is not an integer or is out of range
  * @example
- * insertAt([1, 2, 3], 1, 9, 8); // [1, 9, 8, 2, 3]
- * insertAt([1, 2, 3], -1, 9); // [1, 2, 9, 3]
- * insertAt([1, 2, 3], 3, 9); // [1, 2, 3, 9]
+ * insertAt([1, 2, 3], 1, 9, 8); // => [1, 9, 8, 2, 3]
+ * insertAt([1, 2, 3], -1, 9); // => [1, 2, 9, 3]
+ * insertAt([1, 2, 3], 3, 9); // => [1, 2, 3, 9]
  */
 export function insertAt<T>(array: ReadonlyArray<T>, index: number, ...items: T[]): T[] {
 	const position = resolveIndex('insertAt', 'index', index, array.length, true);
@@ -895,8 +896,8 @@ export function insertAt<T>(array: ReadonlyArray<T>, index: number, ...items: T[
  * @throws {RangeError} when `index` is not an integer or is out of range (any index is out of range for an empty array)
  * @throws {RangeError} when `count` is not a non-negative integer
  * @example
- * removeAt([1, 2, 3, 4], 1); // [1, 3, 4]
- * removeAt([1, 2, 3, 4], -2, 2); // [1, 2]
+ * removeAt([1, 2, 3, 4], 1); // => [1, 3, 4]
+ * removeAt([1, 2, 3, 4], -2, 2); // => [1, 2]
  */
 export function removeAt<T>(array: ReadonlyArray<T>, index: number, count = 1): T[] {
 	const position = resolveIndex('removeAt', 'index', index, array.length, false);
@@ -952,8 +953,8 @@ function lowerBound<T>(caller: string, sortedArray: ReadonlyArray<T>, value: T, 
  * @returns {number} An index in `[0, length]`
  * @throws {RangeError} when `value` is `NaN`
  * @example
- * sortedIndex([10, 20, 20, 30], 20); // 1
- * sortedIndex([10, 20, 30], 99); // 3
+ * sortedIndex([10, 20, 20, 30], 20); // => 1
+ * sortedIndex([10, 20, 30], 99); // => 3
  */
 export function sortedIndex<T extends number | string | bigint>(sortedArray: ReadonlyArray<T>, value: T): number;
 /**
@@ -965,7 +966,7 @@ export function sortedIndex<T extends number | string | bigint>(sortedArray: Rea
  * @param {Comparator<T>} compare - The comparator the array is sorted by
  * @returns {number} An index in `[0, length]`
  * @example
- * sortedIndex([{ n: 1 }, { n: 5 }], { n: 3 }, function (a, b) { return a.n - b.n; }); // 1
+ * sortedIndex([{ n: 1 }, { n: 5 }], { n: 3 }, function (a, b) { return a.n - b.n; }); // => 1
  */
 export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T>): number;
 /**
@@ -977,7 +978,7 @@ export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare:
  * @returns {number} The lowest insertion index
  * @throws {RangeError} when `value` is `NaN` and no comparator is given
  * @example
- * sortedIndex([1, 3], 2); // 1
+ * sortedIndex([1, 3], 2); // => 1
  */
 export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare?: Comparator<T>): number {
 	return lowerBound('sortedIndex', sortedArray, value, compare)[0];
@@ -992,8 +993,8 @@ export function sortedIndex<T>(sortedArray: ReadonlyArray<T>, value: T, compare?
  * @returns {number} The index of `value`, or `-1` when it is absent
  * @throws {RangeError} when `value` is `NaN`
  * @example
- * binarySearch([1, 3, 5, 7], 5); // 2
- * binarySearch([1, 3, 5, 7], 4); // -1
+ * binarySearch([1, 3, 5, 7], 5); // => 2
+ * binarySearch([1, 3, 5, 7], 4); // => -1
  */
 export function binarySearch<T extends number | string | bigint>(sortedArray: ReadonlyArray<T>, value: T): number;
 /**
@@ -1005,7 +1006,7 @@ export function binarySearch<T extends number | string | bigint>(sortedArray: Re
  * @param {Comparator<T>} compare - The comparator the array is sorted by
  * @returns {number} The index of a matching item, or `-1`
  * @example
- * binarySearch(['b', 'c'], 'B', function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }); // 0
+ * binarySearch(['b', 'c'], 'B', function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }); // => 0
  */
 export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare: Comparator<T>): number;
 /**
@@ -1017,7 +1018,7 @@ export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare
  * @returns {number} The lowest matching index, or `-1`
  * @throws {RangeError} when `value` is `NaN` and no comparator is given
  * @example
- * binarySearch([1, 3], 3); // 1
+ * binarySearch([1, 3], 3); // => 1
  */
 export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare?: Comparator<T>): number {
 	const [index, order] = lowerBound('binarySearch', sortedArray, value, compare);
@@ -1033,7 +1034,7 @@ export function binarySearch<T>(sortedArray: ReadonlyArray<T>, value: T, compare
  * @returns {Array<Zipped<T>>} A new array of fresh tuples
  * @throws {RangeError} when the result would have more items than an array can hold
  * @example
- * cartesianProduct([1, 2], ['a', 'b']); // [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']] typed as [number, string][]
+ * cartesianProduct([1, 2], ['a', 'b']); // => [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']] // typed as [number, string][]
  */
 export function cartesianProduct<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Array<Zipped<T>> {
 	let total = 1;
@@ -1064,8 +1065,8 @@ export function cartesianProduct<T extends Array<ReadonlyArray<unknown>>>(...arr
  * @param {S} separator - The value to insert
  * @returns {Array<T | S>} A new array of length `max(0, 2 * length - 1)`
  * @example
- * intersperse([1, 2, 3], 0); // [1, 0, 2, 0, 3]
- * intersperse(['a'], ','); // ['a']
+ * intersperse([1, 2, 3], 0); // => [1, 0, 2, 0, 3]
+ * intersperse(['a'], ','); // => ['a']
  */
 export function intersperse<T, S>(array: ReadonlyArray<T>, separator: S): Array<T | S> {
 	const result: Array<T | S> = [];
@@ -1100,8 +1101,8 @@ function keySet<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): Set<unkn
  * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
  * @returns {T[]} The items of `a` with a distinct key missing from `b`, in first-appearance order
  * @example
- * differenceBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // [{ id: 1 }]
- * differenceBy([1.2, 2.5, 3.1], [2.1], Math.floor); // [1.2, 3.1]
+ * differenceBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // => [{ id: 1 }]
+ * differenceBy([1.2, 2.5, 3.1], [2.1], Math.floor); // => [1.2, 3.1]
  */
 export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
 	const excluded = keySet(b, keyFn);
@@ -1127,7 +1128,7 @@ export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (i
  * @param {(item: T | U) => unknown} keyFn - Returns the identity key of an item of either iterable
  * @returns {T[]} The items of `a` with a distinct key also present in `b`, in first-appearance order
  * @example
- * intersectionBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // [{ id: 2 }]
+ * intersectionBy([{ id: 1 }, { id: 2 }], [{ id: 2 }], function (o) { return o.id; }); // => [{ id: 2 }]
  */
 export function intersectionBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
 	const remaining = keySet(b, keyFn);

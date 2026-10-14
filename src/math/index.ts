@@ -18,7 +18,7 @@ export interface VarianceOptions {
  * @param {number} exponent - The power of ten to shift by (may be negative)
  * @returns {number} `value * 10 ** exponent`, computed on the decimal representation
  * @example
- * shiftDecimal(1.005, 2); // 100.5 (whereas 1.005 * 100 === 100.49999999999999)
+ * shiftDecimal(1.005, 2); // => 100.5 // whereas 1.005 * 100 === 100.49999999999999
  */
 function shiftDecimal(value: number, exponent: number): number {
 	const [mantissa, currentExponent = '0'] = String(value).split('e');
@@ -30,7 +30,7 @@ function shiftDecimal(value: number, exponent: number): number {
  * @param {number} value - A finite number
  * @returns {number} The previous representable double
  * @example
- * nextDown(1); // 0.9999999999999999
+ * nextDown(1); // => 0.9999999999999999
  */
 function nextDown(value: number): number {
 	if (value === 0) return -Number.MIN_VALUE;
@@ -47,7 +47,7 @@ function nextDown(value: number): number {
  * @param {number} b - Second number
  * @returns {number} A negative number if `a` sorts first, positive if `b` sorts first, `0` otherwise
  * @example
- * [3, NaN, 1].sort(compareAscending); // [1, 3, NaN]
+ * [3, NaN, 1].sort(compareAscending); // => [1, 3, NaN]
  */
 function compareAscending(a: number, b: number): number {
 	if (Number.isNaN(a)) return Number.isNaN(b) ? 0 : 1;
@@ -82,9 +82,9 @@ function assertIntegers(name: string, a: number, b: number): void {
  * @param {ReadonlyArray<number>} numbers - The numbers to add up
  * @returns {number} The sum (`0` for an empty array)
  * @example
- * sum([1, 2, 3, 4]); // 10
- * sum([0.1, 0.2, 0.3]); // 0.6 (naive reduce gives 0.6000000000000001)
- * sum([1e100, 1, -1e100]); // 1 (naive reduce gives 0)
+ * sum([1, 2, 3, 4]); // => 10
+ * sum([0.1, 0.2, 0.3]); // => 0.6 // naive reduce gives 0.6000000000000001
+ * sum([1e100, 1, -1e100]); // => 1 // naive reduce gives 0
  */
 export function sum(numbers: ReadonlyArray<number>): number {
 	let total = 0;
@@ -115,11 +115,11 @@ export function sum(numbers: ReadonlyArray<number>): number {
  * @returns {number} The rounded number
  * @throws {RangeError} when `decimals` is not an integer
  * @example
- * round(1.2345, 2); // 1.23
- * round(1.005, 2); // 1.01
- * round(-2.5); // -3
- * round(1234, -2); // 1200
- * round(1e-7, 2); // 0
+ * round(1.2345, 2); // => 1.23
+ * round(1.005, 2); // => 1.01
+ * round(-2.5); // => -3
+ * round(1234, -2); // => 1200
+ * round(1e-7, 2); // => 0
  */
 export function round(number: number, decimals = 0): number {
 	if (!Number.isInteger(decimals)) {
@@ -142,8 +142,8 @@ export function round(number: number, decimals = 0): number {
  * @param {ReadonlyArray<number>} numbers - The numbers to average
  * @returns {number} The mean, or `NaN` for an empty array
  * @example
- * average([1, 2, 3, 4]); // 2.5
- * average([]); // NaN
+ * average([1, 2, 3, 4]); // => 2.5
+ * average([]); // => NaN
  */
 export function average(numbers: ReadonlyArray<number>): number {
 	return sum(numbers) / numbers.length;
@@ -156,9 +156,9 @@ export function average(numbers: ReadonlyArray<number>): number {
  * @returns {number} `number!` (`Infinity` when `number > 170`)
  * @throws {RangeError} when `number` is negative or not an integer
  * @example
- * factorial(0); // 1
- * factorial(5); // 120
- * factorial(171); // Infinity
+ * factorial(0); // => 1
+ * factorial(5); // => 120
+ * factorial(171); // => Infinity
  */
 export function factorial(number: number): number {
 	if (!Number.isInteger(number) || number < 0) {
@@ -177,8 +177,8 @@ export function factorial(number: number): number {
  * @param {ReadonlyArray<number>} numbers - The numbers to search
  * @returns {number} The largest value
  * @example
- * max([1, 5, 3]); // 5
- * max([]); // -Infinity
+ * max([1, 5, 3]); // => 5
+ * max([]); // => -Infinity
  */
 export function max(numbers: ReadonlyArray<number>): number {
 	let result = -Infinity;
@@ -196,8 +196,8 @@ export function max(numbers: ReadonlyArray<number>): number {
  * @param {ReadonlyArray<number>} numbers - The numbers to search
  * @returns {number} The smallest value
  * @example
- * min([4, 1, 3]); // 1
- * min([]); // Infinity
+ * min([4, 1, 3]); // => 1
+ * min([]); // => Infinity
  */
 export function min(numbers: ReadonlyArray<number>): number {
 	let result = Infinity;
@@ -213,7 +213,7 @@ export function min(numbers: ReadonlyArray<number>): number {
  * @param {number} number - The number whose absolute value is to be found
  * @returns {number} The absolute value of the given number
  * @example
- * abs(-10); // 10
+ * abs(-10); // => 10
  */
 export function abs(number: number): number {
 	return Math.abs(number);
@@ -224,7 +224,7 @@ export function abs(number: number): number {
  * @param {number} number - The number whose square root is to be found
  * @returns {number} The square root of the given number (`NaN` for negative input)
  * @example
- * sqrt(9); // 3
+ * sqrt(9); // => 3
  */
 export function sqrt(number: number): number {
 	return Math.sqrt(number);
@@ -236,7 +236,7 @@ export function sqrt(number: number): number {
  * @param {number} exponent - The exponent to raise the base to
  * @returns {number} `base ** exponent`
  * @example
- * pow(2, 3); // 8
+ * pow(2, 3); // => 8
  */
 export function pow(base: number, exponent: number): number {
 	return Math.pow(base, exponent);
@@ -251,9 +251,9 @@ export function pow(base: number, exponent: number): number {
  * @param {number} base - The base of the logarithm
  * @returns {number} `log_base(number)`
  * @example
- * log(1000, 10); // 3 (the plain ratio gives 2.9999999999999996)
- * log(16, 2); // 4
- * log(81, 3); // 4
+ * log(1000, 10); // => 3 // the plain ratio gives 2.9999999999999996
+ * log(16, 2); // => 4
+ * log(81, 3); // => 4
  */
 export function log(number: number, base: number): number {
 	if (base === 10) return Math.log10(number);
@@ -270,7 +270,7 @@ export function log(number: number, base: number): number {
  * @param {number} number - The number to round up
  * @returns {number} The smallest integer greater than or equal to the number
  * @example
- * ceil(3.14); // 4
+ * ceil(3.14); // => 4
  */
 export function ceil(number: number): number {
 	return Math.ceil(number);
@@ -281,7 +281,7 @@ export function ceil(number: number): number {
  * @param {number} number - The number to round down
  * @returns {number} The largest integer less than or equal to the number
  * @example
- * floor(3.14); // 3
+ * floor(3.14); // => 3
  */
 export function floor(number: number): number {
 	return Math.floor(number);
@@ -297,9 +297,9 @@ export function floor(number: number): number {
  * @param {number} divisor - The number to divide by
  * @returns {number} `dividend mod divisor`
  * @example
- * modulo(7, 3); // 1
- * modulo(-1, 3); // 2 (whereas -1 % 3 === -1)
- * modulo(1, -3); // -2
+ * modulo(7, 3); // => 1
+ * modulo(-1, 3); // => 2 // whereas -1 % 3 === -1
+ * modulo(1, -3); // => -2
  */
 export function modulo(dividend: number, divisor: number): number {
 	const rest = dividend % divisor;
@@ -316,8 +316,8 @@ export function modulo(dividend: number, divisor: number): number {
  * @param {number} divisor - The number to divide by
  * @returns {number} `dividend % divisor`
  * @example
- * remainder(7, 3); // 1
- * remainder(-1, 3); // -1
+ * remainder(7, 3); // => 1
+ * remainder(-1, 3); // => -1
  */
 export function remainder(dividend: number, divisor: number): number {
 	return dividend % divisor;
@@ -333,7 +333,7 @@ export function remainder(dividend: number, divisor: number): number {
  * @throws {RangeError} when a bound is not finite or `minimum > maximum`
  * @example
  * randomBetween(1, 10); // e.g. 4.7181…
- * randomBetween(0, 10, function () { return 0.5; }); // 5
+ * randomBetween(0, 10, function () { return 0.5; }); // => 5
  */
 export function randomBetween(minimum: number, maximum: number, random: RandomGenerator = Math.random): number {
 	if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
@@ -359,7 +359,7 @@ export function randomBetween(minimum: number, maximum: number, random: RandomGe
  * @throws {RangeError} when a bound is not finite, or no integer lies in `[minimum, maximum]` (including `minimum > maximum`)
  * @example
  * randomIntBetween(1, 6); // e.g. 4
- * randomIntBetween(1.2, 3.8); // 2 or 3
+ * randomIntBetween(1.2, 3.8); // 2 or 3: only the integers inside the range
  */
 export function randomIntBetween(minimum: number, maximum: number, random: RandomGenerator = Math.random): number {
 	if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
@@ -376,7 +376,7 @@ export function randomIntBetween(minimum: number, maximum: number, random: Rando
  * @param {number} degrees - The angle in degrees
  * @returns {number} The angle in radians
  * @example
- * toRadians(180); // 3.141592653589793
+ * toRadians(180); // => 3.141592653589793
  */
 export function toRadians(degrees: number): number {
 	return (degrees * Math.PI) / 180;
@@ -387,7 +387,7 @@ export function toRadians(degrees: number): number {
  * @param {number} radians - The angle in radians
  * @returns {number} The angle in degrees
  * @example
- * toDegrees(Math.PI); // 180
+ * toDegrees(Math.PI); // => 180
  */
 export function toDegrees(radians: number): number {
 	return (radians * 180) / Math.PI;
@@ -401,9 +401,9 @@ export function toDegrees(radians: number): number {
  * @returns {number} `minimum` if `value < minimum`, `maximum` if `value > maximum`, otherwise `value`
  * @throws {RangeError} when `minimum > maximum` or a bound is `NaN`
  * @example
- * clamp(15, 0, 10); // 10
- * clamp(-5, 0, 10); // 0
- * clamp(5, 0, 10); // 5
+ * clamp(15, 0, 10); // => 10
+ * clamp(-5, 0, 10); // => 0
+ * clamp(5, 0, 10); // => 5
  */
 export function clamp(value: number, minimum: number, maximum: number): number {
 	if (!(minimum <= maximum)) throw new RangeError(`clamp: minimum (${minimum}) must not be greater than maximum (${maximum})`);
@@ -419,8 +419,8 @@ export function clamp(value: number, minimum: number, maximum: number): number {
  * @param {number} t - Interpolation factor
  * @returns {number} `start + (end - start) * t`
  * @example
- * lerp(0, 10, 0.5); // 5
- * lerp(10, 20, 0.25); // 12.5
+ * lerp(0, 10, 0.5); // => 5
+ * lerp(10, 20, 0.25); // => 12.5
  */
 export function lerp(start: number, end: number, t: number): number {
 	if (t === 0) return start;
@@ -437,8 +437,8 @@ export function lerp(start: number, end: number, t: number): number {
  * @param {number} value - The value to locate
  * @returns {number} `(value - start) / (end - start)`, or `0` when `start === end`
  * @example
- * inverseLerp(0, 10, 5); // 0.5
- * inverseLerp(10, 20, 12.5); // 0.25
+ * inverseLerp(0, 10, 5); // => 0.5
+ * inverseLerp(10, 20, 12.5); // => 0.25
  */
 export function inverseLerp(start: number, end: number, value: number): number {
 	if (start === end) return 0;
@@ -455,8 +455,8 @@ export function inverseLerp(start: number, end: number, value: number): number {
  * @param {number} outMax - End of the output range
  * @returns {number} The mapped value
  * @example
- * mapRange(5, 0, 10, 0, 100); // 50
- * mapRange(0.5, 0, 1, 10, 20); // 15
+ * mapRange(5, 0, 10, 0, 100); // => 50
+ * mapRange(0.5, 0, 1, 10, 20); // => 15
  */
 export function mapRange(value: number, inMin: number, inMax: number, outMin: number, outMax: number): number {
 	return lerp(outMin, outMax, inverseLerp(inMin, inMax, value));
@@ -470,9 +470,9 @@ export function mapRange(value: number, inMin: number, inMax: number, outMin: nu
  * @param {number} end - Exclusive bound
  * @returns {boolean} `true` if the value is in range
  * @example
- * inRange(3, 2, 4); // true
- * inRange(4, 2, 4); // false
- * inRange(-3, -2, -6); // true (bounds swapped to [-6, -2))
+ * inRange(3, 2, 4); // => true
+ * inRange(4, 2, 4); // => false
+ * inRange(-3, -2, -6); // => true // bounds swapped to [-6, -2)
  */
 export function inRange(value: number, start: number, end: number): boolean {
 	const low = Math.min(start, end);
@@ -485,8 +485,8 @@ export function inRange(value: number, start: number, end: number): boolean {
  * @param {ReadonlyArray<number>} numbers - The numbers to multiply
  * @returns {number} The product (`1` for an empty array)
  * @example
- * product([2, 3, 4]); // 24
- * product([]); // 1
+ * product([2, 3, 4]); // => 24
+ * product([]); // => 1
  */
 export function product(numbers: ReadonlyArray<number>): number {
 	let result = 1;
@@ -500,9 +500,9 @@ export function product(numbers: ReadonlyArray<number>): number {
  * @param {ReadonlyArray<number>} numbers - The numbers
  * @returns {number} The median, or `NaN` if the array is empty or contains `NaN`
  * @example
- * median([3, 1, 2]); // 2
- * median([4, 1, 3, 2]); // 2.5
- * median([]); // NaN
+ * median([3, 1, 2]); // => 2
+ * median([4, 1, 3, 2]); // => 2.5
+ * median([]); // => NaN
  */
 export function median(numbers: ReadonlyArray<number>): number {
 	const length = numbers.length;
@@ -524,9 +524,9 @@ export function median(numbers: ReadonlyArray<number>): number {
  * @param {ReadonlyArray<number>} numbers - The numbers
  * @returns {number[]} Every value with the highest occurrence count, in ascending order (`NaN` last); `[]` for an empty array
  * @example
- * mode([1, 2, 2, 3]); // [2]
- * mode([3, 1, 3, 1, 2]); // [1, 3]
- * mode([]); // []
+ * mode([1, 2, 2, 3]); // => [2]
+ * mode([3, 1, 3, 1, 2]); // => [1, 3]
+ * mode([]); // => []
  */
 export function mode(numbers: ReadonlyArray<number>): number[] {
 	const counts = new Map<number, number>();
@@ -552,9 +552,9 @@ export function mode(numbers: ReadonlyArray<number>): number[] {
  * @returns {number} The variance; `NaN` for an empty array, for a sample of fewer than 2 values, or if an element is not finite;
  * `Infinity` when every element is finite but the variance overflows (e.g. `variance([1e308, -1e308])`)
  * @example
- * variance([2, 4, 4, 4, 5, 5, 7, 9]); // 4
- * variance([1, 2, 3, 4], { sample: true }); // 1.6666666666666667
- * variance([]); // NaN
+ * variance([2, 4, 4, 4, 5, 5, 7, 9]); // => 4
+ * variance([1, 2, 3, 4], { sample: true }); // => 1.6666666666666667
+ * variance([]); // => NaN
  */
 export function variance(numbers: ReadonlyArray<number>, options: VarianceOptions = {}): number {
 	const sample = options.sample === true;
@@ -584,9 +584,9 @@ export function variance(numbers: ReadonlyArray<number>, options: VarianceOption
  * @param {VarianceOptions} [options={}] - `sample`: compute the sample statistic instead of the population one
  * @returns {number} The standard deviation; `NaN` when the variance is undefined (see {@link variance})
  * @example
- * standardDeviation([2, 4, 4, 4, 5, 5, 7, 9]); // 2
- * standardDeviation([1]); // 0
- * standardDeviation([1], { sample: true }); // NaN
+ * standardDeviation([2, 4, 4, 4, 5, 5, 7, 9]); // => 2
+ * standardDeviation([1]); // => 0
+ * standardDeviation([1], { sample: true }); // => NaN
  */
 export function standardDeviation(numbers: ReadonlyArray<number>, options: VarianceOptions = {}): number {
 	return Math.sqrt(variance(numbers, options));
@@ -600,9 +600,9 @@ export function standardDeviation(numbers: ReadonlyArray<number>, options: Varia
  * @returns {number} The greatest common divisor of `a` and `b`
  * @throws {RangeError} when `a` or `b` is not an integer
  * @example
- * gcd(12, 18); // 6
- * gcd(-4, 6); // 2
- * gcd(0, 5); // 5
+ * gcd(12, 18); // => 6
+ * gcd(-4, 6); // => 2
+ * gcd(0, 5); // => 5
  */
 export function gcd(a: number, b: number): number {
 	assertIntegers('gcd', a, b);
@@ -623,9 +623,9 @@ export function gcd(a: number, b: number): number {
  * @returns {number} The least common multiple of `a` and `b`
  * @throws {RangeError} when `a` or `b` is not an integer
  * @example
- * lcm(4, 6); // 12
- * lcm(-3, 5); // 15
- * lcm(0, 5); // 0
+ * lcm(4, 6); // => 12
+ * lcm(-3, 5); // => 15
+ * lcm(0, 5); // => 0
  */
 export function lcm(a: number, b: number): number {
 	assertIntegers('lcm', a, b);
@@ -639,9 +639,9 @@ export function lcm(a: number, b: number): number {
  * @param {number} number - The number to test
  * @returns {boolean} `true` if the number is prime
  * @example
- * isPrime(7); // true
- * isPrime(9); // false
- * isPrime(1); // false
+ * isPrime(7); // => true
+ * isPrime(9); // => false
+ * isPrime(1); // => false
  */
 export function isPrime(number: number): boolean {
 	if (!Number.isInteger(number) || number < 2) return false;
@@ -658,9 +658,9 @@ export function isPrime(number: number): boolean {
  * @param {number} number - The number to test
  * @returns {boolean} `true` if the number is an even integer
  * @example
- * isEven(4); // true
- * isEven(3); // false
- * isEven(2.5); // false
+ * isEven(4); // => true
+ * isEven(3); // => false
+ * isEven(2.5); // => false
  */
 export function isEven(number: number): boolean {
 	return Number.isInteger(number) && number % 2 === 0;
@@ -671,9 +671,9 @@ export function isEven(number: number): boolean {
  * @param {number} number - The number to test
  * @returns {boolean} `true` if the number is an odd integer
  * @example
- * isOdd(3); // true
- * isOdd(-3); // true
- * isOdd(4); // false
+ * isOdd(3); // => true
+ * isOdd(-3); // => true
+ * isOdd(4); // => false
  */
 export function isOdd(number: number): boolean {
 	return Number.isInteger(number) && Math.abs(number % 2) === 1;
@@ -686,8 +686,8 @@ export function isOdd(number: number): boolean {
  * @param {number} total - The whole
  * @returns {number} The percentage, or `NaN` when `total` is `0`
  * @example
- * percentage(25, 200); // 12.5
- * percentage(3, 0); // NaN
+ * percentage(25, 200); // => 12.5
+ * percentage(3, 0); // => NaN
  */
 export function percentage(value: number, total: number): number {
 	if (total === 0) return NaN;
@@ -736,7 +736,7 @@ const IEC_BYTE_UNITS: ReadonlyArray<string> = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 
  * @param {number} t - Factor in `[0, 1)`
  * @returns {number} The interpolated value
  * @example
- * interpolateSorted(1, 3, 0.5); // 2
+ * interpolateSorted(1, 3, 0.5); // => 2
  */
 function interpolateSorted(low: number, high: number, t: number): number {
 	if (t === 0 || low === high) return low;
@@ -750,8 +750,8 @@ function interpolateSorted(low: number, high: number, t: number): number {
  * @param {number} value - A finite number
  * @returns {number} The number of digits after the decimal point (`0` for integers)
  * @example
- * decimalPlaces(0.25); // 2
- * decimalPlaces(1e-7); // 7
+ * decimalPlaces(0.25); // => 2
+ * decimalPlaces(1e-7); // => 7
  */
 function decimalPlaces(value: number): number {
 	const [mantissa, exponent = '0'] = String(Math.abs(value)).split('e');
@@ -769,10 +769,10 @@ function decimalPlaces(value: number): number {
  * @returns {number} The quantile, or `NaN` if the array is empty or contains `NaN`
  * @throws {RangeError} when `q` is not in `[0, 1]` (including `NaN`)
  * @example
- * quantile([1, 2, 3, 4], 0.5); // 2.5
- * quantile([1, 2, 3, 4], 0.25); // 1.75
- * quantile([7, 1, 3], 1); // 7
- * quantile([], 0.5); // NaN
+ * quantile([1, 2, 3, 4], 0.5); // => 2.5
+ * quantile([1, 2, 3, 4], 0.25); // => 1.75
+ * quantile([7, 1, 3], 1); // => 7
+ * quantile([], 0.5); // => NaN
  */
 export function quantile(numbers: ReadonlyArray<number>, q: number): number {
 	if (!(q >= 0 && q <= 1)) throw new RangeError(`quantile: q must be in [0, 1], received ${q}`);
@@ -794,8 +794,8 @@ export function quantile(numbers: ReadonlyArray<number>, q: number): number {
  * @returns {number} The percentile, or `NaN` if the array is empty or contains `NaN`
  * @throws {RangeError} when `p` is not in `[0, 100]` (including `NaN`)
  * @example
- * percentile([1, 2, 3, 4], 50); // 2.5
- * percentile([15, 20, 35, 40, 50], 40); // 29
+ * percentile([1, 2, 3, 4], 50); // => 2.5
+ * percentile([15, 20, 35, 40, 50], 40); // => 29
  */
 export function percentile(numbers: ReadonlyArray<number>, p: number): number {
 	if (!(p >= 0 && p <= 100)) throw new RangeError(`percentile: p must be in [0, 100], received ${p}`);
@@ -808,9 +808,9 @@ export function percentile(numbers: ReadonlyArray<number>, p: number): number {
  * @param {Iterable<number>} numbers - The numbers to accumulate
  * @returns {number[]} A new array of the same length whose `i`-th element is the sum of the first `i + 1` numbers
  * @example
- * cumulativeSum([1, 2, 3, 4]); // [1, 3, 6, 10]
- * cumulativeSum([1e100, 1, -1e100]); // [1e100, 1e100, 1] (naive running sums end with 0)
- * cumulativeSum([]); // []
+ * cumulativeSum([1, 2, 3, 4]); // => [1, 3, 6, 10]
+ * cumulativeSum([1e100, 1, -1e100]); // => [1e100, 1e100, 1] // naive running sums end with 0
+ * cumulativeSum([]); // => []
  */
 export function cumulativeSum(numbers: Iterable<number>): number[] {
 	const result: number[] = [];
@@ -840,11 +840,11 @@ export function cumulativeSum(numbers: Iterable<number>): number[] {
  * @returns {boolean} `true` if the numbers are within tolerance of each other
  * @throws {RangeError} when a tolerance is negative or `NaN`
  * @example
- * approximatelyEqual(0.1 + 0.2, 0.3); // true
- * approximatelyEqual(1, 1.1); // false
- * approximatelyEqual(1, 1.1, { relative: 0.1 }); // true
- * approximatelyEqual(1e-12, 0); // false
- * approximatelyEqual(1e-12, 0, { absolute: 1e-9 }); // true
+ * approximatelyEqual(0.1 + 0.2, 0.3); // => true
+ * approximatelyEqual(1, 1.1); // => false
+ * approximatelyEqual(1, 1.1, { relative: 0.1 }); // => true
+ * approximatelyEqual(1e-12, 0); // => false
+ * approximatelyEqual(1e-12, 0, { absolute: 1e-9 }); // => true
  */
 export function approximatelyEqual(a: number, b: number, options: ApproximatelyEqualOptions = {}): boolean {
 	const { relative = 1e-9, absolute = 0 } = options;
@@ -865,9 +865,9 @@ export function approximatelyEqual(a: number, b: number, options: ApproximatelyE
  * @returns {number} The weighted mean, or `NaN` when the total weight is `0` (including empty arrays)
  * @throws {RangeError} when `values` and `weights` have different lengths, or a weight is negative, `NaN` or infinite
  * @example
- * weightedAverage([1, 2, 3], [3, 2, 1]); // 1.6666666666666667
- * weightedAverage([10, 20], [1, 1]); // 15
- * weightedAverage([10, 20], [0, 0]); // NaN
+ * weightedAverage([80, 90], [1, 3]); // => 87.5
+ * weightedAverage([10, 20], [1, 1]); // => 15
+ * weightedAverage([10, 20], [0, 0]); // => NaN
  */
 export function weightedAverage(values: ReadonlyArray<number>, weights: ReadonlyArray<number>): number {
 	if (values.length !== weights.length) {
@@ -898,9 +898,9 @@ export function weightedAverage(values: ReadonlyArray<number>, weights: Readonly
  * @returns {number[]} A new array of the same length with values in `[0, 1]`
  * @throws {RangeError} when an element is not finite (`NaN` or `±Infinity`)
  * @example
- * normalize([10, 20, 15]); // [0, 1, 0.5]
- * normalize([5, 5]); // [0, 0]
- * normalize([]); // []
+ * normalize([10, 20, 15]); // => [0, 1, 0.5]
+ * normalize([5, 5]); // => [0, 0]
+ * normalize([]); // => []
  */
 export function normalize(numbers: ReadonlyArray<number>): number[] {
 	for (const value of numbers) {
@@ -932,11 +932,11 @@ export function normalize(numbers: ReadonlyArray<number>): number[] {
  * @returns {string} The formatted size, e.g. `'1.5 kB'`
  * @throws {RangeError} when `bytes` is not finite, `decimals` is not a non-negative integer, or `base` is not `1000` or `1024`
  * @example
- * formatBytes(0); // '0 B'
- * formatBytes(1500); // '1.5 kB'
- * formatBytes(1536, { base: 1024 }); // '1.5 KiB'
- * formatBytes(1234567, { decimals: 2 }); // '1.23 MB'
- * formatBytes(-2048, { base: 1024 }); // '-2 KiB'
+ * formatBytes(0); // => '0 B'
+ * formatBytes(1500); // => '1.5 kB'
+ * formatBytes(1536, { base: 1024 }); // => '1.5 KiB'
+ * formatBytes(1234567, { decimals: 2 }); // => '1.23 MB'
+ * formatBytes(-2048, { base: 1024 }); // => '-2 KiB'
  */
 export function formatBytes(bytes: number, options: FormatBytesOptions = {}): string {
 	const { decimals = 1, base = 1000 } = options;
@@ -965,11 +965,11 @@ export function formatBytes(bytes: number, options: FormatBytesOptions = {}): st
  * @returns {string} The number followed by its ordinal suffix
  * @throws {RangeError} when `n` is not an integer (including `NaN` and `±Infinity`)
  * @example
- * ordinal(1); // '1st'
- * ordinal(22); // '22nd'
- * ordinal(13); // '13th'
- * ordinal(112); // '112th'
- * ordinal(-3); // '-3rd'
+ * ordinal(1); // => '1st'
+ * ordinal(22); // => '22nd'
+ * ordinal(13); // => '13th'
+ * ordinal(112); // => '112th'
+ * ordinal(-3); // => '-3rd'
  */
 export function ordinal(n: number): string {
 	if (!Number.isInteger(n)) throw new RangeError(`ordinal: argument must be an integer, received ${n}`);
@@ -994,10 +994,10 @@ export function ordinal(n: number): string {
  * @returns {number} The real `n`-th root of `value`, or `NaN` when it does not exist
  * @throws {RangeError} when `n` is not a positive integer
  * @example
- * nthRoot(27, 3); // 3
- * nthRoot(-32, 5); // -2
- * nthRoot(16, 4); // 2
- * nthRoot(-16, 4); // NaN
+ * nthRoot(27, 3); // => 3
+ * nthRoot(-32, 5); // => -2
+ * nthRoot(16, 4); // => 2
+ * nthRoot(-16, 4); // => NaN
  */
 export function nthRoot(value: number, n: number): number {
 	if (!Number.isInteger(n) || n < 1) throw new RangeError(`nthRoot: n must be a positive integer, received ${n}`);
@@ -1024,10 +1024,10 @@ export function nthRoot(value: number, n: number): number {
  * @returns {number} The multiple of `step` nearest to `value`
  * @throws {RangeError} when `step` is not a finite number greater than `0`
  * @example
- * roundToStep(1.13, 0.25); // 1.25
- * roundToStep(7, 5); // 5
- * roundToStep(-7.5, 5); // -10
- * roundToStep(0.3, 0.1); // 0.3
+ * roundToStep(1.13, 0.25); // => 1.25
+ * roundToStep(7, 5); // => 5
+ * roundToStep(-7.5, 5); // => -10
+ * roundToStep(0.3, 0.1); // => 0.3
  */
 export function roundToStep(value: number, step: number): number {
 	if (!(step > 0 && step < Infinity)) throw new RangeError(`roundToStep: step must be a finite number greater than 0, received ${step}`);

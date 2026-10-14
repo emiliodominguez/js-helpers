@@ -68,6 +68,7 @@
 		"test": "jest",
 		"test:watch": "jest --watch",
 		"test:coverage": "jest --coverage",
+		"test:docs": "node scripts/doctest.mjs",
 		"test:dist": "node scripts/smoke-dist.mjs",
 		"check:exports": "attw --pack . --profile esm-only",
 		"check:size": "node scripts/check-size.mjs",

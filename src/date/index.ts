@@ -118,7 +118,7 @@ const FORMAT_TOKEN_REGEX = /\[([^\]]*)]|YYYY|YY|SSS|MM|M|DD|D|HH|H|hh|h|mm|m|ss|
  * @param {number} length - The minimum number of digits
  * @returns {string} The padded string
  * @example
- * pad(7, 2); // '07'
+ * pad(7, 2); // => '07'
  */
 function pad(value: number, length: number): string {
 	const digits = String(Math.abs(value)).padStart(length, '0');
@@ -131,7 +131,7 @@ function pad(value: number, length: number): string {
  * @param {number} hours - The hour, 0-23
  * @returns {number} The hour, 1-12
  * @example
- * to12Hour(0); // 12
+ * to12Hour(0); // => 12
  */
 function to12Hour(hours: number): number {
 	return hours % 12 === 0 ? 12 : hours % 12;
@@ -201,7 +201,7 @@ const FORMATTERS: Readonly<Record<string, (date: Date) => string>> = {
  * @throws {TypeError} when `input` is neither a `Date` nor a number
  * @throws {RangeError} when `input` is an invalid date
  * @example
- * toValidDate(0); // 1970-01-01T00:00:00.000Z
+ * toValidDate(0).toISOString(); // => '1970-01-01T00:00:00.000Z'
  */
 function toValidDate(input: DateInput): Date {
 	if (!isDate(input) && typeof input !== 'number') {
@@ -223,7 +223,7 @@ function toValidDate(input: DateInput): Date {
  * @throws {TypeError} when `input` is neither a `Date` nor a number
  * @throws {RangeError} when `input` is an invalid date
  * @example
- * timeOf(new Date(5)); // 5
+ * timeOf(new Date(5)); // => 5
  */
 function timeOf(input: DateInput): number {
 	return toValidDate(input).getTime();
@@ -288,7 +288,7 @@ function assertWeekday(weekStartsOn: number): void {
  * @param {Date} date - A valid date
  * @returns {number} The epoch day number of the local calendar date
  * @example
- * epochDay(new Date(1970, 0, 2)); // 1
+ * epochDay(new Date(1970, 0, 2)); // => 1
  */
 function epochDay(date: Date): number {
 	return daysFromCivil(date.getFullYear(), date.getMonth(), date.getDate());
@@ -303,7 +303,7 @@ function epochDay(date: Date): number {
  * @param {number} day - The day of the month (1-31)
  * @returns {number} The epoch day number
  * @example
- * daysFromCivil(1970, 0, 2); // 1
+ * daysFromCivil(1970, 0, 2); // => 1
  */
 function daysFromCivil(year: number, monthIndex: number, day: number): number {
 	const y = monthIndex < 2 ? year - 1 : year;
@@ -322,7 +322,7 @@ function daysFromCivil(year: number, monthIndex: number, day: number): number {
  * @param {number} divisor - The positive divisor
  * @returns {number} `value mod divisor`, in `[0, divisor)`
  * @example
- * mod(-1, 7); // 6
+ * mod(-1, 7); // => 6
  */
 function mod(value: number, divisor: number): number {
 	return ((value % divisor) + divisor) % divisor;
@@ -337,7 +337,7 @@ function mod(value: number, divisor: number): number {
  * @returns {Date} The start of that local day
  * @throws {RangeError} when the result is outside the representable range
  * @example
- * localMidnight(2024, 0, 32); // 2024-02-01 00:00 (local)
+ * localMidnight(2024, 0, 32); // => new Date(2024, 1, 1) // 00:00 local time
  */
 function localMidnight(year: number, monthIndex: number, day: number): Date {
 	const result = new Date(0);
@@ -356,7 +356,7 @@ function localMidnight(year: number, monthIndex: number, day: number): Date {
  * @param {number} day - An epoch day number
  * @returns {number} The cumulative weekday count
  * @example
- * weekdaysThrough(4) - weekdaysThrough(3); // 1 (1970-01-05 was a Monday)
+ * weekdaysThrough(4) - weekdaysThrough(3); // => 1 // 1970-01-05 was a Monday
  */
 function weekdaysThrough(day: number): number {
 	const sinceMonday = day - EPOCH_MONDAY;
@@ -370,7 +370,7 @@ function weekdaysThrough(day: number): number {
  * @param {Date} date - A valid date
  * @returns {[number, number]} `[isoWeekYear, isoWeek]`
  * @example
- * isoWeekParts(new Date(2021, 0, 3)); // [2020, 53]
+ * isoWeekParts(new Date(2021, 0, 3)); // => [2020, 53]
  */
 function isoWeekParts(date: Date): [number, number] {
 	const day = epochDay(date);
@@ -391,7 +391,7 @@ function isoWeekParts(date: Date): [number, number] {
  * @param {Date} earlier - A valid date
  * @returns {number} `12 * yearDelta + monthDelta`
  * @example
- * calendarMonthDiff(new Date(2024, 0, 1), new Date(2023, 11, 31)); // 1
+ * calendarMonthDiff(new Date(2024, 0, 1), new Date(2023, 11, 31)); // => 1
  */
 function calendarMonthDiff(later: Date, earlier: Date): number {
 	return (later.getFullYear() - earlier.getFullYear()) * 12 + (later.getMonth() - earlier.getMonth());
@@ -402,7 +402,7 @@ function calendarMonthDiff(later: Date, earlier: Date): number {
  * @param {number} value - The value to truncate
  * @returns {number} The truncated value
  * @example
- * truncate(-0.5); // 0
+ * truncate(-0.5); // => 0
  */
 function truncate(value: number): number {
 	return Math.trunc(value) + 0;
@@ -415,7 +415,7 @@ function truncate(value: number): number {
  * @returns {Date} A new date at the end of the local day
  * @throws {RangeError} when the end of the day is outside the representable range
  * @example
- * lastInstantOfDay(new Date(2024, 0, 1, 12)); // 2024-01-01 23:59:59.999 (local)
+ * lastInstantOfDay(new Date(2024, 0, 1, 12)); // => new Date(2024, 0, 1, 23, 59, 59, 999)
  */
 function lastInstantOfDay(date: Date): Date {
 	const nextDay = new Date(date.getTime());
@@ -431,10 +431,10 @@ function lastInstantOfDay(date: Date): Date {
  * @param {unknown} value - The value to check
  * @returns {boolean} `true` when `value` is a valid `Date`
  * @example
- * isValidDate(new Date()); // true
- * isValidDate(new Date('nope')); // false
- * isValidDate(Date.now()); // false (a number, not a Date)
- * isValidDate(Object.create(Date.prototype)); // false (not a real Date)
+ * isValidDate(new Date()); // => true
+ * isValidDate(new Date('nope')); // => false
+ * isValidDate(Date.now()); // => false // a number, not a Date
+ * isValidDate(Object.create(Date.prototype)); // => false // not a real Date
  */
 export function isValidDate(value: unknown): value is Date {
 	return isDate(value) && !Number.isNaN(Date.prototype.getTime.call(value));
@@ -447,7 +447,7 @@ export function isValidDate(value: unknown): value is Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
  * @example
- * addDays(new Date(2024, 0, 31), 1); // 2024-02-01 (local), same time of day
+ * addDays(new Date(2024, 0, 31, 10, 30), 1); // => new Date(2024, 1, 1, 10, 30) // same local time of day
  */
 export function addDays(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
@@ -469,7 +469,7 @@ export function addDays(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
  * @example
- * addWeeks(new Date(2024, 0, 1), 2); // 2024-01-15 (local)
+ * addWeeks(new Date(2024, 0, 1), 2); // => new Date(2024, 0, 15)
  */
 export function addWeeks(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
@@ -485,8 +485,8 @@ export function addWeeks(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
  * @example
- * addMonths(new Date(2023, 0, 31), 1); // 2023-02-28 (local)
- * addMonths(new Date(2024, 0, 31), 1); // 2024-02-29 (local)
+ * addMonths(new Date(2023, 0, 31), 1); // => new Date(2023, 1, 28)
+ * addMonths(new Date(2024, 0, 31), 1); // => new Date(2024, 1, 29)
  */
 export function addMonths(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
@@ -512,7 +512,7 @@ export function addMonths(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
  * @example
- * addYears(new Date(2024, 1, 29), 1); // 2025-02-28 (local)
+ * addYears(new Date(2024, 1, 29), 1); // => new Date(2025, 1, 28)
  */
 export function addYears(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
@@ -527,7 +527,7 @@ export function addYears(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not finite, or the result is out of range
  * @example
- * addHours(new Date(Date.UTC(2024, 0, 1)), 2).toISOString(); // '2024-01-01T02:00:00.000Z'
+ * addHours(new Date(Date.UTC(2024, 0, 1)), 2).toISOString(); // => '2024-01-01T02:00:00.000Z'
  */
 export function addHours(date: DateInput, amount: number): Date {
 	assertFinite(amount);
@@ -542,7 +542,7 @@ export function addHours(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not finite, or the result is out of range
  * @example
- * addMinutes(new Date(Date.UTC(2024, 0, 1)), 90).toISOString(); // '2024-01-01T01:30:00.000Z'
+ * addMinutes(new Date(Date.UTC(2024, 0, 1)), 90).toISOString(); // => '2024-01-01T01:30:00.000Z'
  */
 export function addMinutes(date: DateInput, amount: number): Date {
 	assertFinite(amount);
@@ -557,7 +557,7 @@ export function addMinutes(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not finite, or the result is out of range
  * @example
- * addSeconds(new Date(0), 1.5).getTime(); // 1500
+ * addSeconds(new Date(0), 1.5).getTime(); // => 1500
  */
 export function addSeconds(date: DateInput, amount: number): Date {
 	assertFinite(amount);
@@ -572,7 +572,7 @@ export function addSeconds(date: DateInput, amount: number): Date {
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not finite, or the result is out of range
  * @example
- * addMilliseconds(new Date(0), 250).getTime(); // 250
+ * addMilliseconds(new Date(0), 250).getTime(); // => 250
  */
 export function addMilliseconds(date: DateInput, amount: number): Date {
 	assertFinite(amount);
@@ -588,8 +588,8 @@ export function addMilliseconds(date: DateInput, amount: number): Date {
  * @returns {number} `later`'s calendar day minus `earlier`'s calendar day
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInDays(new Date(2024, 2, 1), new Date(2024, 1, 1)); // 29
- * diffInDays(new Date(2024, 0, 1), new Date(2024, 0, 3)); // -2
+ * diffInDays(new Date(2024, 2, 1), new Date(2024, 1, 1)); // => 29
+ * diffInDays(new Date(2024, 0, 1), new Date(2024, 0, 3)); // => -2
  */
 export function diffInDays(later: DateInput, earlier: DateInput): number {
 	return epochDay(toValidDate(later)) - epochDay(toValidDate(earlier));
@@ -602,7 +602,7 @@ export function diffInDays(later: DateInput, earlier: DateInput): number {
  * @returns {number} The number of whole hours
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInHours(new Date(2024, 0, 1, 10, 59), new Date(2024, 0, 1, 9, 0)); // 1 (when no DST change happens in between)
+ * diffInHours(new Date(2024, 0, 1, 10, 59), new Date(2024, 0, 1, 9, 0)); // => 1 // when no DST change happens in between
  */
 export function diffInHours(later: DateInput, earlier: DateInput): number {
 	return truncate((timeOf(later) - timeOf(earlier)) / MS_PER_HOUR);
@@ -615,7 +615,7 @@ export function diffInHours(later: DateInput, earlier: DateInput): number {
  * @returns {number} The number of whole minutes
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInMinutes(150_000, 0); // 2
+ * diffInMinutes(150_000, 0); // => 2
  */
 export function diffInMinutes(later: DateInput, earlier: DateInput): number {
 	return truncate((timeOf(later) - timeOf(earlier)) / MS_PER_MINUTE);
@@ -628,7 +628,7 @@ export function diffInMinutes(later: DateInput, earlier: DateInput): number {
  * @returns {number} The number of whole seconds
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInSeconds(0, 2_500); // -2
+ * diffInSeconds(0, 2_500); // => -2
  */
 export function diffInSeconds(later: DateInput, earlier: DateInput): number {
 	return truncate((timeOf(later) - timeOf(earlier)) / MS_PER_SECOND);
@@ -644,8 +644,8 @@ export function diffInSeconds(later: DateInput, earlier: DateInput): number {
  * @returns {number} The number of complete months
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInMonths(new Date(2024, 2, 14), new Date(2024, 0, 15)); // 1
- * diffInMonths(new Date(2023, 1, 28), new Date(2023, 0, 31)); // 1
+ * diffInMonths(new Date(2024, 2, 14), new Date(2024, 0, 15)); // => 1
+ * diffInMonths(new Date(2023, 1, 28), new Date(2023, 0, 31)); // => 1
  */
 export function diffInMonths(later: DateInput, earlier: DateInput): number {
 	const end = toValidDate(later);
@@ -664,7 +664,7 @@ export function diffInMonths(later: DateInput, earlier: DateInput): number {
  * @returns {Date} A new date at the start of the same local day
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * startOfDay(new Date(2024, 4, 10, 15, 30)); // 2024-05-10 00:00:00.000 (local)
+ * startOfDay(new Date(2024, 4, 10, 15, 30)); // => new Date(2024, 4, 10)
  */
 export function startOfDay(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -681,7 +681,7 @@ export function startOfDay(date: DateInput): Date {
  * @returns {Date} A new date at the end of the same local day
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * endOfDay(new Date(2024, 4, 10, 15, 30)); // 2024-05-10 23:59:59.999 (local)
+ * endOfDay(new Date(2024, 4, 10, 15, 30)); // => new Date(2024, 4, 10, 23, 59, 59, 999)
  */
 export function endOfDay(date: DateInput): Date {
 	return lastInstantOfDay(toValidDate(date));
@@ -693,7 +693,7 @@ export function endOfDay(date: DateInput): Date {
  * @returns {Date} A new date at the start of the month
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * startOfMonth(new Date(2024, 1, 20)); // 2024-02-01 00:00:00.000 (local)
+ * startOfMonth(new Date(2024, 1, 20)); // => new Date(2024, 1, 1)
  */
 export function startOfMonth(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -710,7 +710,7 @@ export function startOfMonth(date: DateInput): Date {
  * @returns {Date} A new date at the end of the month
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * endOfMonth(new Date(2024, 1, 20)); // 2024-02-29 23:59:59.999 (local)
+ * endOfMonth(new Date(2024, 1, 20)); // => new Date(2024, 1, 29, 23, 59, 59, 999)
  */
 export function endOfMonth(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -727,8 +727,8 @@ export function endOfMonth(date: DateInput): Date {
  * @returns {Date} A new date at the start of the week
  * @throws {RangeError} when `date` is invalid, `weekStartsOn` is not an integer between 0 and 6, or the result is out of range
  * @example
- * startOfWeek(new Date(2024, 4, 15)); // Sun 2024-05-12 00:00 (local)
- * startOfWeek(new Date(2024, 4, 15), 1); // Mon 2024-05-13 00:00 (local)
+ * startOfWeek(new Date(2024, 4, 15)); // => new Date(2024, 4, 12) // Sunday
+ * startOfWeek(new Date(2024, 4, 15), 1); // => new Date(2024, 4, 13) // Monday
  */
 export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Date {
 	assertWeekday(weekStartsOn);
@@ -748,7 +748,7 @@ export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Da
  * @returns {Date} A new date at the end of the week
  * @throws {RangeError} when `date` is invalid, `weekStartsOn` is not an integer between 0 and 6, or the result is out of range
  * @example
- * endOfWeek(new Date(2024, 4, 15)); // Sat 2024-05-18 23:59:59.999 (local)
+ * endOfWeek(new Date(2024, 4, 15)); // => new Date(2024, 4, 18, 23, 59, 59, 999) // Saturday
  */
 export function endOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Date {
 	const result = startOfWeek(date, weekStartsOn);
@@ -764,7 +764,7 @@ export function endOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Date
  * @returns {Date} A new date at the start of the year
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * startOfYear(new Date(2024, 6, 4)); // 2024-01-01 00:00:00.000 (local)
+ * startOfYear(new Date(2024, 6, 4)); // => new Date(2024, 0, 1)
  */
 export function startOfYear(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -781,7 +781,7 @@ export function startOfYear(date: DateInput): Date {
  * @returns {Date} A new date at the end of the year
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * endOfYear(new Date(2024, 6, 4)); // 2024-12-31 23:59:59.999 (local)
+ * endOfYear(new Date(2024, 6, 4)); // => new Date(2024, 11, 31, 23, 59, 59, 999)
  */
 export function endOfYear(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -798,7 +798,7 @@ export function endOfYear(date: DateInput): Date {
  * @returns {boolean} `true` when year, month and day match
  * @throws {RangeError} when either date is invalid
  * @example
- * isSameDay(new Date(2024, 0, 1, 0, 0), new Date(2024, 0, 1, 23, 59)); // true
+ * isSameDay(new Date(2024, 0, 1, 0, 0), new Date(2024, 0, 1, 23, 59)); // => true
  */
 export function isSameDay(a: DateInput, b: DateInput): boolean {
 	const left = toValidDate(a);
@@ -814,8 +814,8 @@ export function isSameDay(a: DateInput, b: DateInput): boolean {
  * @returns {boolean} `true` when year and month match
  * @throws {RangeError} when either date is invalid
  * @example
- * isSameMonth(new Date(2024, 0, 1), new Date(2024, 0, 31)); // true
- * isSameMonth(new Date(2024, 0, 1), new Date(2023, 0, 1)); // false
+ * isSameMonth(new Date(2024, 0, 1), new Date(2024, 0, 31)); // => true
+ * isSameMonth(new Date(2024, 0, 1), new Date(2023, 0, 1)); // => false
  */
 export function isSameMonth(a: DateInput, b: DateInput): boolean {
 	const left = toValidDate(a);
@@ -831,7 +831,7 @@ export function isSameMonth(a: DateInput, b: DateInput): boolean {
  * @returns {boolean} `true` when the years match
  * @throws {RangeError} when either date is invalid
  * @example
- * isSameYear(new Date(2024, 0, 1), new Date(2024, 11, 31)); // true
+ * isSameYear(new Date(2024, 0, 1), new Date(2024, 11, 31)); // => true
  */
 export function isSameYear(a: DateInput, b: DateInput): boolean {
 	return toValidDate(a).getFullYear() === toValidDate(b).getFullYear();
@@ -843,9 +843,9 @@ export function isSameYear(a: DateInput, b: DateInput): boolean {
  * @returns {boolean} `true` for leap years
  * @throws {RangeError} when given a non-integer year or an invalid date
  * @example
- * isLeapYear(2024); // true
- * isLeapYear(1900); // false
- * isLeapYear(new Date(2000, 5, 1)); // true
+ * isLeapYear(2024); // => true
+ * isLeapYear(1900); // => false
+ * isLeapYear(new Date(2000, 5, 1)); // => true
  */
 export function isLeapYear(yearOrDate: number | Date): boolean {
 	const year = yearOrDate instanceof Date ? toValidDate(yearOrDate).getFullYear() : yearOrDate;
@@ -862,8 +862,8 @@ export function isLeapYear(yearOrDate: number | Date): boolean {
  * @returns {number} 28, 29, 30 or 31
  * @throws {RangeError} when `year` is not an integer or `monthIndex` is not an integer between 0 and 11
  * @example
- * daysInMonth(2024, 1); // 29
- * daysInMonth(2023, 1); // 28
+ * daysInMonth(2024, 1); // => 29
+ * daysInMonth(2023, 1); // => 28
  */
 export function daysInMonth(year: number, monthIndex: number): number {
 	assertInteger(year, 'year');
@@ -881,7 +881,7 @@ export function daysInMonth(year: number, monthIndex: number): number {
  * @returns {number} 28, 29, 30 or 31
  * @throws {RangeError} when `date` is invalid
  * @example
- * getDaysInMonth(new Date(2024, 1, 10)); // 29
+ * getDaysInMonth(new Date(2024, 1, 10)); // => 29
  */
 export function getDaysInMonth(date: DateInput): number {
 	const d = toValidDate(date);
@@ -895,7 +895,7 @@ export function getDaysInMonth(date: DateInput): number {
  * @returns {boolean} `true` on weekends
  * @throws {RangeError} when `date` is invalid
  * @example
- * isWeekend(new Date(2024, 4, 18)); // true (Saturday)
+ * isWeekend(new Date(2024, 4, 18)); // => true // a Saturday
  */
 export function isWeekend(date: DateInput): boolean {
 	const day = toValidDate(date).getDay();
@@ -910,7 +910,7 @@ export function isWeekend(date: DateInput): boolean {
  * @returns {boolean} `true` when `a < b`
  * @throws {RangeError} when either date is invalid
  * @example
- * isBefore(new Date(2024, 0, 1), new Date(2024, 0, 2)); // true
+ * isBefore(new Date(2024, 0, 1), new Date(2024, 0, 2)); // => true
  */
 export function isBefore(a: DateInput, b: DateInput): boolean {
 	return timeOf(a) < timeOf(b);
@@ -923,7 +923,7 @@ export function isBefore(a: DateInput, b: DateInput): boolean {
  * @returns {boolean} `true` when `a > b`
  * @throws {RangeError} when either date is invalid
  * @example
- * isAfter(new Date(2024, 0, 2), new Date(2024, 0, 1)); // true
+ * isAfter(new Date(2024, 0, 2), new Date(2024, 0, 1)); // => true
  */
 export function isAfter(a: DateInput, b: DateInput): boolean {
 	return timeOf(a) > timeOf(b);
@@ -938,8 +938,8 @@ export function isAfter(a: DateInput, b: DateInput): boolean {
  * @returns {boolean} `true` when `date` is inside the range
  * @throws {RangeError} when a date is invalid, `start` is after `end`, or `inclusivity` is not one of `'[]' | '()' | '[)' | '(]'`
  * @example
- * isBetween(new Date(2024, 0, 5), new Date(2024, 0, 1), new Date(2024, 0, 10)); // true
- * isBetween(new Date(2024, 0, 10), new Date(2024, 0, 1), new Date(2024, 0, 10), '[)'); // false
+ * isBetween(new Date(2024, 0, 5), new Date(2024, 0, 1), new Date(2024, 0, 10)); // => true
+ * isBetween(new Date(2024, 0, 10), new Date(2024, 0, 1), new Date(2024, 0, 10), '[)'); // => false
  */
 export function isBetween(date: DateInput, start: DateInput, end: DateInput, inclusivity: BetweenInclusivity = '[]'): boolean {
 	if (!INCLUSIVITIES.includes(inclusivity)) throw new RangeError(`inclusivity must be one of ${INCLUSIVITIES.join(', ')}, received ${String(inclusivity)}`);
@@ -963,7 +963,7 @@ export function isBetween(date: DateInput, start: DateInput, end: DateInput, inc
  * @returns {number} `-1` if `a < b`, `1` if `a > b`, `0` if equal
  * @throws {RangeError} when either date is invalid
  * @example
- * [new Date(2024, 1, 1), new Date(2023, 1, 1)].sort(compareAsc); // [2023-02-01, 2024-02-01]
+ * [new Date(2024, 1, 1), new Date(2023, 1, 1)].sort(compareAsc); // => [new Date(2023, 1, 1), new Date(2024, 1, 1)]
  */
 export function compareAsc(a: DateInput, b: DateInput): -1 | 0 | 1 {
 	const left = timeOf(a);
@@ -981,7 +981,7 @@ export function compareAsc(a: DateInput, b: DateInput): -1 | 0 | 1 {
  * @returns {number} `1` if `a < b`, `-1` if `a > b`, `0` if equal
  * @throws {RangeError} when either date is invalid
  * @example
- * [new Date(2023, 1, 1), new Date(2024, 1, 1)].sort(compareDesc); // [2024-02-01, 2023-02-01]
+ * [new Date(2023, 1, 1), new Date(2024, 1, 1)].sort(compareDesc); // => [new Date(2024, 1, 1), new Date(2023, 1, 1)]
  */
 export function compareDesc(a: DateInput, b: DateInput): -1 | 0 | 1 {
 	return compareAsc(b, a);
@@ -993,8 +993,8 @@ export function compareDesc(a: DateInput, b: DateInput): -1 | 0 | 1 {
  * @returns {Date | undefined} A new `Date` equal to the earliest date, or `undefined` when `dates` is empty
  * @throws {RangeError} when any date is invalid
  * @example
- * minDate([new Date(2024, 0, 2), new Date(2024, 0, 1)]); // 2024-01-01
- * minDate([]); // undefined
+ * minDate([new Date(2024, 0, 2), new Date(2024, 0, 1)]); // => new Date(2024, 0, 1)
+ * minDate([]); // => undefined
  */
 export function minDate(dates: Iterable<DateInput>): Date | undefined {
 	let result: number | undefined;
@@ -1014,8 +1014,8 @@ export function minDate(dates: Iterable<DateInput>): Date | undefined {
  * @returns {Date | undefined} A new `Date` equal to the latest date, or `undefined` when `dates` is empty
  * @throws {RangeError} when any date is invalid
  * @example
- * maxDate([new Date(2024, 0, 2), new Date(2024, 0, 1)]); // 2024-01-02
- * maxDate([]); // undefined
+ * maxDate([new Date(2024, 0, 2), new Date(2024, 0, 1)]); // => new Date(2024, 0, 2)
+ * maxDate([]); // => undefined
  */
 export function maxDate(dates: Iterable<DateInput>): Date | undefined {
 	let result: number | undefined;
@@ -1047,8 +1047,8 @@ export function maxDate(dates: Iterable<DateInput>): Date | undefined {
  * @returns {string} The formatted date
  * @throws {RangeError} when `date` is invalid
  * @example
- * formatDate(new Date(2024, 0, 5, 14, 7, 9, 3), 'YYYY-MM-DD HH:mm:ss.SSS'); // '2024-01-05 14:07:09.003'
- * formatDate(new Date(2024, 0, 5, 14, 7), 'D/M/YY h:mm A [o\'clock]'); // "5/1/24 2:07 PM o'clock"
+ * formatDate(new Date(2024, 0, 5, 14, 7, 9, 3), 'YYYY-MM-DD HH:mm:ss.SSS'); // => '2024-01-05 14:07:09.003'
+ * formatDate(new Date(2024, 0, 5, 14, 7), 'D/M/YY h:mm A [o\'clock]'); // => "5/1/24 2:07 PM o'clock"
  */
 export function formatDate(date: DateInput, pattern: string): string {
 	const d = toValidDate(date);
@@ -1065,7 +1065,7 @@ export function formatDate(date: DateInput, pattern: string): string {
  * @returns {string} The local date in ISO 8601 calendar format
  * @throws {RangeError} when `date` is invalid
  * @example
- * toISODateString(new Date(2024, 0, 5, 23, 30)); // '2024-01-05'
+ * toISODateString(new Date(2024, 0, 5, 23, 30)); // => '2024-01-05'
  */
 export function toISODateString(date: DateInput): string {
 	return formatDate(date, 'YYYY-MM-DD');
@@ -1077,9 +1077,9 @@ export function toISODateString(date: DateInput): string {
  * @param {string} value - The string to parse
  * @returns {Date | undefined} The parsed date, or `undefined` when the string is not a valid calendar date
  * @example
- * parseISODate('2024-02-29'); // 2024-02-29 00:00 (local)
- * parseISODate('2023-02-29'); // undefined
- * parseISODate('2024-2-1'); // undefined
+ * parseISODate('2024-02-29'); // => new Date(2024, 1, 29) // local midnight
+ * parseISODate('2023-02-29'); // => undefined
+ * parseISODate('2024-2-1'); // => undefined
  */
 export function parseISODate(value: string): Date | undefined {
 	const match = typeof value === 'string' ? ISO_DATE_REGEX.exec(value) : null;
@@ -1109,9 +1109,9 @@ export function parseISODate(value: string): Date | undefined {
  * @throws {RangeError} when either date is invalid or the locale is malformed
  * @example
  * const base = new Date(2024, 0, 10, 12);
- * getRelativeTime(new Date(2024, 0, 10, 9), base); // '3 hours ago'
- * getRelativeTime(new Date(2024, 0, 11, 12), base); // 'tomorrow'
- * getRelativeTime(new Date(2024, 3, 10, 12), base); // 'in 3 months'
+ * getRelativeTime(new Date(2024, 0, 10, 9), base); // => '3 hours ago'
+ * getRelativeTime(new Date(2024, 0, 11, 12), base); // => 'tomorrow'
+ * getRelativeTime(new Date(2024, 3, 10, 12), base); // => 'in 3 months'
  */
 export function getRelativeTime(date: DateInput, baseDate: DateInput = new Date(), locale = 'en'): string {
 	const target = toValidDate(date);
@@ -1145,10 +1145,8 @@ export function getRelativeTime(date: DateInput, baseDate: DateInput = new Date(
  * @returns {Date[]} A new array of new dates, in ascending order; its first element is the start of `start`'s day
  * @throws {RangeError} when a date is invalid, `start` is after `end`, `step` is not a positive integer, or a result is out of range
  * @example
- * eachDayOfInterval(new Date(2024, 0, 30, 18), new Date(2024, 1, 2, 9));
- * // [2024-01-30, 2024-01-31, 2024-02-01, 2024-02-02] (local midnights)
- * eachDayOfInterval(new Date(2024, 0, 1), new Date(2024, 0, 10), { step: 3 });
- * // [2024-01-01, 2024-01-04, 2024-01-07, 2024-01-10]
+ * eachDayOfInterval(new Date(2024, 0, 30, 18), new Date(2024, 1, 2, 9)); // => [new Date(2024, 0, 30), new Date(2024, 0, 31), new Date(2024, 1, 1), new Date(2024, 1, 2)]
+ * eachDayOfInterval(new Date(2024, 0, 1), new Date(2024, 0, 10), { step: 3 }); // => [new Date(2024, 0, 1), new Date(2024, 0, 4), new Date(2024, 0, 7), new Date(2024, 0, 10)]
  */
 export function eachDayOfInterval(start: DateInput, end: DateInput, options: EachDayOfIntervalOptions = {}): Date[] {
 	const { step = 1 } = options;
@@ -1178,9 +1176,9 @@ export function eachDayOfInterval(start: DateInput, end: DateInput, options: Eac
  * @returns {number} The ISO week number, 1-53
  * @throws {RangeError} when `date` is invalid
  * @example
- * getISOWeek(new Date(2024, 0, 1)); // 1 (Monday)
- * getISOWeek(new Date(2021, 0, 3)); // 53 (Sunday; belongs to ISO year 2020)
- * getISOWeek(new Date(2024, 11, 30)); // 1 (belongs to ISO year 2025)
+ * getISOWeek(new Date(2024, 0, 1)); // => 1 // a Monday
+ * getISOWeek(new Date(2021, 0, 3)); // => 53 // Sunday; belongs to ISO year 2020
+ * getISOWeek(new Date(2024, 11, 30)); // => 1 // belongs to ISO year 2025
  */
 export function getISOWeek(date: DateInput): number {
 	return isoWeekParts(toValidDate(date))[1];
@@ -1193,9 +1191,9 @@ export function getISOWeek(date: DateInput): number {
  * @returns {number} The ISO week-numbering year
  * @throws {RangeError} when `date` is invalid
  * @example
- * getISOWeekYear(new Date(2021, 0, 3)); // 2020
- * getISOWeekYear(new Date(2024, 11, 30)); // 2025
- * getISOWeekYear(new Date(2024, 5, 15)); // 2024
+ * getISOWeekYear(new Date(2021, 0, 3)); // => 2020
+ * getISOWeekYear(new Date(2024, 11, 30)); // => 2025
+ * getISOWeekYear(new Date(2024, 5, 15)); // => 2024
  */
 export function getISOWeekYear(date: DateInput): number {
 	return isoWeekParts(toValidDate(date))[0];
@@ -1207,7 +1205,7 @@ export function getISOWeekYear(date: DateInput): number {
  * @returns {Quarter} 1 (Jan-Mar), 2 (Apr-Jun), 3 (Jul-Sep) or 4 (Oct-Dec)
  * @throws {RangeError} when `date` is invalid
  * @example
- * getQuarter(new Date(2024, 4, 10)); // 2
+ * getQuarter(new Date(2024, 4, 10)); // => 2
  */
 export function getQuarter(date: DateInput): Quarter {
 	return (Math.floor(toValidDate(date).getMonth() / 3) + 1) as Quarter;
@@ -1219,7 +1217,7 @@ export function getQuarter(date: DateInput): Quarter {
  * @returns {Date} A new date at the start of the quarter
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * startOfQuarter(new Date(2024, 4, 10, 15)); // 2024-04-01 00:00:00.000 (local)
+ * startOfQuarter(new Date(2024, 4, 10, 15)); // => new Date(2024, 3, 1)
  */
 export function startOfQuarter(date: DateInput): Date {
 	const result = toValidDate(date);
@@ -1233,7 +1231,7 @@ export function startOfQuarter(date: DateInput): Date {
  * @returns {Date} A new date at the end of the quarter
  * @throws {RangeError} when `date` is invalid or the result is outside the representable range
  * @example
- * endOfQuarter(new Date(2024, 4, 10)); // 2024-06-30 23:59:59.999 (local)
+ * endOfQuarter(new Date(2024, 4, 10)); // => new Date(2024, 5, 30, 23, 59, 59, 999)
  */
 export function endOfQuarter(date: DateInput): Date {
 	const source = toValidDate(date);
@@ -1254,9 +1252,9 @@ export function endOfQuarter(date: DateInput): Date {
  * @returns {number} The age in completed years (`0` on the day of birth)
  * @throws {RangeError} when a date is invalid or `birthDate` is on a later calendar day than `now`
  * @example
- * getAge(new Date(1990, 5, 15), new Date(2024, 5, 14)); // 33
- * getAge(new Date(1990, 5, 15), new Date(2024, 5, 15)); // 34
- * getAge(new Date(2000, 1, 29), new Date(2001, 1, 28)); // 1
+ * getAge(new Date(1990, 5, 15), new Date(2024, 5, 14)); // => 33
+ * getAge(new Date(1990, 5, 15), new Date(2024, 5, 15)); // => 34
+ * getAge(new Date(2000, 1, 29), new Date(2001, 1, 28)); // => 1
  */
 export function getAge(birthDate: DateInput, now: DateInput = new Date()): number {
 	const birth = toValidDate(birthDate);
@@ -1283,9 +1281,9 @@ export function getAge(birthDate: DateInput, now: DateInput = new Date()): numbe
  * @returns {Date} A new date
  * @throws {RangeError} when `date` is invalid, `amount` is not an integer, or the result is out of range
  * @example
- * addBusinessDays(new Date(2024, 4, 17, 9), 1); // Mon 2024-05-20 09:00 (from Friday)
- * addBusinessDays(new Date(2024, 4, 20), -1); // Fri 2024-05-17
- * addBusinessDays(new Date(2024, 4, 18), 1); // Mon 2024-05-20 (from Saturday)
+ * addBusinessDays(new Date(2024, 4, 17, 9), 1); // => new Date(2024, 4, 20, 9) // Friday → Monday
+ * addBusinessDays(new Date(2024, 4, 20), -1); // => new Date(2024, 4, 17) // Monday → Friday
+ * addBusinessDays(new Date(2024, 4, 18), 1); // => new Date(2024, 4, 20) // Saturday → Monday
  */
 export function addBusinessDays(date: DateInput, amount: number): Date {
 	assertInteger(amount, 'amount');
@@ -1331,9 +1329,9 @@ export function addBusinessDays(date: DateInput, amount: number): Date {
  * @returns {number} The number of business days
  * @throws {RangeError} when either date is invalid
  * @example
- * diffInBusinessDays(new Date(2024, 4, 20), new Date(2024, 4, 17)); // 1 (Fri → Mon)
- * diffInBusinessDays(new Date(2024, 4, 31), new Date(2024, 4, 1)); // 22
- * diffInBusinessDays(new Date(2024, 4, 17), new Date(2024, 4, 20)); // -1
+ * diffInBusinessDays(new Date(2024, 4, 20), new Date(2024, 4, 17)); // => 1 // Fri → Mon
+ * diffInBusinessDays(new Date(2024, 4, 31), new Date(2024, 4, 1)); // => 22
+ * diffInBusinessDays(new Date(2024, 4, 17), new Date(2024, 4, 20)); // => -1
  */
 export function diffInBusinessDays(later: DateInput, earlier: DateInput): number {
 	return weekdaysThrough(epochDay(toValidDate(later))) - weekdaysThrough(epochDay(toValidDate(earlier)));
@@ -1346,8 +1344,8 @@ export function diffInBusinessDays(later: DateInput, earlier: DateInput): number
  * @returns {boolean} `true` when `date` is on `now`'s calendar day
  * @throws {RangeError} when either date is invalid
  * @example
- * isToday(new Date()); // true
- * isToday(new Date(2024, 0, 1, 23, 59), new Date(2024, 0, 1, 8)); // true
+ * isToday(new Date()); // => true
+ * isToday(new Date(2024, 0, 1, 23, 59), new Date(2024, 0, 1, 8)); // => true
  */
 export function isToday(date: DateInput, now: DateInput = new Date()): boolean {
 	return isSameDay(date, now);
@@ -1360,8 +1358,8 @@ export function isToday(date: DateInput, now: DateInput = new Date()): boolean {
  * @returns {boolean} `true` when `date < now`
  * @throws {RangeError} when either date is invalid
  * @example
- * isPast(new Date(2000, 0, 1)); // true
- * isPast(5, 5); // false
+ * isPast(new Date(2000, 0, 1)); // => true
+ * isPast(5, 5); // => false
  */
 export function isPast(date: DateInput, now: DateInput = new Date()): boolean {
 	return timeOf(date) < timeOf(now);
@@ -1374,8 +1372,8 @@ export function isPast(date: DateInput, now: DateInput = new Date()): boolean {
  * @returns {boolean} `true` when `date > now`
  * @throws {RangeError} when either date is invalid
  * @example
- * isFuture(Date.now() + 60_000); // true
- * isFuture(5, 5); // false
+ * isFuture(Date.now() + 60_000); // => true
+ * isFuture(5, 5); // => false
  */
 export function isFuture(date: DateInput, now: DateInput = new Date()): boolean {
 	return timeOf(date) > timeOf(now);
@@ -1389,8 +1387,8 @@ export function isFuture(date: DateInput, now: DateInput = new Date()): boolean 
  * @returns {Date} A new date: `min` if `date < min`, `max` if `date > max`, else a copy of `date`
  * @throws {RangeError} when a date is invalid or `min` is after `max`
  * @example
- * clampDate(new Date(2025, 0, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // 2024-12-31
- * clampDate(new Date(2024, 5, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // 2024-06-01
+ * clampDate(new Date(2025, 0, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // => new Date(2024, 11, 31)
+ * clampDate(new Date(2024, 5, 1), new Date(2024, 0, 1), new Date(2024, 11, 31)); // => new Date(2024, 5, 1)
  */
 export function clampDate(date: DateInput, min: DateInput, max: DateInput): Date {
 	const time = timeOf(date);
@@ -1417,12 +1415,12 @@ export function clampDate(date: DateInput, min: DateInput, max: DateInput): Date
  * @throws {TypeError} when `ms` is not a number or `units` is not an array
  * @throws {RangeError} when `ms` is not finite, `units` is empty or contains an unknown unit, or `largest` is not a positive integer
  * @example
- * formatDuration(93_784_005); // '1d 2h 3m 4s 5ms'
- * formatDuration(5_400_000); // '1h 30m'
- * formatDuration(0); // '0s'
- * formatDuration(-90_500); // '-1m 30s 500ms'
- * formatDuration(93_784_005, { largest: 2 }); // '1d 2h'
- * formatDuration(93_784_005, { units: ['h', 'm'] }); // '26h 3m'
+ * formatDuration(93_784_005); // => '1d 2h 3m 4s 5ms'
+ * formatDuration(5_400_000); // => '1h 30m'
+ * formatDuration(0); // => '0s'
+ * formatDuration(-90_500); // => '-1m 30s 500ms'
+ * formatDuration(93_784_005, { largest: 2 }); // => '1d 2h'
+ * formatDuration(93_784_005, { units: ['h', 'm'] }); // => '26h 3m'
  */
 export function formatDuration(ms: number, options: FormatDurationOptions = {}): string {
 	if (typeof ms !== 'number') throw new TypeError(`ms must be a number, received ${typeof ms}`);
@@ -1474,10 +1472,10 @@ export function formatDuration(ms: number, options: FormatDurationOptions = {}):
  * @throws {TypeError} when `value` is not a string or is not a valid duration (empty, a bare number, an unknown unit…)
  * @throws {RangeError} when the duration is too large to be represented as a finite number
  * @example
- * parseDuration('1h 30m'); // 5_400_000
- * parseDuration('1d 2h 3m 4s 5ms'); // 93_784_005
- * parseDuration('1.5s'); // 1_500
- * parseDuration('-2m'); // -120_000
+ * parseDuration('1h 30m'); // => 5_400_000
+ * parseDuration('1d 2h 3m 4s 5ms'); // => 93_784_005
+ * parseDuration('1.5s'); // => 1_500
+ * parseDuration('-2m'); // => -120_000
  * parseDuration('10'); // throws TypeError (missing unit)
  */
 export function parseDuration(value: string): number {

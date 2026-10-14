@@ -238,6 +238,7 @@ function fromState(seedState: SeededRandomState): SeededRandom {
  * rng.int(1, 6); // a die roll
  * rng.shuffle([1, 2, 3]); // a deterministic permutation
  * randomGaussian(0, 1, rng); // usable wherever a `Math.random`-like generator is expected
+ * createRandom('my-seed')() === createRandom('my-seed')(); // => true // same seed, same sequence
  */
 export function createRandom(seed: number | string): SeededRandom {
 	if (typeof seed === 'number') {
@@ -270,7 +271,8 @@ function getCrypto(caller: string): CryptoLike {
  * @throws {RangeError} when `length` is not a non-negative safe integer
  * @throws {Error} when no cryptographically secure random source is available
  * @example
- * randomBytes(16); // Uint8Array(16) [ 211, 7, 92, ... ]
+ * randomBytes(16); // e.g. Uint8Array(16) [ 211, 7, 92, ... ]
+ * randomBytes(16).length; // => 16
  */
 export function randomBytes(length: number): Uint8Array {
 	if (!Number.isSafeInteger(length) || length < 0) {
@@ -292,6 +294,7 @@ export function randomBytes(length: number): Uint8Array {
  * @throws {Error} when no cryptographically secure random source is available
  * @example
  * randomUUID(); // e.g. 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+ * /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(randomUUID()); // => true
  */
 export function randomUUID(): string {
 	const candidate = (globalThis as unknown as { crypto?: Partial<CryptoLike> | null }).crypto;
@@ -324,6 +327,7 @@ export function randomUUID(): string {
  * @example
  * randomId(); // e.g. 'V1StGXR8_Z5jdHi6B-myT'
  * randomId(6, '0123456789'); // e.g. '409182'
+ * randomId().length; // => 21
  */
 export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): string {
 	if (!Number.isSafeInteger(size) || size < 0) {
@@ -369,7 +373,7 @@ export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): st
  * @throws {RangeError} when the arrays differ in length, a weight is negative, NaN or infinite, the total weight is zero or not finite, or `random()` returns a value outside `[0, 1)`
  * @example
  * weightedRandom(['common', 'rare'], [9, 1]); // 'common' ~90% of the time
- * weightedRandom(['a', 'b', 'c'], [0, 1, 0]); // always 'b'
+ * weightedRandom(['a', 'b', 'c'], [0, 1, 0]); // => 'b' // always
  */
 export function weightedRandom<T>(items: ReadonlyArray<T>, weights: ReadonlyArray<number>, random: RandomGenerator = Math.random): T {
 	if (items.length !== weights.length) {
