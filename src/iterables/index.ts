@@ -38,23 +38,48 @@ function assertAwaitableIterable(caller: string, value: unknown): void {
 }
 
 /**
+ * The built-in iterator of arrays (`Array.prototype[Symbol.iterator]`).
+ */
+const ARRAY_ITERATOR = Array.prototype[Symbol.iterator];
+
+/**
+ * Awaits each item of a sync iterable inside a `for...of` loop (see {@link awaitItems}).
+ * @template T
+ * @param {Iterable<T | PromiseLike<T>>} iterable - A sync iterable of values and/or promises
+ * @returns {AsyncGenerator<T, void, undefined>} An async generator of the awaited items
+ */
+async function* awaitedItems<T>(iterable: Iterable<T | PromiseLike<T>>): AsyncGenerator<T, void, undefined> {
+	for (const value of iterable) yield await value;
+}
+
+/**
  * Adapts an {@link AwaitableIterable} for `for await`: async iterables are returned as is, and sync iterables are wrapped so
  * each item is awaited inside a `for...of` loop, which closes the sync source when an item rejects or iteration stops early
  * (the built-in async-from-sync wrapper of older engines leaves the source open when an item rejects).
  * @template T
  * @param {AwaitableIterable<T>} iterable - An async iterable, or a sync iterable of values and/or promises
- * @returns {AsyncIterable<T>} An async iterable of the (awaited) items
+ * @returns {AwaitableIterable<T>} An iterable that `for await` reads as the (awaited) items
  */
-function awaitItems<T>(iterable: AwaitableIterable<T>): AsyncIterable<T> {
-	if (isAsyncIterable(iterable)) return iterable;
-	return (async function* (): AsyncGenerator<T, void, undefined> {
-		for (const value of iterable) yield await value;
-	})();
+function awaitItems<T>(iterable: AwaitableIterable<T>): AwaitableIterable<T> {
+	// An array (or array-like) using the built-in array iterator needs no wrapper: that iterator has nothing to close, so the
+	// async-from-sync wrapper of `for await` is enough.
+	if (isAsyncIterable(iterable) || iterable[Symbol.iterator] === ARRAY_ITERATOR) return iterable;
+	return awaitedItems(iterable);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Sources
 // ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The generator behind {@link count} (the arguments are already validated).
+ * @param {number} start - The first value
+ * @param {number} step - The increment between values
+ * @returns {Generator<number, void, undefined>} A generator of the counted values
+ */
+function* counter(start: number, step: number): Generator<number, void, undefined> {
+	for (let i = 0; ; i++) yield start + i * step;
+}
 
 /**
  * Lazily count from `start` by `step`, forever: `start, start + step, start + 2 * step, ...`.
@@ -72,9 +97,18 @@ function awaitItems<T>(iterable: AwaitableIterable<T>): AsyncIterable<T> {
 export function count(start = 0, step = 1): IterableIterator<number> {
 	assertNumber('count', 'start', start, Number.isFinite(start), 'a finite number');
 	assertNumber('count', 'step', step, Number.isFinite(step), 'a finite number');
-	return (function* (): Generator<number, void, undefined> {
-		for (let i = 0; ; i++) yield start + i * step;
-	})();
+	return counter(start, step);
+}
+
+/**
+ * The generator behind {@link repeatValue} (the arguments are already validated).
+ * @template T
+ * @param {T} value - The value to repeat
+ * @param {number} times - How many times to yield it
+ * @returns {Generator<T, void, undefined>} A generator of the repetitions
+ */
+function* repeated<T>(value: T, times: number): Generator<T, void, undefined> {
+	for (let i = 0; i < times; i++) yield value;
 }
 
 /**
@@ -91,9 +125,24 @@ export function count(start = 0, step = 1): IterableIterator<number> {
  */
 export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> {
 	assertInteger('repeatValue', 'times', times, 0, true);
-	return (function* (): Generator<T, void, undefined> {
-		for (let i = 0; i < times; i++) yield value;
-	})();
+	return repeated(value, times);
+}
+
+/**
+ * The generator behind {@link cycle} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The items to cycle through
+ * @returns {Generator<T, void, undefined>} A generator of the items, repeated
+ */
+function* cycled<T>(iterable: Iterable<T>): Generator<T, void, undefined> {
+	const cache: T[] = [];
+	for (const value of iterable) {
+		cache.push(value);
+		yield value;
+	}
+	if (cache.length === 0) return;
+	// Plain loops rather than `yield*`, so `throw()` rethrows its error instead of a TypeError from the array iterator.
+	for (;;) for (const value of cache) yield value;
 }
 
 /**
@@ -110,16 +159,18 @@ export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> 
  */
 export function cycle<T>(iterable: Iterable<T>): IterableIterator<T> {
 	assertIterable('cycle', iterable);
-	return (function* (): Generator<T, void, undefined> {
-		const cache: T[] = [];
-		for (const value of iterable) {
-			cache.push(value);
-			yield value;
-		}
-		if (cache.length === 0) return;
-		// Plain loops rather than `yield*`, so `throw()` rethrows its error instead of a TypeError from the array iterator.
-		for (;;) for (const value of cache) yield value;
-	})();
+	return cycled(iterable);
+}
+
+/**
+ * The generator behind {@link iterate} (the arguments are already validated).
+ * @template T
+ * @param {T} seed - The first item
+ * @param {(value: T) => T} next - Computes an item from the previous one
+ * @returns {Generator<T, void, undefined>} A generator of the successive items
+ */
+function* iterated<T>(seed: T, next: (value: T) => T): Generator<T, void, undefined> {
+	for (let value = seed; ; value = next(value)) yield value;
 }
 
 /**
@@ -135,14 +186,25 @@ export function cycle<T>(iterable: Iterable<T>): IterableIterator<T> {
  */
 export function iterate<T>(seed: T, next: (value: T) => T): IterableIterator<T> {
 	assertFunction('iterate', 'next', next);
-	return (function* (): Generator<T, void, undefined> {
-		for (let value = seed; ; value = next(value)) yield value;
-	})();
+	return iterated(seed, next);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Transforms (lazy: nothing is pulled from the source until the result is iterated, and early exits close the source)
 // ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The generator behind {@link map} (the arguments are already validated).
+ * @template T
+ * @template U
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => U} fn - Maps an item (and its index)
+ * @returns {Generator<U, void, undefined>} A generator of the mapped items
+ */
+function* mapped<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => U): Generator<U, void, undefined> {
+	let index = 0;
+	for (const value of iterable) yield fn(value, index++);
+}
 
 /**
  * Lazily transform each item of an iterable (the lazy counterpart of `Array.prototype.map`).
@@ -158,10 +220,19 @@ export function iterate<T>(seed: T, next: (value: T) => T): IterableIterator<T> 
 export function map<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => U): IterableIterator<U> {
 	assertIterable('map', iterable);
 	assertFunction('map', 'fn', fn);
-	return (function* (): Generator<U, void, undefined> {
-		let index = 0;
-		for (const value of iterable) yield fn(value, index++);
-	})();
+	return mapped(iterable, fn);
+}
+
+/**
+ * The generator behind {@link filter} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => boolean} predicate - Decides which items to keep
+ * @returns {Generator<T, void, undefined>} A generator of the kept items
+ */
+function* filtered<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): Generator<T, void, undefined> {
+	let index = 0;
+	for (const value of iterable) if (predicate(value, index++)) yield value;
 }
 
 /**
@@ -200,10 +271,25 @@ export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: nu
 export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('filter', iterable);
 	assertFunction('filter', 'predicate', predicate);
-	return (function* (): Generator<T, void, undefined> {
-		let index = 0;
-		for (const value of iterable) if (predicate(value, index++)) yield value;
-	})();
+	return filtered(iterable, predicate);
+}
+
+/**
+ * The generator behind {@link flatMap} (the arguments are already validated).
+ * @template T
+ * @template U
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => Iterable<U>} fn - Maps an item (and its index) to an iterable
+ * @returns {Generator<U, void, undefined>} A generator of the flattened items
+ */
+function* flatMapped<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => Iterable<U>): Generator<U, void, undefined> {
+	let index = 0;
+	for (const value of iterable) {
+		const inner = fn(value, index++);
+		assertIterable('flatMap', inner, 'fn(...)');
+		// Not `yield*`: `throw()` must close the inner iterator and rethrow, not be forwarded into it.
+		for (const item of inner) yield item;
+	}
 }
 
 /**
@@ -221,15 +307,23 @@ export function filter<T>(iterable: Iterable<T>, predicate: (value: T, index: nu
 export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: number) => Iterable<U>): IterableIterator<U> {
 	assertIterable('flatMap', iterable);
 	assertFunction('flatMap', 'fn', fn);
-	return (function* (): Generator<U, void, undefined> {
-		let index = 0;
-		for (const value of iterable) {
-			const inner = fn(value, index++);
-			assertIterable('flatMap', inner, 'fn(...)');
-			// Not `yield*`: `throw()` must close the inner iterator and rethrow, not be forwarded into it.
-			for (const item of inner) yield item;
-		}
-	})();
+	return flatMapped(iterable, fn);
+}
+
+/**
+ * The generator behind {@link take} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {number} n - How many items to take
+ * @returns {Generator<T, void, undefined>} A generator of the first items
+ */
+function* takenItems<T>(iterable: Iterable<T>, n: number): Generator<T, void, undefined> {
+	if (n === 0) return;
+	let taken = 0;
+	for (const value of iterable) {
+		yield value;
+		if (++taken >= n) return;
+	}
 }
 
 /**
@@ -248,14 +342,22 @@ export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: numbe
 export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('take', iterable);
 	assertInteger('take', 'n', n, 0, true);
-	return (function* (): Generator<T, void, undefined> {
-		if (n === 0) return;
-		let taken = 0;
-		for (const value of iterable) {
-			yield value;
-			if (++taken >= n) return;
-		}
-	})();
+	return takenItems(iterable, n);
+}
+
+/**
+ * The generator behind {@link drop} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {number} n - How many items to skip
+ * @returns {Generator<T, void, undefined>} A generator of the remaining items
+ */
+function* dropped<T>(iterable: Iterable<T>, n: number): Generator<T, void, undefined> {
+	let skipped = 0;
+	for (const value of iterable) {
+		if (skipped < n) skipped++;
+		else yield value;
+	}
 }
 
 /**
@@ -273,13 +375,22 @@ export function take<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 export function drop<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 	assertIterable('drop', iterable);
 	assertInteger('drop', 'n', n, 0);
-	return (function* (): Generator<T, void, undefined> {
-		let skipped = 0;
-		for (const value of iterable) {
-			if (skipped < n) skipped++;
-			else yield value;
-		}
-	})();
+	return dropped(iterable, n);
+}
+
+/**
+ * The generator behind {@link takeWhile} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => boolean} predicate - Decides whether to keep going
+ * @returns {Generator<T, void, undefined>} A generator of the leading matching items
+ */
+function* takenWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): Generator<T, void, undefined> {
+	let index = 0;
+	for (const value of iterable) {
+		if (!predicate(value, index++)) return;
+		yield value;
+	}
 }
 
 /**
@@ -295,13 +406,24 @@ export function drop<T>(iterable: Iterable<T>, n: number): IterableIterator<T> {
 export function takeWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('takeWhile', iterable);
 	assertFunction('takeWhile', 'predicate', predicate);
-	return (function* (): Generator<T, void, undefined> {
-		let index = 0;
-		for (const value of iterable) {
-			if (!predicate(value, index++)) return;
-			yield value;
-		}
-	})();
+	return takenWhile(iterable, predicate);
+}
+
+/**
+ * The generator behind {@link dropWhile} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => boolean} predicate - Decides whether to keep skipping
+ * @returns {Generator<T, void, undefined>} A generator of the items from the first failing one
+ */
+function* droppedWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): Generator<T, void, undefined> {
+	let dropping = true;
+	let index = 0;
+	for (const value of iterable) {
+		if (dropping && predicate(value, index++)) continue;
+		dropping = false;
+		yield value;
+	}
 }
 
 /**
@@ -318,15 +440,27 @@ export function takeWhile<T>(iterable: Iterable<T>, predicate: (value: T, index:
 export function dropWhile<T>(iterable: Iterable<T>, predicate: (value: T, index: number) => boolean): IterableIterator<T> {
 	assertIterable('dropWhile', iterable);
 	assertFunction('dropWhile', 'predicate', predicate);
-	return (function* (): Generator<T, void, undefined> {
-		let dropping = true;
-		let index = 0;
-		for (const value of iterable) {
-			if (dropping && predicate(value, index++)) continue;
-			dropping = false;
-			yield value;
+	return droppedWhile(iterable, predicate);
+}
+
+/**
+ * The generator behind {@link chunk} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {number} size - The maximum length of each chunk
+ * @returns {Generator<T[], void, undefined>} A generator of the chunks
+ */
+function* chunked<T>(iterable: Iterable<T>, size: number): Generator<T[], void, undefined> {
+	let buffer: T[] = [];
+	for (const value of iterable) {
+		buffer.push(value);
+		if (buffer.length === size) {
+			const full = buffer;
+			buffer = [];
+			yield full;
 		}
-	})();
+	}
+	if (buffer.length > 0) yield buffer;
 }
 
 /**
@@ -345,18 +479,33 @@ export function dropWhile<T>(iterable: Iterable<T>, predicate: (value: T, index:
 export function chunk<T>(iterable: Iterable<T>, size: number): IterableIterator<T[]> {
 	assertIterable('chunk', iterable);
 	assertInteger('chunk', 'size', size, 1);
-	return (function* (): Generator<T[], void, undefined> {
-		let buffer: T[] = [];
-		for (const value of iterable) {
-			buffer.push(value);
-			if (buffer.length === size) {
-				const full = buffer;
-				buffer = [];
-				yield full;
-			}
+	return chunked(iterable, size);
+}
+
+/**
+ * The generator behind {@link windowed} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {number} size - The length of each window
+ * @param {number} step - The distance between window starts
+ * @returns {Generator<T[], void, undefined>} A generator of the windows
+ */
+function* windows<T>(iterable: Iterable<T>, size: number, step: number): Generator<T[], void, undefined> {
+	let buffer: T[] = [];
+	let skip = 0;
+	for (const value of iterable) {
+		if (skip > 0) {
+			skip--;
+			continue;
 		}
-		if (buffer.length > 0) yield buffer;
-	})();
+		buffer.push(value);
+		if (buffer.length === size) {
+			const window = buffer;
+			buffer = buffer.slice(step);
+			skip = Math.max(0, step - size);
+			yield window;
+		}
+	}
 }
 
 /**
@@ -379,23 +528,7 @@ export function windowed<T>(iterable: Iterable<T>, size: number, step = 1): Iter
 	assertIterable('windowed', iterable);
 	assertInteger('windowed', 'size', size, 1);
 	assertInteger('windowed', 'step', step, 1);
-	return (function* (): Generator<T[], void, undefined> {
-		let buffer: T[] = [];
-		let skip = 0;
-		for (const value of iterable) {
-			if (skip > 0) {
-				skip--;
-				continue;
-			}
-			buffer.push(value);
-			if (buffer.length === size) {
-				const window = buffer;
-				buffer = buffer.slice(step);
-				skip = Math.max(0, step - size);
-				yield window;
-			}
-		}
-	})();
+	return windows(iterable, size, step);
 }
 
 /**
@@ -420,6 +553,38 @@ function closeIterators(iterators: ReadonlyArray<Iterator<unknown>>, skip: numbe
 }
 
 /**
+ * The generator behind {@link zip} (the arguments are already validated).
+ * @template T
+ * @param {T} iterables - The iterables to zip
+ * @returns {Generator<ZippedValues<T>, void, undefined>} A generator of the tuples
+ */
+function* zipped<T extends Array<Iterable<unknown>>>(iterables: T): Generator<ZippedValues<T>, void, undefined> {
+	if (iterables.length === 0) return;
+	const iterators: Array<Iterator<unknown>> = [];
+	// Index of the iterator being advanced: when it ends (or throws), it must not be closed.
+	let current = -1;
+	let threw = false;
+	try {
+		for (const iterable of iterables) iterators.push(iterable[Symbol.iterator]());
+		for (;;) {
+			const tuple = new Array<unknown>(iterators.length);
+			for (current = 0; current < iterators.length; current++) {
+				const result = iterators[current].next();
+				if (result.done === true) return;
+				tuple[current] = result.value;
+			}
+			current = -1;
+			yield tuple as ZippedValues<T>;
+		}
+	} catch (error) {
+		threw = true;
+		throw error;
+	} finally {
+		closeIterators(iterators, current, threw);
+	}
+}
+
+/**
  * Lazily combine iterables item-wise into tuples, stopping at the end of the SHORTEST one (which may be infinite
  * as long as another one is finite). When one source ends, or iteration stops early, all the other sources are closed.
  * @template T
@@ -432,31 +597,18 @@ function closeIterators(iterators: ReadonlyArray<Iterator<unknown>>, skip: numbe
  */
 export function zip<T extends Array<Iterable<unknown>>>(...iterables: T): IterableIterator<ZippedValues<T>> {
 	for (const iterable of iterables) assertIterable('zip', iterable, 'iterables');
-	return (function* (): Generator<ZippedValues<T>, void, undefined> {
-		if (iterables.length === 0) return;
-		const iterators: Array<Iterator<unknown>> = [];
-		// Index of the iterator being advanced: when it ends (or throws), it must not be closed.
-		let current = -1;
-		let threw = false;
-		try {
-			for (const iterable of iterables) iterators.push(iterable[Symbol.iterator]());
-			for (;;) {
-				const tuple: unknown[] = [];
-				for (current = 0; current < iterators.length; current++) {
-					const result = iterators[current].next();
-					if (result.done === true) return;
-					tuple.push(result.value);
-				}
-				current = -1;
-				yield tuple as ZippedValues<T>;
-			}
-		} catch (error) {
-			threw = true;
-			throw error;
-		} finally {
-			closeIterators(iterators, current, threw);
-		}
-	})();
+	return zipped(iterables);
+}
+
+/**
+ * The generator behind {@link enumerate} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @returns {Generator<[number, T], void, undefined>} A generator of the `[index, value]` tuples
+ */
+function* enumerated<T>(iterable: Iterable<T>): Generator<[number, T], void, undefined> {
+	let index = 0;
+	for (const value of iterable) yield [index++, value];
 }
 
 /**
@@ -470,10 +622,26 @@ export function zip<T extends Array<Iterable<unknown>>>(...iterables: T): Iterab
  */
 export function enumerate<T>(iterable: Iterable<T>): IterableIterator<[number, T]> {
 	assertIterable('enumerate', iterable);
-	return (function* (): Generator<[number, T], void, undefined> {
-		let index = 0;
-		for (const value of iterable) yield [index++, value];
-	})();
+	return enumerated(iterable);
+}
+
+/**
+ * The generator behind {@link unique} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {((value: T, index: number) => unknown) | undefined} keyFn - Returns the identity key of an item
+ * @returns {Generator<T, void, undefined>} A generator of the first item per key
+ */
+function* uniqueItems<T>(iterable: Iterable<T>, keyFn: ((value: T, index: number) => unknown) | undefined): Generator<T, void, undefined> {
+	const seen = new Set<unknown>();
+	let index = 0;
+	for (const value of iterable) {
+		const key = keyFn === undefined ? value : keyFn(value, index);
+		index++;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		yield value;
+	}
 }
 
 /**
@@ -491,17 +659,25 @@ export function enumerate<T>(iterable: Iterable<T>): IterableIterator<[number, T
 export function unique<T>(iterable: Iterable<T>, keyFn?: (value: T, index: number) => unknown): IterableIterator<T> {
 	assertIterable('unique', iterable);
 	if (keyFn !== undefined) assertFunction('unique', 'keyFn', keyFn);
-	return (function* (): Generator<T, void, undefined> {
-		const seen = new Set<unknown>();
-		let index = 0;
-		for (const value of iterable) {
-			const key = keyFn === undefined ? value : keyFn(value, index);
-			index++;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			yield value;
-		}
-	})();
+	return uniqueItems(iterable, keyFn);
+}
+
+/**
+ * The generator behind {@link scan} (the arguments are already validated).
+ * @template T
+ * @template A
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(accumulator: A, value: T, index: number) => A} reducer - Combines the accumulator with an item
+ * @param {A} initial - The initial accumulator
+ * @returns {Generator<A, void, undefined>} A generator of the successive accumulators
+ */
+function* scanned<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, initial: A): Generator<A, void, undefined> {
+	let accumulator = initial;
+	let index = 0;
+	for (const value of iterable) {
+		accumulator = reducer(accumulator, value, index++);
+		yield accumulator;
+	}
 }
 
 /**
@@ -520,14 +696,18 @@ export function unique<T>(iterable: Iterable<T>, keyFn?: (value: T, index: numbe
 export function scan<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, initial: A): IterableIterator<A> {
 	assertIterable('scan', iterable);
 	assertFunction('scan', 'reducer', reducer);
-	return (function* (): Generator<A, void, undefined> {
-		let accumulator = initial;
-		let index = 0;
-		for (const value of iterable) {
-			accumulator = reducer(accumulator, value, index++);
-			yield accumulator;
-		}
-	})();
+	return scanned(iterable, reducer, initial);
+}
+
+/**
+ * The generator behind {@link concat} (the arguments are already validated).
+ * @template T
+ * @param {ReadonlyArray<Iterable<T>>} iterables - The iterables to chain
+ * @returns {Generator<T, void, undefined>} A generator of all the items, in order
+ */
+function* concatenated<T>(iterables: ReadonlyArray<Iterable<T>>): Generator<T, void, undefined> {
+	// Not `yield*`: `throw()` must close the current source and rethrow, not be forwarded into it.
+	for (const iterable of iterables) for (const value of iterable) yield value;
 }
 
 /**
@@ -541,10 +721,22 @@ export function scan<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, valu
  */
 export function concat<T>(...iterables: Array<Iterable<T>>): IterableIterator<T> {
 	for (const iterable of iterables) assertIterable('concat', iterable, 'iterables');
-	return (function* (): Generator<T, void, undefined> {
-		// Not `yield*`: `throw()` must close the current source and rethrow, not be forwarded into it.
-		for (const iterable of iterables) for (const value of iterable) yield value;
-	})();
+	return concatenated(iterables);
+}
+
+/**
+ * The generator behind {@link tap} (the arguments are already validated).
+ * @template T
+ * @param {Iterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => void} fn - Side effect run on each item
+ * @returns {Generator<T, void, undefined>} A generator of the same items
+ */
+function* tapped<T>(iterable: Iterable<T>, fn: (value: T, index: number) => void): Generator<T, void, undefined> {
+	let index = 0;
+	for (const value of iterable) {
+		fn(value, index++);
+		yield value;
+	}
 }
 
 /**
@@ -562,13 +754,7 @@ export function concat<T>(...iterables: Array<Iterable<T>>): IterableIterator<T>
 export function tap<T>(iterable: Iterable<T>, fn: (value: T, index: number) => void): IterableIterator<T> {
 	assertIterable('tap', iterable);
 	assertFunction('tap', 'fn', fn);
-	return (function* (): Generator<T, void, undefined> {
-		let index = 0;
-		for (const value of iterable) {
-			fn(value, index++);
-			yield value;
-		}
-	})();
+	return tapped(iterable, fn);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -629,9 +815,14 @@ export function reduce<T>(iterable: Iterable<T>, reducer: (accumulator: T, value
 export function reduce<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, value: T, index: number) => A, ...initial: [] | [A]): A {
 	assertIterable('reduce', iterable);
 	assertFunction('reduce', 'reducer', reducer);
-	let hasAccumulator = initial.length > 0;
 	let accumulator = initial[0] as A;
 	let index = 0;
+	if (initial.length > 0) {
+		// With an initial value, the loop needs no "first item" check.
+		for (const value of iterable) accumulator = reducer(accumulator, value, index++);
+		return accumulator;
+	}
+	let hasAccumulator = false;
 	for (const value of iterable) {
 		if (hasAccumulator) {
 			accumulator = reducer(accumulator, value, index);
@@ -780,6 +971,19 @@ export function countItems<T>(iterable: Iterable<T>, predicate?: (value: T, inde
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
+ * The async generator behind {@link mapAsync} (the arguments are already validated).
+ * @template T
+ * @template U
+ * @param {AwaitableIterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => U | PromiseLike<U>} fn - Maps an item (and its index)
+ * @returns {AsyncGenerator<U, void, undefined>} An async generator of the mapped items
+ */
+async function* mappedAsync<T, U>(iterable: AwaitableIterable<T>, fn: (value: T, index: number) => U | PromiseLike<U>): AsyncGenerator<U, void, undefined> {
+	let index = 0;
+	for await (const value of awaitItems(iterable)) yield await fn(value, index++);
+}
+
+/**
  * Lazily transform each item of an async (or sync) iterable with a possibly async function, one item at a time.
  * @template T
  * @template U
@@ -793,10 +997,19 @@ export function countItems<T>(iterable: Iterable<T>, predicate?: (value: T, inde
 export function mapAsync<T, U>(iterable: AwaitableIterable<T>, fn: (value: T, index: number) => U | PromiseLike<U>): AsyncIterableIterator<U> {
 	assertAwaitableIterable('mapAsync', iterable);
 	assertFunction('mapAsync', 'fn', fn);
-	return (async function* (): AsyncGenerator<U, void, undefined> {
-		let index = 0;
-		for await (const value of awaitItems(iterable)) yield await fn(value, index++);
-	})();
+	return mappedAsync(iterable, fn);
+}
+
+/**
+ * The async generator behind {@link filterAsync} (the arguments are already validated).
+ * @template T
+ * @param {AwaitableIterable<T>} iterable - The source items
+ * @param {(value: T, index: number) => boolean | PromiseLike<boolean>} predicate - Decides which items to keep
+ * @returns {AsyncGenerator<T, void, undefined>} An async generator of the kept items
+ */
+async function* filteredAsync<T>(iterable: AwaitableIterable<T>, predicate: (value: T, index: number) => boolean | PromiseLike<boolean>): AsyncGenerator<T, void, undefined> {
+	let index = 0;
+	for await (const value of awaitItems(iterable)) if (await predicate(value, index++)) yield value;
 }
 
 /**
@@ -835,10 +1048,23 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
 export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value: T, index: number) => boolean | PromiseLike<boolean>): AsyncIterableIterator<T> {
 	assertAwaitableIterable('filterAsync', iterable);
 	assertFunction('filterAsync', 'predicate', predicate);
-	return (async function* (): AsyncGenerator<T, void, undefined> {
-		let index = 0;
-		for await (const value of awaitItems(iterable)) if (await predicate(value, index++)) yield value;
-	})();
+	return filteredAsync(iterable, predicate);
+}
+
+/**
+ * The async generator behind {@link takeAsync} (the arguments are already validated).
+ * @template T
+ * @param {AwaitableIterable<T>} iterable - The source items
+ * @param {number} n - How many items to take
+ * @returns {AsyncGenerator<T, void, undefined>} An async generator of the first items
+ */
+async function* takenAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncGenerator<T, void, undefined> {
+	if (n === 0) return;
+	let taken = 0;
+	for await (const value of awaitItems(iterable)) {
+		yield value;
+		if (++taken >= n) return;
+	}
 }
 
 /**
@@ -856,14 +1082,27 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
 export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIterableIterator<T> {
 	assertAwaitableIterable('takeAsync', iterable);
 	assertInteger('takeAsync', 'n', n, 0, true);
-	return (async function* (): AsyncGenerator<T, void, undefined> {
-		if (n === 0) return;
-		let taken = 0;
-		for await (const value of awaitItems(iterable)) {
-			yield value;
-			if (++taken >= n) return;
+	return takenAsync(iterable, n);
+}
+
+/**
+ * The async generator behind {@link chunkAsync} (the arguments are already validated).
+ * @template T
+ * @param {AwaitableIterable<T>} iterable - The source items
+ * @param {number} size - The maximum length of each chunk
+ * @returns {AsyncGenerator<T[], void, undefined>} An async generator of the chunks
+ */
+async function* chunkedAsync<T>(iterable: AwaitableIterable<T>, size: number): AsyncGenerator<T[], void, undefined> {
+	let buffer: T[] = [];
+	for await (const value of awaitItems(iterable)) {
+		buffer.push(value);
+		if (buffer.length === size) {
+			const full = buffer;
+			buffer = [];
+			yield full;
 		}
-	})();
+	}
+	if (buffer.length > 0) yield buffer;
 }
 
 /**
@@ -881,18 +1120,19 @@ export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIt
 export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): AsyncIterableIterator<T[]> {
 	assertAwaitableIterable('chunkAsync', iterable);
 	assertInteger('chunkAsync', 'size', size, 1);
-	return (async function* (): AsyncGenerator<T[], void, undefined> {
-		let buffer: T[] = [];
-		for await (const value of awaitItems(iterable)) {
-			buffer.push(value);
-			if (buffer.length === size) {
-				const full = buffer;
-				buffer = [];
-				yield full;
-			}
-		}
-		if (buffer.length > 0) yield buffer;
-	})();
+	return chunkedAsync(iterable, size);
+}
+
+/**
+ * The async function behind {@link toArrayAsync} (the argument is already validated).
+ * @template T
+ * @param {AwaitableIterable<T>} iterable - The source items
+ * @returns {Promise<T[]>} A promise of a new array with every (awaited) item
+ */
+async function collect<T>(iterable: AwaitableIterable<T>): Promise<T[]> {
+	const result: T[] = [];
+	for await (const value of awaitItems(iterable)) result.push(value);
+	return result;
 }
 
 /**
@@ -908,9 +1148,5 @@ export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): Asy
  */
 export function toArrayAsync<T>(iterable: AwaitableIterable<T>): Promise<T[]> {
 	assertAwaitableIterable('toArrayAsync', iterable);
-	return (async function (): Promise<T[]> {
-		const result: T[] = [];
-		for await (const value of awaitItems(iterable)) result.push(value);
-		return result;
-	})();
+	return collect(iterable);
 }

@@ -179,6 +179,20 @@ function defineValue(object: object, key: PropertyKey, value: unknown): void {
 }
 
 /**
+ * Same effect as {@link defineOwn}, for objects CREATED BY THIS MODULE whose prototype is `Object.prototype` (or `null`): only a key
+ * that `Object.prototype` has can be intercepted (by an inherited setter or read-only property), so every other key is simply
+ * assigned. Cheaper than {@link defineValue}, which also has to look the key up on the object itself.
+ * @param {object} object - The object to write to
+ * @param {PropertyKey} key - The property key
+ * @param {unknown} value - The value to store
+ * @returns {void}
+ */
+function definePlain(object: object, key: PropertyKey, value: unknown): void {
+	if (key in Object.prototype) defineOwn(object, key, value);
+	else (object as Record<PropertyKey, unknown>)[key] = value;
+}
+
+/**
  * Reads a property of an object without type complaints.
  * @param {object} object - The object to read from
  * @param {PropertyKey} key - The key to read
@@ -277,6 +291,32 @@ function copyRegExp(value: RegExp): RegExp {
 	return adoptPrototype(copy, value);
 }
 
+/**
+ * Whether `value` is a plain object or a plain array that none of the special cases of the clone functions applies to: its
+ * prototype is `Object.prototype` (or `Array.prototype`, for a genuine array), it is not a thenable, and its tag is the default one.
+ * With such a prototype every `instanceof`-based brand check fails, and boxed primitives, errors and binary data can only be told
+ * apart by their tag (or `ArrayBuffer.isView`), so these few checks are equivalent to the full list.
+ * @param {object} value - The object to inspect
+ * @param {unknown} prototype - Its prototype
+ * @returns {boolean} Whether `value` can be copied as a plain object or array
+ */
+function isOrdinary(value: object, prototype: unknown): boolean {
+	if (prototype === Object.prototype) return !isPromise(value) && getTag(value) === '[object Object]' && !ArrayBuffer.isView(value);
+	return prototype === Array.prototype && Array.isArray(value) && !isPromise(value) && getTag(value) === '[object Array]';
+}
+
+/**
+ * Whether an array has exactly the own enumerable keys `'0'` to `'length - 1'`: no holes, no extra string keys, no symbol keys.
+ * Such an array can be copied index by index (`Object.keys` lists the present indices first, in ascending order, then the other keys).
+ * @param {ReadonlyArray<unknown>} array - The array to inspect
+ * @returns {boolean} Whether the array is dense and has no other own keys
+ */
+function isSimpleArray(array: ReadonlyArray<unknown>): boolean {
+	const length = array.length;
+	const keys = Object.keys(array);
+	return keys.length === length && (length === 0 || keys[length - 1] === String(length - 1)) && Object.getOwnPropertySymbols(array).length === 0;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Shallow helpers
 // ---------------------------------------------------------------------------------------------------------------------
@@ -294,13 +334,11 @@ function copyRegExp(value: RegExp): RegExp {
  * merge({ a: 1, b: 2 }, { b: 'x' }, { c: true }); // => { a: 1, b: 'x', c: true }
  */
 export function merge<T extends object, S extends object[]>(target: T, ...sources: S): MergeAll<T, S> {
-	const result: object = {};
-
-	for (const source of [target, ...sources]) {
-		if (source == null) continue;
-		for (const key of ownEnumerableKeys(source)) defineValue(result, key, read(source, key));
-	}
-
+	// Object spread copies exactly the own enumerable string and symbol keys, defining them as own data properties (no setter
+	// runs, so `'__proto__'` stays a plain key), skips `null`/`undefined`, and is much faster than a key-by-key copy.
+	if (sources.length === 1) return { ...target, ...sources[0] } as MergeAll<T, S>;
+	let result: object = { ...target };
+	for (const source of sources) result = { ...result, ...source };
 	return result as MergeAll<T, S>;
 }
 
@@ -320,6 +358,14 @@ export function merge<T extends object, S extends object[]>(target: T, ...source
  */
 export function clone<T>(value: T): T {
 	if (!isObject(value)) return value;
+	if (isOrdinary(value, Object.getPrototypeOf(value))) {
+		if (!Array.isArray(value)) return { ...value };
+		if (isSimpleArray(value)) {
+			const copy = new Array<unknown>(value.length);
+			for (let i = 0; i < value.length; i++) copy[i] = value[i];
+			return copy as T;
+		}
+	}
 	if (isUncloneable(value)) return value;
 
 	const [isBoxed, primitive] = unbox(value);
@@ -434,7 +480,11 @@ export function isEmpty<T>(value: T): boolean {
 	if (Array.isArray(value)) return value.length === 0;
 	if (isMap(value) || isSet(value)) return value.size === 0;
 	// `Object(...)` turns `null`/`undefined` into `{}` and other primitives into wrappers: only a non-empty string has (index) keys.
-	return ownEnumerableKeys(Object(value)).length === 0;
+	const object: object = Object(value);
+	// `for...in` lists the own enumerable string keys first, so the first own key found (if any) settles it without collecting all the keys.
+	for (const key in object) if (hasOwn(object, key)) return false;
+	for (const symbol of Object.getOwnPropertySymbols(object)) if (Object.prototype.propertyIsEnumerable.call(object, symbol)) return false;
+	return true;
 }
 
 /**
@@ -451,7 +501,7 @@ export function isEmpty<T>(value: T): boolean {
 export function pick<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Pick<T, K> {
 	const result = {} as Pick<T, K>;
 	for (const key of keys) {
-		if (key in object) defineValue(result, key, object[key]);
+		if (key in object) definePlain(result, key, object[key]);
 	}
 	return result;
 }
@@ -470,14 +520,11 @@ export function pick<T extends object, K extends keyof T>(object: T, keys: Reado
  */
 export function omit<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Omit<T, K> {
 	// Property keys are strings or symbols at runtime: numeric keys (`omit(o, [1])`) must match the string key `'1'`.
-	const excluded = new Set<PropertyKey>(
-		keys.map(function (key): PropertyKey {
-			return typeof key === 'number' ? String(key) : key;
-		})
-	);
+	const excluded = new Set<PropertyKey>();
+	for (const key of keys) excluded.add(typeof key === 'number' ? String(key) : key);
 	const result = {} as Omit<T, K>;
 	for (const key of ownEnumerableKeys(object)) {
-		if (!excluded.has(key)) defineValue(result, key, read(object, key));
+		if (!excluded.has(key)) definePlain(result, key, read(object, key));
 	}
 	return result;
 }
@@ -497,9 +544,12 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
 export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => R): { [K in keyof T]: R } {
 	assertFunction('mapValues', 'fn', fn);
 	// For array types the mapped return type is an array type, so the runtime result must be an array too.
-	const result = (Array.isArray(object) ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
+	const isArray = Array.isArray(object);
+	const result = (isArray ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
 	for (const key of ownEnumerableKeys(object)) {
-		defineValue(result, key, fn(read(object, key) as T[keyof T], key as keyof T, object));
+		const value = fn(read(object, key) as T[keyof T], key as keyof T, object);
+		if (isArray) defineValue(result, key, value);
+		else definePlain(result, key, value);
 	}
 	return result;
 }
@@ -520,7 +570,7 @@ export function mapKeys<T extends object, K extends PropertyKey>(object: T, fn: 
 	const result = {} as Record<K, T[keyof T]>;
 	for (const key of ownEnumerableKeys(object)) {
 		const value = read(object, key) as T[keyof T];
-		defineValue(result, fn(value, key as keyof T, object), value);
+		definePlain(result, fn(value, key as keyof T, object), value);
 	}
 	return result;
 }
@@ -542,7 +592,7 @@ export function invert<T extends Record<PropertyKey, PropertyKey>>(object: T): I
 		if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'symbol') {
 			throw new TypeError(`invert: \`object.${key}\` must be a string, number or symbol, got ${describe(value)}`);
 		}
-		defineValue(result, value, key);
+		definePlain(result, value, key);
 	}
 	return result;
 }
@@ -607,10 +657,12 @@ function parseWritablePath(caller: string, label: string, path: string, separato
 function assignPath(target: object, segments: ReadonlyArray<string>, value: unknown, path: string, separator: string, caller: string, owned?: WeakSet<object>): void {
 	let current = target as Record<string, unknown>;
 	const last = segments.length - 1;
+	// Whether `current` was created by this call: it then has no own property yet, so nothing needs to be looked up.
+	let fresh = false;
 
 	for (let index = 0; index < last; index++) {
 		const segment = segments[index];
-		const exists = hasOwn(current, segment);
+		const exists = !fresh && hasOwn(current, segment);
 		let next = exists ? current[segment] : undefined;
 
 		if (owned !== undefined && exists && !owned.has(next as object)) {
@@ -618,8 +670,11 @@ function assignPath(target: object, segments: ReadonlyArray<string>, value: unkn
 		}
 		if (next == null) {
 			const container: object = isArrayIndex(segments[index + 1]) ? [] : {};
-			defineOwn(current, segment, container);
+			// A fresh container has no own keys, so only an inherited key can intercept a plain assignment.
+			if (fresh && !(segment in current)) current[segment] = container;
+			else defineOwn(current, segment, container);
 			owned?.add(container);
+			fresh = true;
 			next = container;
 		} else if (!isObject(next) && !isFunction(next)) {
 			throw new TypeError(`${caller}: cannot set "${path}": "${segments.slice(0, index + 1).join(separator)}" is a ${typeof next}, not an object`);
@@ -670,9 +725,13 @@ export function getFromObjectByKeys<T extends object, P extends NestedKeyOf<T>, 
  */
 export function getFromObjectByKeys(target: object, keys: string, defaultValue?: unknown): unknown {
 	let current: unknown = target;
-	for (const segment of keys.split('.')) {
-		if (current == null) return defaultValue;
-		current = (current as Record<string, unknown>)[segment];
+	// A single segment (the most common path) is read directly, without splitting.
+	if (keys.indexOf('.') === -1) current = current == null ? undefined : (current as Record<string, unknown>)[keys];
+	else {
+		for (const segment of keys.split('.')) {
+			if (current == null) return defaultValue;
+			current = (current as Record<string, unknown>)[segment];
+		}
 	}
 	return current === undefined ? defaultValue : current;
 }
@@ -706,12 +765,32 @@ export function setInObjectByKeys<T extends object>(target: T, path: string, val
 /**
  * Recursive worker of {@link deepClone}.
  * @param {unknown} value - The value to copy
- * @param {WeakMap<object, unknown>} seen - Already-copied objects (handles shared and circular references)
+ * @param {Map<object, unknown>} seen - Already-copied objects (handles shared and circular references)
  * @returns {unknown} The deep copy
  */
-function deepCloneWith(value: unknown, seen: WeakMap<object, unknown>): unknown {
+function deepCloneWith(value: unknown, seen: Map<object, unknown>): unknown {
 	if (!isObject(value)) return value;
-	if (seen.has(value)) return seen.get(value);
+	// Copies are objects, so `undefined` means "not copied yet".
+	const known = seen.get(value);
+	if (known !== undefined) return known;
+
+	// Fast paths for the usual plain objects and dense arrays (same result as the generic copy at the end).
+	if (isOrdinary(value, Object.getPrototypeOf(value))) {
+		if (!Array.isArray(value)) {
+			// Spread defines the same own data properties as the generic copy, then each (own, writable) one is replaced by its clone.
+			const copy: Record<PropertyKey, unknown> = { ...value };
+			seen.set(value, copy);
+			for (const key of ownEnumerableKeys(copy)) copy[key] = deepCloneWith(copy[key], seen);
+			return copy;
+		}
+		if (isSimpleArray(value)) {
+			const copy = new Array<unknown>(value.length);
+			seen.set(value, copy);
+			for (let i = 0; i < value.length; i++) copy[i] = deepCloneWith(value[i], seen);
+			return copy;
+		}
+	}
+
 	if (isUncloneable(value)) return value;
 
 	const [isBoxed, primitive] = unbox(value);
@@ -776,7 +855,7 @@ function deepCloneWith(value: unknown, seen: WeakMap<object, unknown>): unknown 
  * isEqual(copy, original); // => true
  */
 export function deepClone<T>(value: T): T {
-	return deepCloneWith(value, new WeakMap()) as T;
+	return deepCloneWith(value, new Map()) as T;
 }
 
 /**
@@ -798,9 +877,9 @@ function deepMergeInto(result: object, source: object, ancestors: Set<object>): 
 		if (isPlainObject(sourceValue)) {
 			const current = hasOwn(result, key) ? read(result, key) : undefined;
 			const base = isPlainObject(current) ? current : Object.create(Object.getPrototypeOf(sourceValue));
-			defineValue(result, key, deepMergeInto(base, sourceValue, ancestors));
+			definePlain(result, key, deepMergeInto(base, sourceValue, ancestors));
 		} else {
-			defineValue(result, key, sourceValue);
+			definePlain(result, key, sourceValue);
 		}
 	}
 
@@ -963,6 +1042,7 @@ function propertiesEqual(a: object, b: object, stack: ComparisonStack): boolean 
  * @returns {boolean} Whether they are deeply equal
  */
 function objectsEqual(a: object, b: object, stack: ComparisonStack): boolean {
+	if (isOrdinary(a, Object.getPrototypeOf(a))) return (!Array.isArray(a) || a.length === (b as unknown[]).length) && propertiesEqual(a, b, stack);
 	if (isUncloneable(a)) return false;
 	if (isDate(a)) return sameValueZero(a.getTime(), (b as Date).getTime());
 	if (isRegExp(a)) return a.source === (b as RegExp).source && a.flags === (b as RegExp).flags;
@@ -1133,7 +1213,7 @@ export function typedEntries<T extends object>(object: T): Array<EntryOf<T>> {
  */
 export function typedFromEntries<E extends readonly [PropertyKey, unknown]>(entries: Iterable<E>): FromEntries<E> {
 	const result = {};
-	for (const [key, value] of entries) defineValue(result, key, value);
+	for (const [key, value] of entries) definePlain(result, key, value);
 	return result as FromEntries<E>;
 }
 
@@ -1152,7 +1232,7 @@ export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T
 	const result: Partial<T> = {};
 	for (const key of ownEnumerableKeys(object)) {
 		const value = read(object, key) as T[keyof T];
-		if (predicate(value, key as keyof T, object)) defineValue(result, key, value);
+		if (predicate(value, key as keyof T, object)) definePlain(result, key, value);
 	}
 	return result;
 }
@@ -1238,23 +1318,27 @@ function isContainer(value: unknown): value is object {
 /**
  * Recursive worker of {@link flattenObject}.
  * @param {object} source - The container being flattened
+ * @param {ReadonlyArray<string>} keys - Its own enumerable string keys (`Object.keys(source)`)
  * @param {string} prefix - The path of `source` followed by the separator (empty at the root)
  * @param {string} separator - The segment separator
  * @param {Record<string, unknown>} result - The flat record being built (mutated)
- * @param {Set<object>} ancestors - Containers on the current path (cycle detection)
+ * @param {object[]} ancestors - Containers on the current path (cycle detection)
  * @returns {void}
  * @throws {TypeError} when `source` contains a circular reference
  */
-function flattenInto(source: object, prefix: string, separator: string, result: Record<string, unknown>, ancestors: Set<object>): void {
-	if (ancestors.has(source)) throw new TypeError('flattenObject: cannot flatten a circular structure');
-	ancestors.add(source);
-	for (const key of Object.keys(source)) {
+function flattenInto(source: object, keys: ReadonlyArray<string>, prefix: string, separator: string, result: Record<string, unknown>, ancestors: object[]): void {
+	// A list rather than a Set: it only holds the current path, which is short and cheaper to scan than to hash into (the
+	// recursion, bounded by the call stack, keeps the worst case of the scans small).
+	if (ancestors.includes(source)) throw new TypeError('flattenObject: cannot flatten a circular structure');
+	ancestors.push(source);
+	for (const key of keys) {
 		const value = read(source, key);
 		const path = prefix + key;
-		if (isContainer(value) && Object.keys(value).length > 0) flattenInto(value, path + separator, separator, result, ancestors);
-		else defineValue(result, path, value);
+		const nested = isContainer(value) ? Object.keys(value) : undefined;
+		if (nested !== undefined && nested.length > 0) flattenInto(value as object, nested, path + separator, separator, result, ancestors);
+		else definePlain(result, path, value);
 	}
-	ancestors.delete(source);
+	ancestors.pop();
 }
 
 /**
@@ -1282,7 +1366,7 @@ export function flattenObject(object: object, options: FlattenOptions = {}): Rec
 	const separator = readSeparator('flattenObject', options);
 	if (!isContainer(object)) throw new TypeError(`flattenObject: \`object\` must be a plain object or an array, got ${describe(object)}`);
 	const result: Record<string, unknown> = {};
-	flattenInto(object, '', separator, result, new Set());
+	flattenInto(object, Object.keys(object), '', separator, result, []);
 	return result;
 }
 

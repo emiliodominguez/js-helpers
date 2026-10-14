@@ -90,6 +90,29 @@ describe('Objects helpers', function () {
 			expect(1 in sparse).toBe(false);
 		});
 
+		it('keeps the extra keys of arrays (regexp matches, symbol keys, holes plus extra keys)', function () {
+			const symbol = Symbol('tag');
+			const match = /b(?<rest>c)/.exec('abc') as RegExpExecArray;
+			// eslint-disable-next-line no-sparse-arrays
+			const sparse = Object.assign([, 'x'], { label: 'two keys, like a dense array of length 2' });
+			const tagged = Object.assign(['a'], { [symbol]: true });
+			for (const copy of [helpers.clone(match), helpers.deepClone(match)]) {
+				expect(Array.from(copy)).toStrictEqual(['bc', 'c']);
+				expect(copy.index).toBe(1);
+				expect(copy.input).toBe('abc');
+				expect(copy.groups?.rest).toBe('c');
+			}
+			for (const copy of [helpers.clone(sparse), helpers.deepClone(sparse)]) {
+				expect(0 in copy).toBe(false);
+				expect(copy[1]).toBe('x');
+				expect(copy.label).toBe(sparse.label);
+			}
+			for (const copy of [helpers.clone(tagged), helpers.deepClone(tagged)]) {
+				expect(Array.from(copy)).toStrictEqual(['a']);
+				expect(copy[symbol]).toBe(true);
+			}
+		});
+
 		it('preserves class instance prototypes and symbol keys', function () {
 			class Point {
 				x: number;
@@ -167,6 +190,17 @@ describe('Objects helpers', function () {
 			expect(deep.s.valueOf()).toBe('ab');
 		});
 
+		it('recognises boxed primitives by their internal slot, even with Object.prototype as prototype', function () {
+			const five = Object.setPrototypeOf(new Number(5), Object.prototype) as object;
+			for (const copy of [helpers.clone(five), helpers.deepClone(five)]) {
+				expect(copy).not.toBe(five);
+				expect(Object.getPrototypeOf(copy)).toBe(Object.prototype);
+				expect(Number.prototype.valueOf.call(copy)).toBe(5);
+			}
+			expect(helpers.isEqual(five, Object.setPrototypeOf(new Number(6), Object.prototype))).toBe(false);
+			expect(helpers.isEqual(five, Object.setPrototypeOf(new Number(5), Object.prototype))).toBe(true);
+		});
+
 		it('keeps error messages', function () {
 			const error = new TypeError('boom');
 			const copy = helpers.clone(error);
@@ -224,6 +258,22 @@ describe('Objects helpers', function () {
 			expect(copy.left).not.toBe(shared);
 			expect(copy.list[0]).toBe(copy.list);
 			expect(copy.list[1]).toBe(copy);
+		});
+
+		it('handles circular references through null-prototype objects and class instances', function () {
+			class Node {
+				next: unknown = null;
+			}
+			const bare = Object.create(null) as { self?: unknown };
+			bare.self = bare;
+			const node = new Node();
+			node.next = node;
+			const bareCopy = helpers.deepClone(bare);
+			const nodeCopy = helpers.deepClone(node);
+			expect(bareCopy).not.toBe(bare);
+			expect(bareCopy.self).toBe(bareCopy);
+			expect(nodeCopy).toBeInstanceOf(Node);
+			expect(nodeCopy.next).toBe(nodeCopy);
 		});
 
 		it('clones Map keys and values and Set members', function () {
@@ -406,6 +456,12 @@ describe('Objects helpers', function () {
 			expect(helpers.getFromObjectByKeys({ a: 'hello world' }, 'b' as any)).toBeUndefined();
 		});
 
+		it('returns the default value for a nullish target, whatever the number of segments', function () {
+			expect(helpers.getFromObjectByKeys(null as any, 'a', 'fallback')).toBe('fallback');
+			expect(helpers.getFromObjectByKeys(undefined as any, 'a.b', 'fallback')).toBe('fallback');
+			expect(helpers.getFromObjectByKeys(null as any, 'a')).toBeUndefined();
+		});
+
 		it('does not throw on missing or null intermediates (used to throw)', function () {
 			const target: { a: { x?: { y: number } | null } } = { a: {} };
 			expect(helpers.getFromObjectByKeys(target, 'a.x.y')).toBeUndefined();
@@ -434,6 +490,21 @@ describe('Objects helpers', function () {
 	});
 
 	describe('setInObjectByKeys', function () {
+		it('shadows an inherited accessor with a new own container instead of assigning through it', function () {
+			class Settings {
+				/**
+				 * A read-only, inherited property.
+				 * @returns {undefined} Always `undefined`
+				 */
+				get theme(): undefined {
+					return undefined;
+				}
+			}
+			const settings = helpers.setInObjectByKeys(new Settings() as any, 'theme.color', 'red');
+			expect(Object.getOwnPropertyDescriptor(settings, 'theme')?.value).toStrictEqual({ color: 'red' });
+			expect(new Settings().theme).toBeUndefined();
+		});
+
 		it('sets nested values, creating objects and arrays as needed, and returns the target', function () {
 			const target: Record<string, any> = { keep: 1 };
 			const result = helpers.setInObjectByKeys(target, 'a.list.0.id', 7);
@@ -489,6 +560,13 @@ describe('Objects helpers', function () {
 			expect(helpers.isEmpty({})).toBe(true);
 			expect(helpers.isEmpty(Object.create({ inherited: 1 }))).toBe(true);
 			expect(helpers.isEmpty(Object.defineProperty({}, 'hidden', { value: 1 }))).toBe(true);
+			expect(helpers.isEmpty(Object.defineProperty({}, Symbol('hidden'), { value: 1 }))).toBe(true);
+		});
+
+		it('ignores enumerable inherited keys but not own keys shadowing them', function () {
+			const parent = { inherited: 1 };
+			expect(helpers.isEmpty(Object.create(parent))).toBe(true);
+			expect(helpers.isEmpty(Object.assign(Object.create(parent), { own: 1 }))).toBe(false);
 		});
 
 		it('should return false if the object is not empty', function () {
@@ -702,6 +780,14 @@ describe('Objects helpers', function () {
 	});
 
 	describe('isEqual', function () {
+		it('compares arrays of a subclass by length and elements', function () {
+			class List<T> extends Array<T> {}
+			expect(helpers.isEqual(List.from([1, 2]), List.from([1, 2]))).toBe(true);
+			expect(helpers.isEqual(List.from([1]), List.from([1, 2]))).toBe(false);
+			expect(helpers.isEqual(new List(2), new List(3))).toBe(false);
+			expect(helpers.isEqual(List.from([1, 2]), [1, 2])).toBe(false);
+		});
+
 		it('compares primitives with SameValueZero', function () {
 			expect(helpers.isEqual(1, 1)).toBe(true);
 			expect(helpers.isEqual('a', 'a')).toBe(true);

@@ -981,6 +981,30 @@ describe('Arrays helpers', function () {
 				[2, 2]
 			]);
 		});
+
+		it('handles number keys followed by other key types, still calling the selector once per item', function () {
+			const keys: Array<number | string | bigint | Date> = [NaN, 4, 2, 'b', 1n, new Date(0), 'a', 3];
+			const indices: number[] = [];
+			/**
+			 * Records the index it is called with and returns the item as its key.
+			 * @param {number | string | bigint | Date} value - The item
+			 * @param {number} index - Its index
+			 * @returns {number | string | bigint | Date} The item
+			 */
+			function selector(value: number | string | bigint | Date, index: number): number | string | bigint | Date {
+				indices.push(index);
+				return value;
+			}
+			expect(helpers.minBy(keys, selector)).toBe(keys[5]);
+			expect(indices).toStrictEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+			expect(helpers.maxBy(keys, selector)).toBe('b');
+			expect(helpers.minBy([NaN, 'x'], selector)).toBe('x');
+			expect(helpers.maxBy([NaN, NaN, new Date(NaN), 2n], selector)).toBe(2n);
+			expect(helpers.minBy([5, 5, 'q', 5], selector)).toBe(5);
+			indices.length = 0;
+			expect(helpers.maxBy(['b', 1, 'c'], selector)).toBe('c');
+			expect(indices).toStrictEqual([0, 1, 2]);
+		});
 	});
 
 	describe('sumBy', function () {
@@ -991,6 +1015,8 @@ describe('Arrays helpers', function () {
 				})
 			).toBe(0.6);
 			expect(helpers.sumBy([1e100, 1, -1e100], Number)).toBe(1);
+			// The small term is kept whether it comes before or after the large one.
+			expect(helpers.sumBy([1, 1e100, -1e100], Number)).toBe(1);
 			expect(
 				helpers.sumBy(['a', 'bb'], function (s, i) {
 					return s.length * 10 + i;

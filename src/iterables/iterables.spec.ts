@@ -1309,6 +1309,21 @@ describe('iterables', function () {
 				expect(finalized).toBe(1);
 			});
 
+			it('also closes an array whose iterator was replaced', async function () {
+				let finalized = 0;
+				const failure = new Error('item failed');
+				const source: Array<Promise<number>> = [Promise.resolve(1), Promise.reject(failure)];
+				(source as any)[Symbol.iterator] = function* (): Generator<Promise<number>, void, undefined> {
+					try {
+						yield* Array.prototype.values.call(source) as IterableIterator<Promise<number>>;
+					} finally {
+						finalized++;
+					}
+				};
+				await expect(helpers.toArrayAsync(source)).rejects.toBe(failure);
+				expect(finalized).toBe(1);
+			});
+
 			it('also closes it on early exit', async function () {
 				let finalized = 0;
 				const source = (function* () {

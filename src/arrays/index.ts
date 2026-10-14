@@ -1,5 +1,4 @@
 import { isIterable } from '../guards/index.js';
-import { sum } from '../math/index.js';
 import { assertFunction, assertInteger, assertNumber, describe, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
 
@@ -191,7 +190,7 @@ function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
  * removeDuplicates([1, 2, 2, 3, 1]); // => [1, 2, 3]
  */
 export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
-	const values = Array.from(iterable);
+	const values: ReadonlyArray<T> = Array.isArray(iterable) ? iterable : Array.from(iterable);
 	const set = new Set<T>(values);
 	const result = Array.from(set);
 	// A Set stores -0 as +0: when the first zero of the input is -0, it is put back, so every value is an original one.
@@ -306,10 +305,8 @@ export function isSubset<T>(subset: Iterable<T>, superset: Iterable<T>): boolean
  */
 export function chunk<T>(array: ReadonlyArray<T>, size: number): T[][] {
 	assertInteger('chunk', 'size', size, 1);
-	const result: T[][] = [];
-	for (let i = 0; i < array.length; i += size) {
-		result.push(array.slice(i, i + size));
-	}
+	const result = new Array<T[]>(Math.ceil(array.length / size));
+	for (let i = 0; i < result.length; i++) result[i] = array.slice(i * size, (i + 1) * size);
 	return result;
 }
 
@@ -322,9 +319,12 @@ export function chunk<T>(array: ReadonlyArray<T>, size: number): T[][] {
  * compact([0, 1, false, 2, '', 3, null, NaN]); // => [1, 2, 3]
  */
 export function compact<T>(array: ReadonlyArray<T>): Array<Exclude<T, Falsy>> {
-	return array.filter(function (value): value is Exclude<T, Falsy> {
-		return Boolean(value);
-	});
+	const result: Array<Exclude<T, Falsy>> = [];
+	for (let i = 0; i < array.length; i++) {
+		const value = array[i];
+		if (value) result.push(value as Exclude<T, Falsy>);
+	}
+	return result;
 }
 
 /**
@@ -357,8 +357,13 @@ export function range(start: number, end?: number, step = 1): number[] {
 	const nearest = Math.round(ratio);
 	// `ratio` carries rounding errors (`2.1 / 0.3` is `7.000000000000001`); when it is an integer up to those errors,
 	// the range is meant to stop exactly one step before `end`, so the count must not be rounded up.
-	const tolerance = 4 * Number.EPSILON * ((Math.abs(from) + Math.abs(to)) / Math.abs(step) + Math.abs(ratio));
-	let length = Math.max(0, Math.abs(ratio - nearest) <= tolerance ? nearest : Math.ceil(ratio));
+	// (An exact integer ratio, the usual case, needs no tolerance.)
+	let length = Math.max(
+		0,
+		ratio === nearest || Math.abs(ratio - nearest) <= 4 * Number.EPSILON * ((Math.abs(from) + Math.abs(to)) / Math.abs(step) + Math.abs(ratio))
+			? nearest
+			: Math.ceil(ratio)
+	);
 	if (length > MAX_ARRAY_LENGTH) throw new RangeError(`range: the range would contain ${length} items, more than an array can hold`);
 	// Safety net for huge magnitudes, where `start + i * step` rounds onto (or past) `end`: the end stays exclusive.
 	while (length > 0 && (from + (length - 1) * step - to) * step >= 0) length--;
@@ -376,14 +381,15 @@ export function range(start: number, end?: number, step = 1): number[] {
  * zip([1, 2, 3], ['a', 'b']); // => [[1, 'a'], [2, 'b']] // typed as [number, string][]
  */
 export function zip<T extends Array<ReadonlyArray<unknown>>>(...arrays: T): Array<Zipped<T>> {
-	if (arrays.length === 0) return [];
-	let length = Infinity;
-	for (const array of arrays) length = Math.min(length, array.length);
-	const result: Array<Zipped<T>> = [];
+	const count = arrays.length;
+	if (count === 0) return [];
+	let length = arrays[0].length;
+	for (let k = 1; k < count; k++) length = Math.min(length, arrays[k].length);
+	const result = new Array<Zipped<T>>(length);
 	for (let i = 0; i < length; i++) {
-		const tuple: unknown[] = [];
-		for (const array of arrays) tuple.push(array[i]);
-		result.push(tuple as Zipped<T>);
+		const tuple = new Array<unknown>(count);
+		for (let k = 0; k < count; k++) tuple[k] = arrays[k][i];
+		result[i] = tuple as Zipped<T>;
 	}
 	return result;
 }
@@ -570,14 +576,17 @@ function compareKeys(a: number | string | bigint, b: number | string | bigint): 
 export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, order: SortOrder = 'asc'): T[] {
 	assertFunction('sortBy', 'selector', selector);
 	if (order !== 'asc' && order !== 'desc') throw new RangeError(`sortBy: \`order\` must be 'asc' or 'desc', got ${String(order)}`);
+	const length = array.length;
 	const keys: Array<number | string | bigint> = [];
 	// Indices of the items to sort, then of the items with a NaN key (they keep their input order, after all the others).
 	const sorted: number[] = [];
 	const unordered: number[] = [];
-	for (let i = 0; i < array.length; i++) {
-		const key = toComparable(selector(array[i], i));
+	for (let i = 0; i < length; i++) {
+		const selected = selector(array[i], i);
+		// Number keys (the common case) skip the `Date` check; NaN is the only key not equal to itself.
+		const key = typeof selected === 'number' ? selected : toComparable(selected);
 		keys.push(key);
-		(Number.isNaN(key) ? unordered : sorted).push(i);
+		(key !== key ? unordered : sorted).push(i);
 	}
 	// `sort` is stable and `sorted` is in input order, so items with equal keys keep their relative order.
 	sorted.sort(
@@ -589,9 +598,10 @@ export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: nu
 					return compareKeys(keys[y], keys[x]);
 				}
 	);
-	return sorted.concat(unordered).map(function (index) {
-		return array[index];
-	});
+	const result = new Array<T>(length);
+	for (let i = 0; i < sorted.length; i++) result[i] = array[sorted[i]];
+	for (let i = 0; i < unordered.length; i++) result[sorted.length + i] = array[unordered[i]];
+	return result;
 }
 
 /**
@@ -691,13 +701,13 @@ export type Comparator<T> = (a: T, b: T) => number;
  */
 export function unzip<T extends ReadonlyArray<unknown>>(tuples: ReadonlyArray<T>): Unzipped<T> | [] {
 	if (tuples.length === 0) return [];
-	let arity = Infinity;
-	for (const tuple of tuples) arity = Math.min(arity, tuple.length);
-	const result: unknown[][] = [];
+	let arity = tuples[0].length;
+	for (let row = 1; row < tuples.length; row++) arity = Math.min(arity, tuples[row].length);
+	const result: unknown[][] = new Array<unknown[]>(arity);
 	for (let position = 0; position < arity; position++) {
 		const column: unknown[] = new Array<unknown>(tuples.length);
 		for (let row = 0; row < tuples.length; row++) column[row] = tuples[row][position];
-		result.push(column);
+		result[position] = column;
 	}
 	return result as Unzipped<T>;
 }
@@ -753,15 +763,40 @@ export function pairwise<T>(array: ReadonlyArray<T>): Array<[T, T]> {
  */
 function extremeBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, direction: number): T | undefined {
 	let best: T | undefined;
-	let bestKey: number | string | bigint | undefined;
-	for (let i = 0; i < array.length; i++) {
-		const key = toComparable(selector(array[i], i));
-		if (Number.isNaN(key)) continue;
-		// Strict comparison: on ties the first item wins.
-		if (bestKey === undefined || compareKeys(key, bestKey) === direction) {
+	let bestKey: number | string | bigint = NaN;
+	let selected: SortKey = NaN;
+	let i = 0;
+	// Fast path while the keys are numbers (the common case): find the first non-NaN key...
+	for (; i < array.length; i++) {
+		selected = selector(array[i], i);
+		if (typeof selected !== 'number') break;
+		if (selected === selected) {
+			best = array[i++];
+			bestKey = selected;
+			break;
+		}
+	}
+	// ...then compare with plain strict comparisons (on ties the first item wins; NaN keys compare false and are skipped).
+	if (bestKey === bestKey) {
+		for (; i < array.length; i++) {
+			selected = selector(array[i], i);
+			if (typeof selected !== 'number') break;
+			if (direction < 0 ? selected < bestKey : selected > bestKey) {
+				best = array[i];
+				bestKey = selected;
+			}
+		}
+	}
+	// General path from the first non-number key on (`selected` already holds it).
+	let found = bestKey === bestKey;
+	for (; i < array.length; i++) {
+		const key = toComparable(selected);
+		if (key === key && (!found || compareKeys(key, bestKey) === direction)) {
+			found = true;
 			best = array[i];
 			bestKey = key;
 		}
+		if (i + 1 < array.length) selected = selector(array[i + 1], i + 1);
 	}
 	return best;
 }
@@ -806,7 +841,7 @@ export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
 }
 
 /**
- * Add up the numbers returned by `selector` for each item, using compensated (Neumaier) summation like `sum` from the math module,
+ * Add up the numbers returned by `selector` for each item, using compensated (Neumaier) summation like `sum` from the math module (same algorithm, same result),
  * so the rounding error does not grow with the number of items.
  * `NaN`/`Infinity` keys propagate as in plain addition.
  * @template T
@@ -819,7 +854,16 @@ export function maxBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: num
  */
 export function sumBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => number): number {
 	assertFunction('sumBy', 'selector', selector);
-	return sum(Array.from(array, selector));
+	// Neumaier summation inlined (same algorithm and result as `sum`), so no intermediate array of keys is allocated.
+	let total = 0;
+	let compensation = 0;
+	for (let i = 0; i < array.length; i++) {
+		const value = selector(array[i], i);
+		const next = total + value;
+		compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
+		total = next;
+	}
+	return Number.isFinite(total) ? total + compensation : total;
 }
 
 /**
