@@ -1,0 +1,336 @@
+/**
+ * A single query-string value. Dates are serialized with `toISOString()`, everything else with `String()`.
+ */
+export type QueryValue = string | number | boolean | bigint | Date;
+
+/**
+ * The parameters accepted by {@link buildQueryString} and {@link withQuery}: a single value or a list of values per key.
+ * `undefined` values are always skipped; `null` values depend on the `skipNull` option.
+ */
+export type QueryParams = Readonly<Record<string, QueryValue | ReadonlyArray<QueryValue> | undefined | null>>;
+
+/**
+ * How {@link buildQueryString} serializes arrays:
+ * - `'repeat'`: `a=1&a=2`
+ * - `'comma'`: `a=1,2` (commas inside values are percent-encoded, so the split is unambiguous)
+ * - `'brackets'`: `a[]=1&a[]=2`
+ */
+export type ArrayFormat = 'repeat' | 'comma' | 'brackets';
+
+/**
+ * Options accepted by {@link buildQueryString} and {@link withQuery}.
+ */
+export interface BuildQueryStringOptions {
+	/** How arrays are serialized. Defaults to `'repeat'`. */
+	readonly arrayFormat?: ArrayFormat;
+	/** Skip keys whose value is `null`. When `false`, they are written as a bare key without `=` (`a`). Defaults to `true`. */
+	readonly skipNull?: boolean;
+	/** Sort the keys (by UTF-16 code units) instead of keeping the object's key order. The order of the values of a key is kept. Defaults to `false`. */
+	readonly sort?: boolean;
+}
+
+/**
+ * The result of {@link parseQueryString}: a key maps to a string, or to an array when it appears several times or uses brackets (`a[]=`).
+ * The object has a `null` prototype, so keys such as `__proto__` or `constructor` are ordinary own keys.
+ */
+export type ParsedQuery = Record<string, string | string[]>;
+
+/**
+ * The array formats supported by {@link buildQueryString}.
+ */
+const ARRAY_FORMATS: ReadonlySet<string> = new Set<ArrayFormat>(['repeat', 'comma', 'brackets']);
+
+/**
+ * Percent-encodes a query-string component with `encodeURIComponent`. Lone surrogates, which `encodeURIComponent` rejects, are
+ * replaced with U+FFFD first (like `URLSearchParams` does).
+ * @param {string} value - The text to encode
+ * @returns {string} The encoded text
+ */
+function encodeComponent(value: string): string {
+	const wellFormed = value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, function (match: string): string {
+		return match.length === 2 ? match : '�';
+	});
+
+	return encodeURIComponent(wellFormed);
+}
+
+/**
+ * Decodes a query-string component the way {@link parseQueryString} does: `+` is a space and malformed percent sequences never throw.
+ * @param {string} value - The raw component (without `&`, `=` or `#`)
+ * @returns {string} The decoded text
+ */
+function decodeComponent(value: string): string {
+	return new URLSearchParams(`k=${value}`).get('k') as string;
+}
+
+/**
+ * Serializes a single value.
+ * @param {string} key - The key, for error messages
+ * @param {unknown} value - The value to serialize
+ * @returns {string} The serialized (not yet encoded) value
+ * @throws {RangeError} when `value` is an invalid `Date`
+ * @throws {TypeError} when `value` is not a string, number, boolean, bigint or `Date`
+ */
+function serializeValue(key: string, value: unknown): string {
+	if (value instanceof Date) {
+		if (Number.isNaN(value.getTime())) throw new RangeError(`buildQueryString: invalid Date for key "${key}"`);
+
+		return value.toISOString();
+	}
+
+	if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+
+	throw new TypeError(`buildQueryString: unsupported value of type ${typeof value} for key "${key}"`);
+}
+
+/**
+ * Type guard telling whether a parameter value is a list of values.
+ * @param {unknown} value - The parameter value
+ * @returns {boolean} Whether `value` is an array
+ */
+function isValueList(value: unknown): value is ReadonlyArray<unknown> {
+	return Array.isArray(value);
+}
+
+/**
+ * Builds a query string (WITHOUT the leading `?`) from a record of parameters. Keys and values are percent-encoded with
+ * `encodeURIComponent` (spaces become `%20`; lone surrogates become U+FFFD), so encoded values never contain a raw `&`, `=`, `,` or `#`.
+ *
+ * - `undefined` values (and `undefined`/`null` items inside arrays) are skipped.
+ * - `null` values are skipped by default; with `skipNull: false` they are written as a bare key (`a`).
+ * - Numbers, booleans and bigints use `String()`; dates use `toISOString()`.
+ * - Arrays follow `arrayFormat`; an empty array writes nothing.
+ * - Only own enumerable string keys are read, in object order unless `sort` is set.
+ * @param {QueryParams} params - The parameters
+ * @param {BuildQueryStringOptions} [options={}] - `arrayFormat` (default `'repeat'`), `skipNull` (default `true`) and `sort` (default `false`)
+ * @returns {string} The query string, `''` when nothing is written
+ * @throws {RangeError} when `arrayFormat` is unknown or a `Date` is invalid
+ * @throws {TypeError} when a value is not a string, number, boolean, bigint, `Date`, array of those, `null` or `undefined`
+ * @example
+ * buildQueryString({ q: 'hello world', page: 2, tags: ['a', 'b'] }); // 'q=hello%20world&page=2&tags=a&tags=b'
+ * buildQueryString({ tags: ['a', 'b'] }, { arrayFormat: 'brackets' }); // 'tags[]=a&tags[]=b'
+ * buildQueryString({ tags: ['a', 'b,c'] }, { arrayFormat: 'comma' }); // 'tags=a,b%2Cc'
+ * buildQueryString({ b: 1, a: null, c: undefined }, { skipNull: false, sort: true }); // 'a&b=1'
+ */
+export function buildQueryString(params: QueryParams, options: BuildQueryStringOptions = {}): string {
+	const { arrayFormat = 'repeat', skipNull = true, sort = false } = options;
+
+	if (!ARRAY_FORMATS.has(arrayFormat)) throw new RangeError(`buildQueryString: unknown arrayFormat ${JSON.stringify(arrayFormat)}`);
+
+	const keys = Object.keys(params);
+
+	if (sort) keys.sort();
+
+	const pairs: string[] = [];
+
+	for (const key of keys) {
+		const value = params[key];
+		const encodedKey = encodeComponent(key) + (arrayFormat === 'brackets' && isValueList(value) ? '[]' : '');
+
+		if (value === undefined) continue;
+
+		if (value === null) {
+			if (!skipNull) pairs.push(encodedKey);
+			continue;
+		}
+
+		if (!isValueList(value)) {
+			pairs.push(`${encodedKey}=${encodeComponent(serializeValue(key, value))}`);
+			continue;
+		}
+
+		const items = value
+			.filter(function (item: unknown): boolean {
+				return item != null;
+			})
+			.map(function (item: unknown): string {
+				return encodeComponent(serializeValue(key, item));
+			});
+
+		if (items.length === 0) continue;
+
+		if (arrayFormat === 'comma') pairs.push(`${encodedKey}=${items.join(',')}`);
+		else for (const item of items) pairs.push(`${encodedKey}=${item}`);
+	}
+
+	return pairs.join('&');
+}
+
+/**
+ * Parses a query string into a record. Parsing follows `URLSearchParams`: an optional leading `?` is ignored, pairs are separated by `&`,
+ * `+` decodes to a space, malformed percent-escapes never throw (invalid UTF-8 becomes U+FFFD) and a key without `=` gets `''`.
+ * Anything after a `#` is ignored (it is a fragment, not part of the query).
+ *
+ * A key that appears several times maps to an array of its values, in order. A key ending in `[]` (`a[]=1`, also when percent-encoded)
+ * is stored without the brackets and always maps to an array, even with a single value. Comma-separated values are NOT split.
+ *
+ * The result has a `null` prototype, so it is safe against prototype pollution (`__proto__=x` creates an own `__proto__` key);
+ * use `Object.keys`, `in` or `Object.hasOwn` on it rather than `result.hasOwnProperty`.
+ * @param {string} query - The query string, with or without the leading `?`
+ * @returns {ParsedQuery} The parsed parameters
+ * @example
+ * parseQueryString('?q=hello+world&tag=a&tag=b&empty'); // { q: 'hello world', tag: ['a', 'b'], empty: '' }
+ * parseQueryString('ids[]=1'); // { ids: ['1'] }
+ */
+export function parseQueryString(query: string): ParsedQuery {
+	const hashIndex = query.indexOf('#');
+	const search = hashIndex === -1 ? query : query.slice(0, hashIndex);
+	const result = Object.create(null) as ParsedQuery;
+
+	for (const [rawKey, value] of new URLSearchParams(search)) {
+		const isBracket = rawKey.endsWith('[]');
+		const key = isBracket ? rawKey.slice(0, -2) : rawKey;
+		const existing = result[key];
+
+		if (existing === undefined) result[key] = isBracket ? [value] : value;
+		else if (Array.isArray(existing)) existing.push(value);
+		else result[key] = [existing, value];
+	}
+
+	return result;
+}
+
+/**
+ * Splits a URL string into the part before the query, the raw query (without `?`) and the fragment (with `#`).
+ * @param {string} url - The URL
+ * @returns {{ base: string, query: string, hash: string }} The three parts (`query` and `hash` may be empty)
+ */
+function splitUrl(url: string): { base: string; query: string; hash: string } {
+	const hashIndex = url.indexOf('#');
+	const beforeHash = hashIndex === -1 ? url : url.slice(0, hashIndex);
+	const hash = hashIndex === -1 ? '' : url.slice(hashIndex);
+	const queryIndex = beforeHash.indexOf('?');
+
+	if (queryIndex === -1) return { base: beforeHash, query: '', hash };
+
+	return { base: beforeHash.slice(0, queryIndex), query: beforeHash.slice(queryIndex + 1), hash };
+}
+
+/**
+ * Adds parameters to a URL string that may already have a query and/or a `#fragment`.
+ *
+ * Existing pairs whose key (decoded, with `[]` removed) is not in `params` are kept verbatim, in place. Every key of `params` whose value is
+ * not `undefined` replaces all existing occurrences of that key; its new pairs are appended at the end, serialized by {@link buildQueryString}
+ * with `options` (which apply to the appended pairs only). A `null` value therefore removes the key (with the default `skipNull: true`).
+ * The fragment is preserved at the end; a dangling `?` is dropped when no pair remains.
+ * @param {string} url - The URL (absolute or relative)
+ * @param {QueryParams} params - The parameters to set
+ * @param {BuildQueryStringOptions} [options={}] - Serialization options for the new parameters
+ * @returns {string} The URL with the merged query
+ * @throws {RangeError} see {@link buildQueryString}
+ * @throws {TypeError} see {@link buildQueryString}
+ * @example
+ * withQuery('https://x.com/search?q=old&page=2#results', { q: 'new value', lang: 'en' }); // 'https://x.com/search?page=2&q=new%20value&lang=en#results'
+ * withQuery('/list?page=2&sort=asc', { page: null }); // '/list?sort=asc'
+ * withQuery('/list', {}); // '/list'
+ */
+export function withQuery(url: string, params: QueryParams, options: BuildQueryStringOptions = {}): string {
+	const { base, query, hash } = splitUrl(url);
+	const replaced = new Set(
+		Object.keys(params).filter(function (key: string): boolean {
+			return params[key] !== undefined;
+		})
+	);
+	const pairs = query.split('&').filter(function (pair: string): boolean {
+		if (pair === '') return false;
+
+		const equalsIndex = pair.indexOf('=');
+		const key = decodeComponent(equalsIndex === -1 ? pair : pair.slice(0, equalsIndex));
+
+		return !replaced.has(key.endsWith('[]') ? key.slice(0, -2) : key);
+	});
+	const added = buildQueryString(params, options);
+
+	if (added !== '') pairs.push(added);
+
+	return base + (pairs.length === 0 ? '' : `?${pairs.join('&')}`) + hash;
+}
+
+/**
+ * Joins URL parts with exactly one `/` between them.
+ *
+ * - Empty parts are ignored; runs of slashes inside or between parts collapse into one.
+ * - The beginning of the first part is preserved: a scheme with its slashes (`https://`, `file:///`), a protocol-relative `//host`, or a leading `/`
+ *   (also for a first part made only of slashes, or starting with three or more: there is no host to make it protocol-relative).
+ * - The result ends with `/` only when the last part (ignoring its query/fragment) does.
+ * - The query (`?...`) and fragment (`#...`) of the last part are kept as they are; `?` and `#` in other parts are treated as path text.
+ * @param {...string} parts - The URL parts
+ * @returns {string} The joined URL (`''` when every part is empty)
+ * @throws {TypeError} when a part is not a string
+ * @example
+ * joinUrl('https://api.example.com/', '/v1/', 'users', '42'); // 'https://api.example.com/v1/users/42'
+ * joinUrl('/api', 'items/', '?page=2'); // '/api/items?page=2'
+ * joinUrl('a', 'b/'); // 'a/b/'
+ * joinUrl('//cdn.example.com', 'lib.js'); // '//cdn.example.com/lib.js'
+ */
+export function joinUrl(...parts: string[]): string {
+	const nonEmpty = parts.filter(function (part: unknown): boolean {
+		if (typeof part !== 'string') throw new TypeError(`joinUrl: every part must be a string, received ${typeof part}`);
+
+		return part !== '';
+	});
+
+	if (nonEmpty.length === 0) return '';
+
+	const lastIndex = nonEmpty.length - 1;
+	const last = nonEmpty[lastIndex];
+	const suffixIndex = last.search(/[?#]/);
+	const paths = nonEmpty.slice();
+	let suffix = '';
+
+	if (suffixIndex !== -1) {
+		suffix = last.slice(suffixIndex);
+		paths[lastIndex] = last.slice(0, suffixIndex);
+	}
+
+	const scheme = /^[a-z][a-z\d+.-]*:\/*/i.exec(paths[0]);
+	let prefix: string;
+
+	if (scheme !== null) prefix = scheme[0];
+	else if (/^\/\/[^/]/.test(paths[0])) prefix = '//';
+	else if (paths[0].startsWith('/')) prefix = '/';
+	else prefix = '';
+
+	if (scheme !== null) paths[0] = paths[0].slice(prefix.length);
+
+	const trailingSlash = paths[lastIndex].endsWith('/');
+	const segments = paths.flatMap(function (path: string): string[] {
+		return path.split('/').filter(Boolean);
+	});
+	const body = segments.join('/');
+
+	return prefix + body + (trailingSlash && body !== '' ? '/' : '') + suffix;
+}
+
+/**
+ * Reads the first value of a query parameter from a URL string (see {@link parseQueryString} for the decoding rules).
+ * Only the part between the first `?` and the `#fragment` is searched, so a string without `?` has no parameters.
+ * @param {string} url - The URL (absolute or relative)
+ * @param {string} key - The parameter name (`a` also matches `a[]`)
+ * @returns {string | undefined} The first value, or `undefined` when the parameter is absent
+ * @example
+ * getQueryParam('https://x.com/?q=hello+world&q=2#top', 'q'); // 'hello world'
+ * getQueryParam('/path?flag', 'flag'); // ''
+ * getQueryParam('/path', 'q'); // undefined
+ */
+export function getQueryParam(url: string, key: string): string | undefined {
+	const { query } = splitUrl(url);
+	const value = parseQueryString(query)[key];
+
+	return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * Checks whether a string is an absolute URL: it starts with a scheme followed by `://` (`https://`, `ftp://`, `custom+app://`)
+ * or is protocol-relative (`//host`). Schemes without `//` (`mailto:`, `data:`, `javascript:`) are not considered absolute here.
+ * @param {string} string - The string to check
+ * @returns {boolean} Whether the string is an absolute URL
+ * @example
+ * isAbsoluteUrl('https://example.com'); // true
+ * isAbsoluteUrl('//cdn.example.com/lib.js'); // true
+ * isAbsoluteUrl('/relative/path'); // false
+ * isAbsoluteUrl('mailto:someone@example.com'); // false
+ */
+export function isAbsoluteUrl(string: string): boolean {
+	return /^[a-z][a-z\d+.-]*:\/\//i.test(string) || string.startsWith('//');
+}

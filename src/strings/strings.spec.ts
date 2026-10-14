@@ -117,6 +117,20 @@ describe('String helpers', function () {
 		it('should handle empty input', function () {
 			expect(helpers.substring('', 0, 3)).toEqual('');
 		});
+
+		it('should never swap the indices, even when one of them is NaN (regression)', function () {
+			// NaN used to reach String.prototype.substring, which treats it as 0 and swaps the indices.
+			expect(helpers.substring('abc', 1, NaN)).toEqual('');
+			expect(helpers.substring('abc', Infinity, NaN)).toEqual('');
+			expect(helpers.substring('abc', NaN, 2)).toEqual('ab');
+		});
+
+		it('should clamp negative and out-of-range indices and truncate fractional ones', function () {
+			expect(helpers.substring('abc', -5, 2)).toEqual('ab');
+			expect(helpers.substring('abc', 0, -1)).toEqual('');
+			expect(helpers.substring('abc', 1.9, 2.9)).toEqual('b');
+			expect(helpers.substring('abc', -Infinity, Infinity)).toEqual('abc');
+		});
 	});
 
 	describe('includes', function () {
@@ -254,6 +268,15 @@ describe('String helpers', function () {
 			expect(helpers.toTitleCase('ΑΘΗΝΑ')).toEqual('Αθηνα');
 			expect(helpers.toTitleCase('straße ßa')).toEqual('Straße Ssa');
 			expect(helpers.toTitleCase('ﬁne')).toEqual('Fine');
+		});
+
+		it('should use the Unicode title-case form of digraphs (regression)', function () {
+			// Used to produce the upper-case digraph ('Ǆemal').
+			expect(helpers.toTitleCase('ǆemal ǅEMAL Ǆemal')).toEqual('ǅemal ǅemal ǅemal');
+			expect(helpers.toTitleCase('ǉubljana ǌ ǳ')).toEqual('ǈubljana ǋ ǲ');
+			expect(helpers.toTitleCase(helpers.toTitleCase('ǆemal'))).toEqual('ǅemal');
+			expect(helpers.toPascalCase('ǆemal ǉubljana')).toEqual('ǅemalǈubljana');
+			expect(helpers.toCamelCase('foo ǆemal')).toEqual('fooǅemal');
 		});
 	});
 
@@ -644,6 +667,340 @@ describe('String helpers', function () {
 			expect(helpers.interpolate('no placeholders', { a: 1 })).toEqual('no placeholders');
 			expect(helpers.interpolate('{} { a', { a: 1 })).toEqual('{} { a');
 			expect(helpers.interpolate('', {})).toEqual('');
+		});
+	});
+
+	describe('levenshtein', function () {
+		it('should compute classic edit distances', function () {
+			expect(helpers.levenshtein('kitten', 'sitting')).toBe(3);
+			expect(helpers.levenshtein('flaw', 'lawn')).toBe(2);
+			expect(helpers.levenshtein('saturday', 'sunday')).toBe(3);
+			expect(helpers.levenshtein('abc', 'abc')).toBe(0);
+			expect(helpers.levenshtein('abc', 'xyz')).toBe(3);
+		});
+
+		it('should handle empty strings', function () {
+			expect(helpers.levenshtein('', '')).toBe(0);
+			expect(helpers.levenshtein('', 'abc')).toBe(3);
+			expect(helpers.levenshtein('abc', '')).toBe(3);
+		});
+
+		it('should be symmetric and handle pure insertions around a common core', function () {
+			expect(helpers.levenshtein('sitting', 'kitten')).toBe(3);
+			expect(helpers.levenshtein('abc', 'xabcx')).toBe(2);
+			expect(helpers.levenshtein('xabcx', 'abc')).toBe(2);
+		});
+
+		it('should count code points, not UTF-16 units', function () {
+			expect(helpers.levenshtein('😀a', '😃a')).toBe(1);
+			expect(helpers.levenshtein('😀', '')).toBe(1);
+			expect(helpers.levenshtein('a😀b', 'ab')).toBe(1);
+		});
+	});
+
+	describe('similarity', function () {
+		it('should normalize the distance by the longest length', function () {
+			expect(helpers.similarity('kitten', 'sitting')).toBeCloseTo(1 - 3 / 7);
+			expect(helpers.similarity('abcd', 'abce')).toBe(0.75);
+			expect(helpers.similarity('abc', 'xyz')).toBe(0);
+			expect(helpers.similarity('abc', '')).toBe(0);
+		});
+
+		it('should return 1 for equal strings, including two empty strings', function () {
+			expect(helpers.similarity('', '')).toBe(1);
+			expect(helpers.similarity('same', 'same')).toBe(1);
+		});
+
+		it('should count code points', function () {
+			expect(helpers.similarity('😀😀', '😀😃')).toBe(0.5);
+		});
+	});
+
+	describe('dedent', function () {
+		it('should remove the common indentation and the surrounding blank lines', function () {
+			expect(helpers.dedent('\n    a\n      b\n    c\n')).toBe('a\n  b\nc');
+			expect(helpers.dedent('  a\n    b')).toBe('a\n  b');
+			expect(helpers.dedent('no indentation\n  here')).toBe('no indentation\n  here');
+		});
+
+		it('should only drop one leading and one trailing blank line', function () {
+			expect(helpers.dedent('\n\n  a\n\n')).toBe('\na\n');
+			expect(helpers.dedent('  \n  a\n  ')).toBe('a');
+		});
+
+		it('should ignore blank lines when computing the indentation and empty them', function () {
+			expect(helpers.dedent('  a\n\n    b')).toBe('a\n\n  b');
+			expect(helpers.dedent('  a\n      \n  b')).toBe('a\n\nb');
+			expect(helpers.dedent('  a\n \n  b')).toBe('a\n\nb');
+		});
+
+		it('should handle empty and blank input', function () {
+			expect(helpers.dedent('')).toBe('');
+			expect(helpers.dedent('\n')).toBe('');
+			expect(helpers.dedent('   ')).toBe('');
+			expect(helpers.dedent('  \n  ')).toBe('');
+			expect(helpers.dedent(' \n \n ')).toBe('');
+		});
+
+		it('should keep \\r\\n and \\r separators', function () {
+			expect(helpers.dedent('\r\n  a\r\n    b\r\n')).toBe('a\r\n  b');
+			expect(helpers.dedent('  a\r  b')).toBe('a\rb');
+		});
+
+		it('should only remove the longest common prefix of mixed tabs and spaces', function () {
+			expect(helpers.dedent('\t\ta\n\t b')).toBe('\ta\n b');
+			expect(helpers.dedent('\ta\n b')).toBe('\ta\n b');
+		});
+
+		it('should work as a template tag without re-indenting interpolated values', function () {
+			const name = 'Ada\n  Lovelace';
+			const result = helpers.dedent`
+				Hello ${name},
+				  welcome ${42}!
+			`;
+			expect(result).toBe('Hello Ada\n  Lovelace,\n  welcome 42!');
+		});
+
+		it('should treat a line holding an interpolation as non-blank and stop its indentation there', function () {
+			expect(helpers.dedent`
+				a
+				${''}
+			`).toBe('a\n');
+			expect(helpers.dedent`\n    a\n  ${'x'}b\n`).toBe('  a\nxb');
+			expect(helpers.dedent`${'x'}
+				y`).toBe('x\n\t\t\t\ty');
+			expect(helpers.dedent`  ${1}  ${2}`).toBe('1  2');
+		});
+
+		it('should resolve escape sequences in the literal text before dedenting', function () {
+			expect(helpers.dedent`\n  a\n    b\n`).toBe('a\n  b');
+			expect(helpers.dedent`\x20\x20a`).toBe('a');
+		});
+
+		it('should fall back to the raw text for invalid escapes', function () {
+			const strings = Object.assign([undefined, 'b'], { raw: ['  \\unicode\n  ', 'b'] }) as any;
+			expect(helpers.dedent(strings, 'x')).toBe('\\unicode\nxb');
+		});
+
+		it('should stringify values with String()', function () {
+			expect(helpers.dedent`${null} ${undefined} ${[1, 2]} ${10n}`).toBe('null undefined 1,2 10');
+		});
+
+		it('should throw a TypeError for other inputs', function () {
+			expect(function () {
+				helpers.dedent(42 as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('splitLines', function () {
+		it('should split on every newline flavour', function () {
+			expect(helpers.splitLines('a\r\nb\rc\nd')).toEqual(['a', 'b', 'c', 'd']);
+			expect(helpers.splitLines('a\n\r\nb')).toEqual(['a', '', 'b']);
+			expect(helpers.splitLines('a\r\rb')).toEqual(['a', '', 'b']);
+		});
+
+		it('should keep empty leading and trailing lines', function () {
+			expect(helpers.splitLines('')).toEqual(['']);
+			expect(helpers.splitLines('a\n')).toEqual(['a', '']);
+			expect(helpers.splitLines('\na')).toEqual(['', 'a']);
+		});
+	});
+
+	describe('wordWrap', function () {
+		it('should wrap greedily on whitespace', function () {
+			expect(helpers.wordWrap('The quick brown fox jumps', 10)).toBe('The quick\nbrown fox\njumps');
+			expect(helpers.wordWrap('aaa bbb ccc', 7)).toBe('aaa bbb\nccc');
+			expect(helpers.wordWrap('a b c', 1)).toBe('a\nb\nc');
+		});
+
+		it('should collapse whitespace runs and keep existing line breaks', function () {
+			expect(helpers.wordWrap('  a   b\t c  ', 80)).toBe('a b c');
+			expect(helpers.wordWrap('a\n\n  b  c ', 80)).toBe('a\n\nb c');
+			expect(helpers.wordWrap('a b\r\nc d', 3)).toBe('a b\nc d');
+			expect(helpers.wordWrap('', 5)).toBe('');
+		});
+
+		it('should keep long words whole by default', function () {
+			expect(helpers.wordWrap('ab abcdefgh cd', 4)).toBe('ab\nabcdefgh\ncd');
+		});
+
+		it('should break long words when asked', function () {
+			expect(helpers.wordWrap('abcdefghij xy', 4, { breakLongWords: true })).toBe('abcd\nefgh\nij\nxy');
+			expect(helpers.wordWrap('abcdefgh', 4, { breakLongWords: true })).toBe('abcd\nefgh');
+			expect(helpers.wordWrap('ab abcdefghi c', 4, { breakLongWords: true })).toBe('ab\nabcd\nefgh\ni c');
+		});
+
+		it('should use the custom newline', function () {
+			expect(helpers.wordWrap('a b c', 3, { newline: '<br>' })).toBe('a b<br>c');
+			expect(helpers.wordWrap('a\nb', 3, { newline: '\r\n' })).toBe('a\r\nb');
+		});
+
+		it('should measure graphemes', function () {
+			expect(helpers.wordWrap('👍🏽👍🏽 👍🏽', 3)).toBe('👍🏽👍🏽\n👍🏽');
+			expect(helpers.wordWrap('👍🏽👍🏽👍🏽', 2, { breakLongWords: true })).toBe('👍🏽👍🏽\n👍🏽');
+		});
+
+		it('should accept Infinity as a width', function () {
+			expect(helpers.wordWrap(' a  b ', Infinity, { breakLongWords: true })).toBe('a b');
+		});
+
+		it('should throw a RangeError for invalid widths', function () {
+			for (const width of [0, -1, 1.5, NaN, -Infinity]) {
+				expect(function () {
+					helpers.wordWrap('a', width);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('mask', function () {
+		it('should keep the last 4 characters visible by default', function () {
+			expect(helpers.mask('4111111111111111')).toBe('************1111');
+			expect(helpers.mask('12345')).toBe('*2345');
+		});
+
+		it('should support visibleStart, visibleEnd and char', function () {
+			expect(helpers.mask('john.doe@mail.com', { visibleStart: 2, visibleEnd: 9, char: '•' })).toBe('jo••••••@mail.com');
+			expect(helpers.mask('secret', { visibleEnd: 0 })).toBe('******');
+			expect(helpers.mask('secret', { visibleStart: 1, visibleEnd: 1, char: '#' })).toBe('s####t');
+			expect(helpers.mask('abc', { visibleEnd: 0, char: '👍🏽' })).toBe('👍🏽👍🏽👍🏽');
+		});
+
+		it('should return the string unchanged when nothing is left to hide', function () {
+			expect(helpers.mask('1234')).toBe('1234');
+			expect(helpers.mask('abc')).toBe('abc');
+			expect(helpers.mask('')).toBe('');
+			expect(helpers.mask('abcd', { visibleStart: 2, visibleEnd: 2 })).toBe('abcd');
+		});
+
+		it('should be grapheme-aware', function () {
+			expect(helpers.mask('👍🏽👍🏽👍🏽👍🏽👍🏽', { visibleEnd: 1 })).toBe('****👍🏽');
+			expect(helpers.mask('e\u0301e\u0301e\u0301', { visibleStart: 1, visibleEnd: 0 })).toBe('e\u0301**');
+		});
+
+		it('should throw a RangeError for invalid options', function () {
+			const invalid: helpers.MaskOptions[] = [{ visibleStart: -1 }, { visibleStart: 1.5 }, { visibleEnd: -1 }, { visibleEnd: NaN }, { char: '' }, { char: '**' }];
+			for (const options of invalid) {
+				expect(function () {
+					helpers.mask('abcdef', options);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('randomString', function () {
+		it('should generate strings of the requested length from the default alphanumeric alphabet', function () {
+			const value = helpers.randomString(32);
+			expect(value).toHaveLength(32);
+			expect(value).toMatch(/^[A-Za-z0-9]{32}$/);
+			expect(helpers.randomString(0)).toBe('');
+		});
+
+		it('should map random() uniformly onto the alphabet', function () {
+			const values = [0, 0.25, 0.5, 0.75, 0.999];
+			let index = 0;
+			function random(): number {
+				return values[index++];
+			}
+			expect(helpers.randomString(5, 'abcd', random)).toBe('abcdd');
+			expect(
+				helpers.randomString(3, 'ab', function () {
+					return 0;
+				})
+			).toBe('aaa');
+		});
+
+		it('should ignore duplicate characters and split by code points', function () {
+			expect(
+				helpers.randomString(2, 'aab', function () {
+					return 0.6;
+				})
+			).toBe('bb');
+			expect(
+				helpers.randomString(2, '😀😃', function () {
+					return 0.9;
+				})
+			).toBe('😃😃');
+		});
+
+		it('should throw a RangeError for invalid arguments', function () {
+			for (const length of [-1, 1.5, NaN, Infinity]) {
+				expect(function () {
+					helpers.randomString(length);
+				}).toThrow(RangeError);
+			}
+			expect(function () {
+				helpers.randomString(3, '');
+			}).toThrow(RangeError);
+			for (const bad of [1, -0.1, NaN]) {
+				expect(function () {
+					helpers.randomString(3, 'ab', function () {
+						return bad;
+					});
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('toSentenceCase', function () {
+		it('should convert identifiers and text to sentence case', function () {
+			expect(helpers.toSentenceCase('helloWorld-foo')).toBe('Hello world foo');
+			expect(helpers.toSentenceCase('SOME_CONSTANT_NAME')).toBe('Some constant name');
+			expect(helpers.toSentenceCase('XMLHttpRequest')).toBe('Xml http request');
+			expect(helpers.toSentenceCase('  the QUICK  brown fox. ')).toBe('The quick brown fox');
+		});
+
+		it('should handle unicode and empty input', function () {
+			expect(helpers.toSentenceCase('élanVital')).toBe('Élan vital');
+			expect(helpers.toSentenceCase('ßa')).toBe('Ssa');
+			expect(helpers.toSentenceCase('')).toBe('');
+			expect(helpers.toSentenceCase('--- !!')).toBe('');
+		});
+	});
+
+	describe('pluralize / formatCount', function () {
+		it('should pick the singular only for 1 and -1', function () {
+			expect(helpers.pluralize(1, 'item')).toBe('item');
+			expect(helpers.pluralize(-1, 'item')).toBe('item');
+			expect(helpers.pluralize(0, 'item')).toBe('items');
+			expect(helpers.pluralize(2, 'item')).toBe('items');
+			expect(helpers.pluralize(1.5, 'item')).toBe('items');
+			expect(helpers.pluralize(NaN, 'item')).toBe('items');
+		});
+
+		it('should support irregular plurals', function () {
+			expect(helpers.pluralize(2, 'child', 'children')).toBe('children');
+			expect(helpers.pluralize(1, 'child', 'children')).toBe('child');
+		});
+
+		it('should format the count with the word', function () {
+			expect(helpers.formatCount(3, 'item')).toBe('3 items');
+			expect(helpers.formatCount(1, 'item')).toBe('1 item');
+			expect(helpers.formatCount(0, 'person', 'people')).toBe('0 people');
+			expect(helpers.formatCount(2.5, 'liter')).toBe('2.5 liters');
+		});
+	});
+
+	describe('ensurePrefix / ensureSuffix / stripPrefix / stripSuffix', function () {
+		it('should add a missing prefix or suffix only once', function () {
+			expect(helpers.ensurePrefix('example.com', 'https://')).toBe('https://example.com');
+			expect(helpers.ensurePrefix('https://example.com', 'https://')).toBe('https://example.com');
+			expect(helpers.ensureSuffix('path/to', '/')).toBe('path/to/');
+			expect(helpers.ensureSuffix('path/to/', '/')).toBe('path/to/');
+			expect(helpers.ensurePrefix('a', '')).toBe('a');
+			expect(helpers.ensureSuffix('', 'x')).toBe('x');
+		});
+
+		it('should strip a prefix or suffix once', function () {
+			expect(helpers.stripPrefix('https://example.com', 'https://')).toBe('example.com');
+			expect(helpers.stripPrefix('//a', '/')).toBe('/a');
+			expect(helpers.stripPrefix('abc', 'x')).toBe('abc');
+			expect(helpers.stripSuffix('report.pdf', '.pdf')).toBe('report');
+			expect(helpers.stripSuffix('a//', '/')).toBe('a/');
+			expect(helpers.stripSuffix('abc', 'x')).toBe('abc');
+			expect(helpers.stripPrefix('abc', '')).toBe('abc');
+			expect(helpers.stripSuffix('abc', '')).toBe('abc');
 		});
 	});
 });

@@ -416,4 +416,328 @@ describe('String helpers (properties)', function () {
 			);
 		});
 	});
+
+	describe('substring', function () {
+		it('equals the native method whenever it does not swap the indices, and is empty otherwise', function () {
+			const index = fc.oneof(fc.integer({ min: -5, max: 15 }), fc.constantFrom(NaN, Infinity, -Infinity), fc.double({ min: -5, max: 15, noNaN: true }));
+			/** Mirrors the native index normalization. */
+			function normalize(value: number, length: number): number {
+				return Number.isNaN(value) ? 0 : Math.min(Math.max(Math.trunc(value), 0), length);
+			}
+			fc.assert(
+				fc.property(fc.string({ maxLength: 10 }), index, index, function (s, start, end) {
+					const from = normalize(start, s.length);
+					const to = normalize(end, s.length);
+					expect(helpers.substring(s, start, end)).toBe(from <= to ? s.substring(start, end) : '');
+				})
+			);
+		});
+	});
+
+	describe('levenshtein / similarity', function () {
+		const smallString = fc.string({ unit: fc.constantFrom('a', 'b', 'c', '😀'), maxLength: 8 });
+
+		/** Naive full-matrix reference implementation over code points. */
+		function reference(a: string, b: string): number {
+			const x = Array.from(a);
+			const y = Array.from(b);
+			const table: number[][] = [];
+			for (let i = 0; i <= x.length; i++) {
+				table.push([]);
+				for (let j = 0; j <= y.length; j++) {
+					if (i === 0 || j === 0) table[i].push(i + j);
+					else table[i].push(Math.min(table[i - 1][j] + 1, table[i][j - 1] + 1, table[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)));
+				}
+			}
+			return table[x.length][y.length];
+		}
+
+		it('matches the naive dynamic-programming reference', function () {
+			fc.assert(
+				fc.property(smallString, smallString, function (a, b) {
+					expect(helpers.levenshtein(a, b)).toBe(reference(a, b));
+				})
+			);
+		});
+
+		it('satisfies the metric axioms and the length bounds', function () {
+			fc.assert(
+				fc.property(smallString, smallString, smallString, function (a, b, c) {
+					const ab = helpers.levenshtein(a, b);
+					const lengthA = Array.from(a).length;
+					const lengthB = Array.from(b).length;
+					expect(helpers.levenshtein(a, a)).toBe(0);
+					expect(ab === 0).toBe(a === b);
+					expect(helpers.levenshtein(b, a)).toBe(ab);
+					expect(ab).toBeLessThanOrEqual(helpers.levenshtein(a, c) + helpers.levenshtein(c, b));
+					expect(ab).toBeLessThanOrEqual(Math.max(lengthA, lengthB));
+					expect(ab).toBeGreaterThanOrEqual(Math.abs(lengthA - lengthB));
+				})
+			);
+		});
+
+		it('similarity lies in [0, 1] and is 1 iff the strings are equal', function () {
+			fc.assert(
+				fc.property(fc.oneof(smallString, fc.string()), fc.oneof(smallString, fc.string()), function (a, b) {
+					const score = helpers.similarity(a, b);
+					expect(score).toBeGreaterThanOrEqual(0);
+					expect(score).toBeLessThanOrEqual(1);
+					expect(score === 1).toBe(a === b);
+					expect(helpers.similarity(b, a)).toBe(score);
+				})
+			);
+		});
+	});
+
+	describe('dedent', function () {
+		const whitespaceLine = fc.string({ unit: fc.constantFrom(' ', '\t', 'a', 'b', ' '), maxLength: 8 });
+		const text = fc.array(whitespaceLine, { maxLength: 8 }).map(function (lines) {
+			return lines.join('\n');
+		});
+
+		it('is idempotent once the dropped blank edge lines are accounted for', function () {
+			fc.assert(
+				fc.property(text, function (s) {
+					const once = helpers.dedent(s);
+					expect(helpers.dedent('\n' + once + '\n')).toBe(once);
+				})
+			);
+		});
+
+		it('only removes leading whitespace: every output line is a suffix of its input line', function () {
+			fc.assert(
+				fc.property(text, function (s) {
+					const input = helpers.splitLines(s);
+					const output = helpers.splitLines(helpers.dedent(s));
+					const offset = /^[ \t]*$/.test(input[0]) ? 1 : 0;
+					if (helpers.dedent(s) === '') return;
+					expect(output.length).toBeLessThanOrEqual(input.length - offset);
+					output.forEach(function (line, index) {
+						expect(line.length).toBeLessThanOrEqual(input[index + offset].length);
+						expect(input[index + offset].endsWith(line)).toBe(true);
+					});
+					const indents = output
+						.filter(function (line) {
+							return line.trim() !== '';
+						})
+						.map(function (line) {
+							return /^[ \t]*/.exec(line)![0];
+						});
+					// No common indentation is left.
+					const common = indents.reduce(function (prefix, indent) {
+						let length = 0;
+						while (length < prefix.length && prefix[length] === indent[length]) length++;
+						return prefix.slice(0, length);
+					}, indents[0] ?? '');
+					expect(common).toBe('');
+				})
+			);
+		});
+
+		it('undoes a uniform indentation', function () {
+			const line = fc.tuple(fc.nat(3), fc.stringMatching(/^[a-z]{1,5}$/)).map(function ([spaces, word]) {
+				return ' '.repeat(spaces) + word;
+			});
+			fc.assert(
+				fc.property(
+					fc.array(fc.oneof(line, fc.constant('')), { maxLength: 6 }),
+					fc.stringMatching(/^[a-z]{1,5}$/),
+					fc.stringMatching(/^[ \t]{0,4}$/),
+					function (middle, head, prefix) {
+						const block = [head, ...middle, head];
+						const indented = block
+							.map(function (value) {
+								return value === '' ? '' : prefix + value;
+							})
+							.join('\n');
+						expect(helpers.dedent(indented)).toBe(block.join('\n'));
+						expect(helpers.dedent('\n' + indented + '\n')).toBe(block.join('\n'));
+					}
+				)
+			);
+		});
+
+		it('as a tag, equals dedenting the literal text with inline values when they cannot affect indentation', function () {
+			fc.assert(
+				fc.property(
+					fc.array(fc.tuple(fc.stringMatching(/^ {0,4}[a-z]{1,3}\n? {0,4}[a-z]{1,3}$/), fc.stringMatching(/^[A-Z]{1,3}$/)), { maxLength: 4 }),
+					fc.stringMatching(/^[a-z]{1,3}$/),
+					function (pieces, tail) {
+						const literals = pieces.map(function ([literal]) {
+							return literal;
+						});
+						const values = pieces.map(function ([, value]) {
+							return value;
+						});
+						const strings = Object.assign([...literals, tail], { raw: [...literals, tail] }) as unknown as TemplateStringsArray;
+						const inline = literals
+							.map(function (literal, index) {
+								return literal + values[index];
+							})
+							.join('');
+						expect(helpers.dedent(strings, ...values)).toBe(helpers.dedent(inline + tail));
+					}
+				)
+			);
+		});
+	});
+
+	describe('splitLines', function () {
+		it('joining with \\n gives the input with normalized newlines', function () {
+			fc.assert(
+				fc.property(fc.string({ unit: fc.constantFrom('a', 'b', '\n', '\r', '\r\n', ' ') }), function (s) {
+					const lines = helpers.splitLines(s);
+					expect(lines.join('\n')).toBe(s.replace(/\r\n|\r/g, '\n'));
+					lines.forEach(function (line) {
+						expect(line).not.toMatch(/[\r\n]/);
+					});
+				})
+			);
+		});
+	});
+
+	describe('wordWrap', function () {
+		const words = fc.string({ unit: fc.constantFrom('a', 'b', 'é', '👍🏽', ' ', '  ', '\t', '\n', '\r\n') });
+
+		it('keeps the words in order (whitespace aside)', function () {
+			fc.assert(
+				fc.property(words, fc.integer({ min: 1, max: 12 }), function (s, width) {
+					const wrapped = helpers.wordWrap(s, width);
+					expect(helpers.normalizeWhitespace(wrapped.split('\n').join(' '))).toBe(helpers.normalizeWhitespace(s));
+					// Overlong lines only happen for a single long word.
+					wrapped.split('\n').forEach(function (line) {
+						if (graphemes(line).length > width) expect(line).not.toMatch(/\s/);
+					});
+				})
+			);
+		});
+
+		it('never exceeds the width when breaking long words and loses no character', function () {
+			fc.assert(
+				fc.property(words, fc.integer({ min: 1, max: 12 }), function (s, width) {
+					const wrapped = helpers.wordWrap(s, width, { breakLongWords: true });
+					wrapped.split('\n').forEach(function (line) {
+						expect(graphemes(line).length).toBeLessThanOrEqual(width);
+						expect(line).toBe(line.trim());
+					});
+					expect(wrapped.replace(/\s+/g, '')).toBe(s.replace(/\s+/g, ''));
+				})
+			);
+		});
+
+		it('keeps the same number of hard line breaks with an infinite width', function () {
+			fc.assert(
+				fc.property(words, function (s) {
+					const wrapped = helpers.wordWrap(s, Infinity);
+					expect(helpers.splitLines(wrapped)).toHaveLength(helpers.splitLines(s).length);
+				})
+			);
+		});
+	});
+
+	describe('mask', function () {
+		const maskable = fc.string({ unit: fc.constantFrom('a', '1', ' ', 'é', 'é', '👍🏽', '🇫🇷', '-') });
+
+		it('preserves the grapheme length and the visible parts', function () {
+			fc.assert(
+				fc.property(maskable, fc.nat(5), fc.nat(5), fc.constantFrom('*', '•', '#'), function (s, visibleStart, visibleEnd, char) {
+					const masked = helpers.mask(s, { visibleStart, visibleEnd, char });
+					const input = graphemes(s);
+					const output = graphemes(masked);
+					expect(output).toHaveLength(input.length);
+					if (input.length <= visibleStart + visibleEnd) {
+						expect(masked).toBe(s);
+						return;
+					}
+					expect(output.slice(0, visibleStart)).toEqual(input.slice(0, visibleStart));
+					expect(output.slice(input.length - visibleEnd)).toEqual(input.slice(input.length - visibleEnd));
+					expect(output.slice(visibleStart, input.length - visibleEnd).join('')).toBe(char.repeat(input.length - visibleStart - visibleEnd));
+				})
+			);
+		});
+	});
+
+	describe('randomString', function () {
+		it('has the requested length and only uses alphabet characters, picked as floor(r * n)', function () {
+			fc.assert(
+				fc.property(
+					fc.nat(20),
+					fc.string({ unit: fc.constantFrom('a', 'b', 'c', '😀', 'Z'), minLength: 1 }),
+					fc.array(fc.double({ min: 0, max: 1, maxExcluded: true, noNaN: true }), { minLength: 1 }),
+					function (length, alphabet, draws) {
+						const characters = Array.from(new Set(alphabet));
+						let index = 0;
+						function random(): number {
+							return draws[index++ % draws.length];
+						}
+						const result = Array.from(helpers.randomString(length, alphabet, random));
+						expect(result).toHaveLength(length);
+						result.forEach(function (char, position) {
+							expect(characters).toContain(char);
+							expect(char).toBe(characters[Math.floor(draws[position % draws.length] * characters.length)]);
+						});
+					}
+				)
+			);
+		});
+	});
+
+	describe('toSentenceCase', function () {
+		it('has the same words as snake case and is idempotent', function () {
+			fc.assert(
+				fc.property(separatedWords, function (s) {
+					const sentence = helpers.toSentenceCase(s);
+					expect(sentence.toLowerCase()).toBe(helpers.toSnakeCase(s).split('_').join(' '));
+					expect(helpers.toSentenceCase(sentence)).toBe(sentence);
+					expect(sentence[0]).toBe(sentence[0].toUpperCase());
+				})
+			);
+		});
+	});
+
+	describe('pluralize / formatCount', function () {
+		it('uses the singular iff |count| is 1, and formatCount prefixes the count', function () {
+			fc.assert(
+				fc.property(fc.oneof(fc.integer({ min: -3, max: 3 }), fc.double()), fc.stringMatching(/^[a-z]{1,6}$/), function (count, word) {
+					expect(helpers.pluralize(count, word) === word).toBe(Math.abs(count) === 1);
+					expect(helpers.pluralize(count, word, 'X')).toBe(Math.abs(count) === 1 ? word : 'X');
+					expect(helpers.formatCount(count, word)).toBe(`${String(count)} ${helpers.pluralize(count, word)}`);
+				})
+			);
+		});
+	});
+
+	describe('ensurePrefix / ensureSuffix / stripPrefix / stripSuffix', function () {
+		const piece = fc.string({ unit: fc.constantFrom('a', 'b', '/'), maxLength: 4 });
+
+		it('ensure* is idempotent and guarantees the affix', function () {
+			fc.assert(
+				fc.property(piece, piece, function (s, affix) {
+					const prefixed = helpers.ensurePrefix(s, affix);
+					const suffixed = helpers.ensureSuffix(s, affix);
+					expect(prefixed.startsWith(affix)).toBe(true);
+					expect(suffixed.endsWith(affix)).toBe(true);
+					expect(helpers.ensurePrefix(prefixed, affix)).toBe(prefixed);
+					expect(helpers.ensureSuffix(suffixed, affix)).toBe(suffixed);
+					expect(prefixed === s).toBe(s.startsWith(affix));
+					expect(suffixed === s).toBe(s.endsWith(affix));
+				})
+			);
+		});
+
+		it('strip* undoes a concatenation and round-trips with ensure*', function () {
+			fc.assert(
+				fc.property(piece, piece, function (s, affix) {
+					expect(helpers.stripPrefix(affix + s, affix)).toBe(s);
+					expect(helpers.stripSuffix(s + affix, affix)).toBe(s);
+					if (s.startsWith(affix)) expect(affix + helpers.stripPrefix(s, affix)).toBe(s);
+					else expect(helpers.stripPrefix(s, affix)).toBe(s);
+					if (s.endsWith(affix)) expect(helpers.stripSuffix(s, affix) + affix).toBe(s);
+					else expect(helpers.stripSuffix(s, affix)).toBe(s);
+					expect(helpers.stripPrefix(helpers.ensurePrefix(s, affix), affix)).toBe(s.startsWith(affix) ? helpers.stripPrefix(s, affix) : s);
+					expect(helpers.stripSuffix(helpers.ensureSuffix(s, affix), affix)).toBe(s.endsWith(affix) ? helpers.stripSuffix(s, affix) : s);
+				})
+			);
+		});
+	});
 });

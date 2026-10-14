@@ -1,3 +1,5 @@
+import type { RandomGenerator } from '../utils/index.js';
+
 /**
  * Options accepted by {@link countSubString}.
  */
@@ -75,12 +77,35 @@ function firstGrapheme(string: string): string {
 }
 
 /**
- * Upper-cases a single letter for use at the start of a word. When the upper-case mapping expands to several code points
- * (`'ß'` → `'SS'`, `'ﬁ'` → `'FI'`) only the first one stays upper-case (`'Ss'`, `'Fi'`), approximating Unicode title case.
+ * Latin digraphs, whose Unicode title-case form is a dedicated letter (`ǆ` → `ǅ`) rather than their upper-case form (`Ǆ`).
+ */
+const TITLE_CASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
+	['Ǆ', 'ǅ'],
+	['ǅ', 'ǅ'],
+	['ǆ', 'ǅ'],
+	['Ǉ', 'ǈ'],
+	['ǈ', 'ǈ'],
+	['ǉ', 'ǈ'],
+	['Ǌ', 'ǋ'],
+	['ǋ', 'ǋ'],
+	['ǌ', 'ǋ'],
+	['Ǳ', 'ǲ'],
+	['ǲ', 'ǲ'],
+	['ǳ', 'ǲ']
+]);
+
+/**
+ * Title-cases a single letter (one code point) for use at the start of a word. Digraphs use their dedicated title-case letter (`'ǆ'` → `'ǅ'`).
+ * When the upper-case mapping expands to several code points (`'ß'` → `'SS'`, `'ﬁ'` → `'FI'`) only the first one stays upper-case
+ * (`'Ss'`, `'Fi'`), approximating Unicode title case.
  * @param {string} letter - The letter to convert
  * @returns {string} The title-cased letter
  */
 function titleCaseLetter(letter: string): string {
+	const exception = TITLE_CASE_EXCEPTIONS.get(letter);
+
+	if (exception !== undefined) return exception;
+
 	const upper = letter.toUpperCase();
 	const head = String.fromCodePoint(upper.codePointAt(0) as number);
 
@@ -169,8 +194,21 @@ export function uncapitalize(string: string): string {
 }
 
 /**
+ * Converts an index to an integer in `[0, length]`, like `String.prototype.substring` does: `NaN` → `0`, fractions truncated, out-of-range values clamped.
+ * @param {number} index - The index to normalize
+ * @param {number} length - The length of the string
+ * @returns {number} The normalized index
+ */
+function clampIndex(index: number, length: number): number {
+	if (Number.isNaN(index)) return 0;
+
+	return Math.min(Math.max(Math.trunc(index), 0), length);
+}
+
+/**
  * Extracts a substring from a string based on start and end indices (UTF-16 code units, like `String.prototype.substring`).
- * Unlike the native method, the indices are not swapped: when `start > end` an empty string is returned.
+ * Indices are normalized like the native method (`NaN` → `0`, fractions truncated, clamped to `[0, string.length]`), but they are never swapped:
+ * when the normalized `start` is not before the normalized `end`, an empty string is returned.
  * @param {string} string - The original string
  * @param {number} start - The start index of the substring
  * @param {number} end - The end index of the substring (exclusive)
@@ -180,9 +218,10 @@ export function uncapitalize(string: string): string {
  * substring('Hello, World!', 12, 7); // ''
  */
 export function substring(string: string, start: number, end: number): string {
-	if (start > end) return '';
+	const from = clampIndex(start, string.length);
+	const to = clampIndex(end, string.length);
 
-	return string.substring(start, end);
+	return from < to ? string.slice(from, to) : '';
 }
 
 /**
@@ -643,4 +682,531 @@ export function interpolate(template: string, values: InterpolationValues): stri
 
 		return value === undefined ? placeholder : String(value);
 	});
+}
+
+/**
+ * Returns the number of user-perceived characters (grapheme clusters, or code points without `Intl.Segmenter`) of a string.
+ * @param {string} string - The string to measure
+ * @returns {number} The grapheme count
+ */
+function graphemeLength(string: string): number {
+	let count = 0;
+
+	for (const _grapheme of iterateGraphemes(string)) count++;
+
+	return count;
+}
+
+/**
+ * Computes the Levenshtein edit distance between two strings: the minimum number of single-character insertions, deletions and substitutions
+ * turning `a` into `b`. Characters are Unicode code points, so an astral character (emoji, surrogate pair) counts as one.
+ * The common prefix and suffix are skipped and the dynamic-programming table keeps a single row sized after the shorter string,
+ * so the extra memory is O(min(n, m)) and the time O(n × m).
+ * @param {string} a - The first string
+ * @param {string} b - The second string
+ * @returns {number} The edit distance (a non-negative integer, `0` iff the strings are equal)
+ * @example
+ * levenshtein('kitten', 'sitting'); // 3
+ * levenshtein('', 'abc'); // 3
+ * levenshtein('😀a', '😃a'); // 1
+ */
+export function levenshtein(a: string, b: string): number {
+	if (a === b) return 0;
+
+	let shorter = Array.from(a);
+	let longer = Array.from(b);
+
+	if (shorter.length > longer.length) [shorter, longer] = [longer, shorter];
+
+	// Skip the common prefix and suffix: they never contribute to the distance.
+	let start = 0;
+	let shorterEnd = shorter.length;
+	let longerEnd = longer.length;
+
+	while (start < shorterEnd && shorter[start] === longer[start]) start++;
+
+	while (shorterEnd > start && shorter[shorterEnd - 1] === longer[longerEnd - 1]) {
+		shorterEnd--;
+		longerEnd--;
+	}
+
+	const rowLength = shorterEnd - start;
+
+	if (rowLength === 0) return longerEnd - start;
+
+	const row = new Uint32Array(rowLength + 1);
+
+	for (let i = 0; i <= rowLength; i++) row[i] = i;
+
+	for (let j = 1; j <= longerEnd - start; j++) {
+		const character = longer[start + j - 1];
+		let diagonal = row[0];
+
+		row[0] = j;
+
+		for (let i = 1; i <= rowLength; i++) {
+			const above = row[i];
+			const substitution = diagonal + (shorter[start + i - 1] === character ? 0 : 1);
+
+			row[i] = Math.min(above + 1, row[i - 1] + 1, substitution);
+			diagonal = above;
+		}
+	}
+
+	return row[rowLength];
+}
+
+/**
+ * Computes a normalized similarity score from the {@link levenshtein} distance: `1 - distance / maxLength`, where lengths are counted in code points.
+ * Two empty strings are considered identical (`1`).
+ * @param {string} a - The first string
+ * @param {string} b - The second string
+ * @returns {number} A score in `[0, 1]`: `1` iff the strings are equal, `0` when every character must be changed
+ * @example
+ * similarity('kitten', 'sitting'); // 0.5714285714285714 (1 - 3 / 7)
+ * similarity('abc', 'abc'); // 1
+ * similarity('', ''); // 1
+ * similarity('abc', 'xyz'); // 0
+ */
+export function similarity(a: string, b: string): number {
+	const maxLength = Math.max(Array.from(a).length, Array.from(b).length);
+
+	return maxLength === 0 ? 1 : 1 - levenshtein(a, b) / maxLength;
+}
+
+/**
+ * Removes the common indentation from template literal parts. Interpolation points (between two parts) count as non-blank content
+ * and end a line's indentation, but are never modified themselves.
+ * @param {ReadonlyArray<string>} parts - The literal parts (one more than the interpolated values)
+ * @returns {string[]} The dedented parts, in the same order
+ */
+function dedentParts(parts: ReadonlyArray<string>): string[] {
+	const joined = parts.join('');
+	const valueOffsets: number[] = [];
+	let offset = 0;
+
+	for (let index = 0; index < parts.length - 1; index++) {
+		offset += parts[index].length;
+		valueOffsets.push(offset);
+	}
+
+	const valueAt = new Set(valueOffsets);
+	const lines: Array<{ start: number; end: number; next: number; indentation: string; blank: boolean }> = [];
+	const separator = /\r\n|\r|\n/g;
+	let start = 0;
+	let valueIndex = 0;
+
+	for (;;) {
+		const match = separator.exec(joined);
+		const end = match === null ? joined.length : match.index;
+		const next = match === null ? joined.length : match.index + match[0].length;
+		let indentationEnd = start;
+		let hasValue = false;
+
+		while (indentationEnd < end && (joined[indentationEnd] === ' ' || joined[indentationEnd] === '\t') && !valueAt.has(indentationEnd)) indentationEnd++;
+
+		// A value belongs to this line when it is inserted before the next line starts (or anywhere after the start of the last line).
+		while (valueIndex < valueOffsets.length && (match === null || valueOffsets[valueIndex] < next)) {
+			hasValue = true;
+			valueIndex++;
+		}
+
+		lines.push({ start, end, next, indentation: joined.slice(start, indentationEnd), blank: !hasValue && indentationEnd === end });
+
+		if (match === null) break;
+
+		start = next;
+	}
+
+	const removed = new Uint8Array(joined.length);
+	const first = 0;
+	const last = lines.length - 1;
+	const dropFirst = lines[first].blank;
+	const dropLast = last > first && lines[last].blank;
+
+	/**
+	 * Marks the code units in `[from, to)` as removed.
+	 * @param {number} from - First removed index
+	 * @param {number} to - End of the removed range (exclusive)
+	 * @returns {void}
+	 */
+	function remove(from: number, to: number): void {
+		removed.fill(1, from, to);
+	}
+
+	if (dropFirst) remove(lines[first].start, lines[first].next);
+
+	if (dropLast) remove(lines[last - 1].end, lines[last].next);
+
+	const kept = lines.slice(dropFirst ? 1 : 0, dropLast ? last : lines.length);
+	let common: string | undefined;
+
+	for (const line of kept) {
+		if (line.blank) continue;
+
+		if (common === undefined) {
+			common = line.indentation;
+			continue;
+		}
+
+		let length = 0;
+
+		while (length < common.length && length < line.indentation.length && common[length] === line.indentation[length]) length++;
+
+		common = common.slice(0, length);
+	}
+
+	const commonLength = common === undefined ? 0 : common.length;
+
+	for (const line of kept) {
+		if (line.blank) remove(line.start, line.end);
+		else remove(line.start, line.start + commonLength);
+	}
+
+	const result: string[] = [];
+	let base = 0;
+
+	for (const part of parts) {
+		let text = '';
+
+		for (let index = 0; index < part.length; index++) {
+			if (removed[base + index] === 0) text += part[index];
+		}
+
+		result.push(text);
+		base += part.length;
+	}
+
+	return result;
+}
+
+/**
+ * Removes the common leading indentation from a multi-line string, so it can be written indented in the source code.
+ *
+ * Rules:
+ * - Lines are separated by `\n`, `\r\n` or `\r` (separators are kept as they are).
+ * - The first line is dropped when it is blank (empty or only spaces/tabs), and so is the last one; this removes the line breaks that
+ *   follow the opening backtick and precede the closing one.
+ * - The longest common prefix of spaces/tabs of the remaining non-blank lines is removed from each of them (tabs and spaces are not
+ *   converted into each other). Lines that contain only spaces/tabs become empty.
+ *
+ * It can be called as a function or used as a template tag. As a tag, the indentation is computed on the literal text only (cooked,
+ * i.e. escape sequences such as `\n` are already resolved; the raw text is used for an invalid escape) and the interpolated values are
+ * inserted afterwards with `String()`: they are NOT re-indented, so a multi-line value keeps its own line breaks and indentation,
+ * and a line holding an interpolation is never treated as blank.
+ * @param {string} string - The text to dedent
+ * @returns {string} The dedented text
+ * @example
+ * dedent('\n    a\n      b\n    c\n'); // 'a\n  b\nc'
+ */
+export function dedent(string: string): string;
+/**
+ * Template-tag form of {@link dedent}: removes the common indentation of the literal text, then inserts the values (not re-indented).
+ * @param {TemplateStringsArray} strings - The literal parts of the template
+ * @param {...unknown} values - The interpolated values, stringified with `String()`
+ * @returns {string} The dedented text
+ * @example
+ * const name = 'Ada';
+ * dedent`
+ *     Hello ${name},
+ *       welcome!
+ * `; // 'Hello Ada,\n  welcome!'
+ */
+export function dedent(strings: TemplateStringsArray, ...values: unknown[]): string;
+/**
+ * Removes the common leading indentation from a multi-line string; usable as a function or as a template tag (see the overloads).
+ * @param {string | TemplateStringsArray} input - The text, or the literal parts of a template
+ * @param {...unknown} values - The interpolated values when used as a tag
+ * @returns {string} The dedented text
+ * @throws {TypeError} when `input` is neither a string nor a template strings array
+ * @example
+ * dedent('  a\n    b'); // 'a\n  b'
+ */
+export function dedent(input: string | TemplateStringsArray, ...values: unknown[]): string {
+	if (typeof input === 'string') return dedentParts([input])[0];
+
+	if (!Array.isArray(input)) throw new TypeError(`dedent: expected a string or a template strings array, received ${typeof input}`);
+
+	const literals = input.map(function (cooked: string | undefined, index: number): string {
+		return cooked ?? input.raw[index];
+	});
+	const parts = dedentParts(literals);
+	let result = parts[0];
+
+	for (let index = 1; index < parts.length; index++) result += String(values[index - 1]) + parts[index];
+
+	return result;
+}
+
+/**
+ * Splits a string into lines. `\r\n`, `\r` and `\n` are all recognized as line breaks; the separators are not included in the result.
+ * A trailing line break produces a trailing empty line, and an empty string gives `['']`.
+ * @param {string} string - The text to split
+ * @returns {string[]} The lines (at least one)
+ * @example
+ * splitLines('a\r\nb\rc\nd'); // ['a', 'b', 'c', 'd']
+ * splitLines('a\n'); // ['a', '']
+ */
+export function splitLines(string: string): string[] {
+	return string.split(/\r\n|\r|\n/);
+}
+
+/**
+ * Options accepted by {@link wordWrap}.
+ */
+export interface WordWrapOptions {
+	/** Cut words longer than `width` into `width`-sized pieces. When `false`, such words stay whole on their own (overlong) line. Defaults to `false`. */
+	readonly breakLongWords?: boolean;
+	/** The line break inserted between output lines. Defaults to `'\n'`. */
+	readonly newline?: string;
+}
+
+/**
+ * Wraps text to lines of at most `width` user-perceived characters (grapheme clusters) using a greedy algorithm: words are separated
+ * by whitespace and added to the current line while they fit, with a single space between them.
+ *
+ * Existing line breaks (`\n`, `\r\n`, `\r`) are kept as hard breaks (each input line is wrapped on its own, blank lines are preserved),
+ * every output line break is `newline`, and runs of other whitespace (including indentation and trailing spaces) collapse into the
+ * separating single space. A word longer than `width` starts a new line; it is cut into `width`-sized pieces when `breakLongWords` is set
+ * (the last piece can be followed by more words), otherwise it is kept whole.
+ * @param {string} string - The text to wrap
+ * @param {number} width - The maximum line width in graphemes (a positive integer, or `Infinity` to only normalize whitespace)
+ * @param {WordWrapOptions} [options={}] - `breakLongWords` (default `false`) and `newline` (default `'\n'`)
+ * @returns {string} The wrapped text
+ * @throws {RangeError} when `width` is less than 1, `NaN` or a non-integer finite number
+ * @example
+ * wordWrap('The quick brown fox jumps', 10); // 'The quick\nbrown fox\njumps'
+ * wordWrap('abcdefghij xy', 4, { breakLongWords: true }); // 'abcd\nefgh\nij\nxy'
+ * wordWrap('a b c', 3, { newline: '<br>' }); // 'a b<br>c'
+ */
+export function wordWrap(string: string, width: number, options: WordWrapOptions = {}): string {
+	if (!(width >= 1) || (!Number.isInteger(width) && width !== Infinity)) throw new RangeError(`wordWrap: width must be a positive integer, received ${String(width)}`);
+
+	const { breakLongWords = false, newline = '\n' } = options;
+	const output: string[] = [];
+
+	for (const line of splitLines(string)) {
+		let current = '';
+		let currentLength = 0;
+
+		for (const word of line.split(/\s+/)) {
+			if (word === '') continue;
+
+			const wordLength = graphemeLength(word);
+
+			if (wordLength > width && breakLongWords) {
+				if (current !== '') output.push(current);
+
+				const pieces = splitGraphemes(word);
+
+				for (let index = 0; index + width < pieces.length; index += width) output.push(pieces.slice(index, index + width).join(''));
+
+				const lastLength = pieces.length % width || width;
+
+				current = pieces.slice(pieces.length - lastLength).join('');
+				currentLength = lastLength;
+			} else if (current === '') {
+				current = word;
+				currentLength = wordLength;
+			} else if (currentLength + 1 + wordLength <= width) {
+				current += ' ' + word;
+				currentLength += 1 + wordLength;
+			} else {
+				output.push(current);
+				current = word;
+				currentLength = wordLength;
+			}
+		}
+
+		output.push(current);
+	}
+
+	return output.join(newline);
+}
+
+/**
+ * Options accepted by {@link mask}.
+ */
+export interface MaskOptions {
+	/** How many graphemes to leave visible at the start. Defaults to `0`. */
+	readonly visibleStart?: number;
+	/** How many graphemes to leave visible at the end. Defaults to `4`. */
+	readonly visibleEnd?: number;
+	/** The replacement for every hidden grapheme; must be exactly one grapheme. Defaults to `'*'`. */
+	readonly char?: string;
+}
+
+/**
+ * Hides the middle of a string (card numbers, tokens, phone numbers...), replacing every user-perceived character (grapheme cluster)
+ * except the first `visibleStart` and the last `visibleEnd` ones with `char`. The grapheme length is preserved.
+ * When the visible parts cover the whole string (it has at most `visibleStart + visibleEnd` graphemes), nothing is hidden and
+ * the string is returned unchanged — pick the visible counts accordingly for short secrets.
+ * @param {string} string - The string to mask
+ * @param {MaskOptions} [options={}] - `visibleStart` (default `0`), `visibleEnd` (default `4`) and `char` (default `'*'`)
+ * @returns {string} The masked string
+ * @throws {RangeError} when `visibleStart` or `visibleEnd` is not a non-negative integer, or `char` is not exactly one grapheme
+ * @example
+ * mask('4111111111111111'); // '************1111'
+ * mask('john.doe@mail.com', { visibleStart: 2, visibleEnd: 9, char: '•' }); // 'jo••••••@mail.com'
+ * mask('👍🏽👍🏽👍🏽👍🏽👍🏽', { visibleEnd: 1 }); // '****👍🏽'
+ */
+export function mask(string: string, options: MaskOptions = {}): string {
+	const { visibleStart = 0, visibleEnd = 4, char = '*' } = options;
+
+	if (!Number.isInteger(visibleStart) || visibleStart < 0) throw new RangeError(`mask: visibleStart must be a non-negative integer, received ${String(visibleStart)}`);
+
+	if (!Number.isInteger(visibleEnd) || visibleEnd < 0) throw new RangeError(`mask: visibleEnd must be a non-negative integer, received ${String(visibleEnd)}`);
+
+	if (graphemeLength(char) !== 1) throw new RangeError(`mask: char must be exactly one grapheme, received ${JSON.stringify(char)}`);
+
+	const graphemes = splitGraphemes(string);
+	const hidden = graphemes.length - visibleStart - visibleEnd;
+
+	if (hidden <= 0) return string;
+
+	return graphemes.slice(0, visibleStart).join('') + char.repeat(hidden) + graphemes.slice(visibleStart + hidden).join('');
+}
+
+/**
+ * The default alphabet of {@link randomString}: ASCII letters and digits.
+ */
+const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+/**
+ * Generates a random string by drawing `length` characters uniformly and independently from `alphabet`.
+ *
+ * The alphabet is split into Unicode code points and duplicates are ignored, so every distinct character is equally likely;
+ * the result therefore has exactly `length` code points.
+ *
+ * NOT cryptographically secure: with the default `Math.random` the output is predictable. Do not use it for passwords, tokens,
+ * session ids or anything security-sensitive; use `crypto.getRandomValues` / `crypto.randomUUID` instead.
+ * @param {number} length - The number of characters to generate (non-negative integer)
+ * @param {string} [alphabet='A-Za-z0-9'] - The characters to choose from (defaults to the 62 ASCII letters and digits)
+ * @param {RandomGenerator} [random=Math.random] - Source of uniform numbers in `[0, 1)`, injectable for deterministic results
+ * @returns {string} The random string
+ * @throws {RangeError} when `length` is not a non-negative integer, `alphabet` is empty, or `random()` returns a value outside `[0, 1)`
+ * @example
+ * randomString(8); // e.g. 'aZ3kP0qx'
+ * randomString(6, '0123456789'); // e.g. '402913'
+ * randomString(3, 'ab', function () { return 0; }); // 'aaa'
+ */
+export function randomString(length: number, alphabet: string = ALPHANUMERIC, random: RandomGenerator = Math.random): string {
+	if (!Number.isInteger(length) || length < 0) throw new RangeError(`randomString: length must be a non-negative integer, received ${String(length)}`);
+
+	const characters = Array.from(new Set(alphabet));
+
+	if (characters.length === 0) throw new RangeError('randomString: alphabet must not be empty');
+
+	let result = '';
+
+	for (let index = 0; index < length; index++) {
+		const value = random();
+
+		if (!(value >= 0 && value < 1)) throw new RangeError(`randomString: \`random()\` must return a number in [0, 1), got ${String(value)}`);
+
+		result += characters[Math.floor(value * characters.length)];
+	}
+
+	return result;
+}
+
+/**
+ * Converts a string to Sentence case, using the same word detection as {@link toSnakeCase}: the words are lower-cased, joined with
+ * single spaces, and the first letter of the first word is upper-cased. Punctuation and separators are dropped, and acronyms are
+ * lower-cased too (`'XMLHttpRequest'` → `'Xml http request'`).
+ * @param {string} string - The string to convert
+ * @returns {string} The string in sentence case
+ * @example
+ * toSentenceCase('helloWorld-foo'); // 'Hello world foo'
+ * toSentenceCase('SOME_CONSTANT_NAME'); // 'Some constant name'
+ */
+export function toSentenceCase(string: string): string {
+	return splitWords(string)
+		.map(function (word: string, index: number): string {
+			return index === 0 ? upperFirstLowerRest(word) : word.toLowerCase();
+		})
+		.join(' ');
+}
+
+/**
+ * Picks the singular or plural form of a word for a count. The singular is used when `count` is `1` or `-1`, the plural otherwise
+ * (including `0`, fractions and `NaN`). Only the word is returned; see {@link formatCount} to include the number.
+ * @param {number} count - The quantity
+ * @param {string} singular - The singular form
+ * @param {string} [plural=singular + 's'] - The plural form, for irregular plurals
+ * @returns {string} `singular` or `plural`
+ * @example
+ * pluralize(1, 'item'); // 'item'
+ * pluralize(3, 'item'); // 'items'
+ * pluralize(0, 'child', 'children'); // 'children'
+ */
+export function pluralize(count: number, singular: string, plural: string = singular + 's'): string {
+	return Math.abs(count) === 1 ? singular : plural;
+}
+
+/**
+ * Formats a count followed by the matching singular or plural word (see {@link pluralize}); the number is stringified with `String()`.
+ * @param {number} count - The quantity
+ * @param {string} singular - The singular form
+ * @param {string} [plural=singular + 's'] - The plural form, for irregular plurals
+ * @returns {string} `'<count> <word>'`
+ * @example
+ * formatCount(3, 'item'); // '3 items'
+ * formatCount(1, 'item'); // '1 item'
+ * formatCount(2, 'person', 'people'); // '2 people'
+ */
+export function formatCount(count: number, singular: string, plural: string = singular + 's'): string {
+	return `${String(count)} ${pluralize(count, singular, plural)}`;
+}
+
+/**
+ * Prepends `prefix` unless the string already starts with it.
+ * @param {string} string - The original string
+ * @param {string} prefix - The required prefix
+ * @returns {string} A string that starts with `prefix`
+ * @example
+ * ensurePrefix('example.com', 'https://'); // 'https://example.com'
+ * ensurePrefix('https://example.com', 'https://'); // 'https://example.com'
+ */
+export function ensurePrefix(string: string, prefix: string): string {
+	return string.startsWith(prefix) ? string : prefix + string;
+}
+
+/**
+ * Appends `suffix` unless the string already ends with it.
+ * @param {string} string - The original string
+ * @param {string} suffix - The required suffix
+ * @returns {string} A string that ends with `suffix`
+ * @example
+ * ensureSuffix('path/to', '/'); // 'path/to/'
+ * ensureSuffix('path/to/', '/'); // 'path/to/'
+ */
+export function ensureSuffix(string: string, suffix: string): string {
+	return string.endsWith(suffix) ? string : string + suffix;
+}
+
+/**
+ * Removes `prefix` from the start of the string once, if present.
+ * @param {string} string - The original string
+ * @param {string} prefix - The prefix to remove
+ * @returns {string} The string without the prefix (unchanged when it does not start with it)
+ * @example
+ * stripPrefix('https://example.com', 'https://'); // 'example.com'
+ * stripPrefix('//a', '/'); // '/a'
+ */
+export function stripPrefix(string: string, prefix: string): string {
+	return string.startsWith(prefix) ? string.slice(prefix.length) : string;
+}
+
+/**
+ * Removes `suffix` from the end of the string once, if present.
+ * @param {string} string - The original string
+ * @param {string} suffix - The suffix to remove
+ * @returns {string} The string without the suffix (unchanged when it does not end with it)
+ * @example
+ * stripSuffix('report.pdf', '.pdf'); // 'report'
+ * stripSuffix('a//', '/'); // 'a/'
+ */
+export function stripSuffix(string: string, suffix: string): string {
+	return string.endsWith(suffix) ? string.slice(0, string.length - suffix.length) : string;
 }
