@@ -209,6 +209,39 @@ describe('Objects helpers', function () {
 			expect(copy.message).toBe('boom');
 		});
 
+		it('keeps the descriptors of error properties (message stays non-enumerable, accessors stay accessors)', function () {
+			const error = new TypeError('boom');
+			Object.defineProperty(error, 'code', {
+				get: function (): number {
+					return 7;
+				},
+				enumerable: true,
+				configurable: true
+			});
+			for (const copy of [helpers.clone(error), helpers.deepClone(error)]) {
+				expect(Object.getOwnPropertyDescriptor(copy, 'message')).toStrictEqual(Object.getOwnPropertyDescriptor(error, 'message'));
+				expect(typeof Object.getOwnPropertyDescriptor(copy, 'code')?.get).toBe('function');
+			}
+		});
+
+		it('reads own getters of class instances into plain data properties', function () {
+			class Box {
+				declare value: number;
+			}
+			const box = new Box();
+			Object.defineProperty(box, 'value', {
+				get: function (): number {
+					return 3;
+				},
+				enumerable: true,
+				configurable: true
+			});
+			for (const copy of [helpers.clone(box), helpers.deepClone(box)]) {
+				expect(copy).toBeInstanceOf(Box);
+				expect(Object.getOwnPropertyDescriptor(copy, 'value')).toStrictEqual({ value: 3, writable: true, enumerable: true, configurable: true });
+			}
+		});
+
 		it('returns primitives, functions, weak collections and promises as-is', function () {
 			function fn(): number {
 				return 1;
@@ -610,6 +643,8 @@ describe('Objects helpers', function () {
 				}
 			}
 			expect(helpers.pick({} as { a?: number }, ['a'])).toStrictEqual({});
+			expect(helpers.pick({ undefined: 1, a: 2 }, ['a'])).toStrictEqual({ a: 2 });
+			expect(helpers.pick({ a: undefined, b: 1 } as { a?: number; b: number }, ['a'])).toStrictEqual({ a: undefined });
 			expect(helpers.pick(new User(), ['upper'])).toStrictEqual({ upper: 'ADA' });
 		});
 

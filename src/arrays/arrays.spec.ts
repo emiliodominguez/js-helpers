@@ -204,6 +204,15 @@ describe('Arrays helpers', function () {
 	});
 
 	describe('removeDuplicates', function () {
+		it('should give the same result for long inputs (more than 16 items)', function () {
+			const long = [3, -0, 3, NaN, 'x', 0, NaN, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'x', -0, 11];
+			const result = helpers.removeDuplicates(long);
+			expect(result).toStrictEqual([3, -0, NaN, 'x', 1, 2, 4, 5, 6, 7, 8, 9, 10, 11]);
+			expect(Object.is(result[1], -0)).toBe(true);
+			expect(helpers.removeDuplicates([0, ...long])[0]).toBe(0);
+			expect(Object.is(helpers.removeDuplicates([0, ...long])[0], 0)).toBe(true);
+		});
+
 		it('should keep the original -0 instead of the +0 a Set hands back', function () {
 			expect(Object.is(helpers.removeDuplicates([-0, 0])[0], -0)).toBe(true);
 			expect(Object.is(helpers.union([-0], [1])[0], -0)).toBe(true);
@@ -318,6 +327,33 @@ describe('Arrays helpers', function () {
 	});
 
 	describe('chunk', function () {
+		it('should create the pieces like Array.prototype.slice, also for Array subclasses', function () {
+			class List<T> extends Array<T> {}
+			const list = List.from([1, 2, 3, 4, 5]) as List<number>;
+			for (const piece of [...helpers.chunk(list, 2), helpers.take(list, 2), helpers.drop(list, 3), ...helpers.windowed(list, 2)]) {
+				expect(piece).toBeInstanceOf(List);
+			}
+			expect(helpers.chunk(list, 2)).toStrictEqual([list.slice(0, 2), list.slice(2, 4), list.slice(4)]);
+			expect(Object.getPrototypeOf(helpers.take([1, 2, 3], 2))).toBe(Array.prototype);
+		});
+
+		it('should keep holes like Array.prototype.slice (chunk, take, drop and windowed)', function () {
+			const sparse = new Array<number>(40);
+			sparse[1] = 1;
+			sparse[38] = 38;
+			const chunks = helpers.chunk(sparse, 3);
+			expect(chunks).toHaveLength(14);
+			expect(0 in chunks[0]).toBe(false);
+			expect(chunks[0][1]).toBe(1);
+			expect(chunks[0]).toHaveLength(3);
+			expect(helpers.take(sparse, 3)).toStrictEqual(sparse.slice(0, 3));
+			expect(2 in helpers.take(sparse, 3)).toBe(false);
+			expect(helpers.drop(sparse, 37)).toStrictEqual(sparse.slice(37));
+			expect(helpers.drop(sparse, 2)).toStrictEqual(sparse.slice(2));
+			expect(helpers.windowed(sparse, 2, 19)).toStrictEqual([sparse.slice(0, 2), sparse.slice(19, 21), sparse.slice(38, 40)]);
+			expect(0 in helpers.windowed(sparse, 2, 19)[0]).toBe(false);
+		});
+
 		it('should split an array into chunks of the given size', function () {
 			expect(helpers.chunk([1, 2, 3, 4, 5], 2)).toStrictEqual([[1, 2], [3, 4], [5]]);
 			expect(helpers.chunk([1, 2, 3, 4], 2)).toStrictEqual([

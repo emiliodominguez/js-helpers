@@ -113,6 +113,26 @@ describe('arrays (property-based)', function () {
 		);
 	});
 
+	it('removeDuplicates keeps the first of each SameValueZero class (short and long inputs alike, -0 and NaN included)', function () {
+		const value = fc.oneof(fc.integer({ min: -4, max: 4 }), fc.constantFrom(-0, NaN, 'a', 'b', undefined));
+		fc.assert(
+			fc.property(fc.array(value, { maxLength: 60 }), function (array) {
+				const expected: unknown[] = [];
+				for (const item of array) {
+					if (
+						!expected.some(function (kept) {
+							return kept === item || (kept !== kept && item !== item);
+						})
+					) {
+						expected.push(item);
+					}
+				}
+				expect(helpers.removeDuplicates(array)).toStrictEqual(expected);
+				expect(helpers.removeDuplicates(new Set(array).values())).toHaveLength(expected.length);
+			})
+		);
+	});
+
 	it('union, intersection and difference match naive references', function () {
 		fc.assert(
 			fc.property(smallInts, smallInts, function (a, b) {

@@ -772,7 +772,11 @@ export function tap<T>(iterable: Iterable<T>, fn: (value: T, index: number) => v
  */
 export function toArray<T>(iterable: Iterable<T>): T[] {
 	assertIterable('toArray', iterable);
-	return Array.from(iterable);
+	// Arrays are copied fastest by the built-in spread, but other iterators (generators) are drained faster by a `for...of` loop.
+	if (Array.isArray(iterable)) return [...(iterable as T[])];
+	const result: T[] = [];
+	for (const value of iterable) result.push(value);
+	return result;
 }
 
 /**

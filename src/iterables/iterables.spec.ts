@@ -1028,6 +1028,9 @@ describe('iterables', function () {
 		it('collects the items', function () {
 			expect(helpers.toArray(new Set([1, 2]))).toStrictEqual([1, 2]);
 			expect(helpers.toArray([])).toStrictEqual([]);
+			// eslint-disable-next-line no-sparse-arrays
+			expect(helpers.toArray([1, , 'a'])).toStrictEqual([1, undefined, 'a']);
+			expect(helpers.toArray('ab')).toStrictEqual(['a', 'b']);
 		});
 
 		it('returns a fresh array', function () {

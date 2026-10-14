@@ -115,6 +115,11 @@ export type DeepMergeAll<T, S extends readonly unknown[]> = S extends readonly [
 		: DeepMerge<T, Partial<UnionToIntersection<S[number]>>>;
 
 /**
+ * Any object, seen as a record of properties (for reading and writing arbitrary keys).
+ */
+type Properties = Record<PropertyKey, unknown>;
+
+/**
  * The type produced by {@link invert}: values become keys and keys become (string) values.
  * @example
  * type I = Invert<{ a: 'x'; b: 'y' }>; // { x: 'a'; y: 'b' }
@@ -175,7 +180,7 @@ function defineOwn(object: object, key: PropertyKey, value: unknown): void {
  */
 function defineValue(object: object, key: PropertyKey, value: unknown): void {
 	if (key in object && !hasOwn(object, key)) defineOwn(object, key, value);
-	else (object as Record<PropertyKey, unknown>)[key] = value;
+	else (object as Properties)[key] = value;
 }
 
 /**
@@ -189,17 +194,7 @@ function defineValue(object: object, key: PropertyKey, value: unknown): void {
  */
 function definePlain(object: object, key: PropertyKey, value: unknown): void {
 	if (key in Object.prototype) defineOwn(object, key, value);
-	else (object as Record<PropertyKey, unknown>)[key] = value;
-}
-
-/**
- * Reads a property of an object without type complaints.
- * @param {object} object - The object to read from
- * @param {PropertyKey} key - The key to read
- * @returns {unknown} The property value
- */
-function read(object: object, key: PropertyKey): unknown {
-	return (object as Record<PropertyKey, unknown>)[key];
+	else (object as Properties)[key] = value;
 }
 
 /**
@@ -357,29 +352,13 @@ export function merge<T extends object, S extends object[]>(target: T, ...source
  * clone(new Map([['a', 1]])); // => new Map([['a', 1]]) // a new Map with the same entries
  */
 export function clone<T>(value: T): T {
-	if (!isObject(value)) return value;
-	if (isOrdinary(value, Object.getPrototypeOf(value))) {
+	// The most common cases (plain objects and dense arrays) are handled here, without the call to the generic worker.
+	if (isObject(value) && isOrdinary(value, Object.getPrototypeOf(value))) {
 		if (!Array.isArray(value)) return { ...value };
-		if (isSimpleArray(value)) {
-			const copy = new Array<unknown>(value.length);
-			for (let i = 0; i < value.length; i++) copy[i] = value[i];
-			return copy as T;
-		}
+		// A dense array without extra keys is copied by `Array.from` (built-in fast path) with the same result as the generic copy.
+		if (isSimpleArray(value)) return Array.from(value) as T;
 	}
-	if (isUncloneable(value)) return value;
-
-	const [isBoxed, primitive] = unbox(value);
-	if (isBoxed) return adoptPrototype(Object(primitive), value) as T;
-	if (isDate(value)) return adoptPrototype(new Date(value.getTime()), value) as T;
-	if (isRegExp(value)) return copyRegExp(value) as T;
-	if (isMap(value)) return adoptPrototype(new Map(value), value) as T;
-	if (isSet(value)) return adoptPrototype(new Set(value), value) as T;
-	if (isBinary(value)) return copyBinary(value) as T;
-	if (isError(value)) return Object.create(Object.getPrototypeOf(value), Object.getOwnPropertyDescriptors(value)) as T;
-
-	const copy: object = Array.isArray(value) ? adoptPrototype(new Array(value.length), value) : Object.create(Object.getPrototypeOf(value));
-	for (const key of ownEnumerableKeys(value)) defineValue(copy, key, read(value, key));
-	return copy as T;
+	return copyWith(value) as T;
 }
 
 /**
@@ -501,7 +480,9 @@ export function isEmpty<T>(value: T): boolean {
 export function pick<T extends object, K extends keyof T>(object: T, keys: ReadonlyArray<K>): Pick<T, K> {
 	const result = {} as Pick<T, K>;
 	for (const key of keys) {
-		if (key in object) definePlain(result, key, object[key]);
+		const value = object[key];
+		// Only an `undefined` value can come from a missing key, so the `in` lookup is skipped for every other value.
+		if (value !== undefined || key in object) definePlain(result, key, value);
 	}
 	return result;
 }
@@ -524,7 +505,7 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
 	for (const key of keys) excluded.add(typeof key === 'number' ? String(key) : key);
 	const result = {} as Omit<T, K>;
 	for (const key of ownEnumerableKeys(object)) {
-		if (!excluded.has(key)) definePlain(result, key, read(object, key));
+		if (!excluded.has(key)) definePlain(result, key, (object as Properties)[key]);
 	}
 	return result;
 }
@@ -547,7 +528,7 @@ export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T]
 	const isArray = Array.isArray(object);
 	const result = (isArray ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
 	for (const key of ownEnumerableKeys(object)) {
-		const value = fn(read(object, key) as T[keyof T], key as keyof T, object);
+		const value = fn((object as Properties)[key] as T[keyof T], key as keyof T, object);
 		if (isArray) defineValue(result, key, value);
 		else definePlain(result, key, value);
 	}
@@ -569,7 +550,7 @@ export function mapKeys<T extends object, K extends PropertyKey>(object: T, fn: 
 	assertFunction('mapKeys', 'fn', fn);
 	const result = {} as Record<K, T[keyof T]>;
 	for (const key of ownEnumerableKeys(object)) {
-		const value = read(object, key) as T[keyof T];
+		const value = (object as Properties)[key] as T[keyof T];
 		definePlain(result, fn(value, key as keyof T, object), value);
 	}
 	return result;
@@ -763,30 +744,31 @@ export function setInObjectByKeys<T extends object>(target: T, path: string, val
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * Recursive worker of {@link deepClone}.
+ * Worker of {@link clone} (`seen` is omitted: children are kept as they are) and of {@link deepClone} (children are copied too).
  * @param {unknown} value - The value to copy
- * @param {Map<object, unknown>} seen - Already-copied objects (handles shared and circular references)
- * @returns {unknown} The deep copy
+ * @param {Map<object, unknown>} [seen] - For a deep copy: the already-copied objects (handles shared and circular references)
+ * @returns {unknown} The copy
  */
-function deepCloneWith(value: unknown, seen: Map<object, unknown>): unknown {
+function copyWith(value: unknown, seen?: Map<object, unknown>): unknown {
 	if (!isObject(value)) return value;
 	// Copies are objects, so `undefined` means "not copied yet".
-	const known = seen.get(value);
+	const known = seen?.get(value);
 	if (known !== undefined) return known;
 
 	// Fast paths for the usual plain objects and dense arrays (same result as the generic copy at the end).
 	if (isOrdinary(value, Object.getPrototypeOf(value))) {
 		if (!Array.isArray(value)) {
-			// Spread defines the same own data properties as the generic copy, then each (own, writable) one is replaced by its clone.
-			const copy: Record<PropertyKey, unknown> = { ...value };
-			seen.set(value, copy);
-			for (const key of ownEnumerableKeys(copy)) copy[key] = deepCloneWith(copy[key], seen);
+			// Spread defines the same own data properties as the generic copy; a deep copy then replaces each (own, writable) one by its
+			// copy. (`clone` copies plain objects itself, with its own spread: a spread site fed with every nested shape goes megamorphic.)
+			const copy: Properties = { ...value };
+			seen?.set(value, copy);
+			for (const key of ownEnumerableKeys(copy)) copy[key] = copyChild(copy[key], seen);
 			return copy;
 		}
 		if (isSimpleArray(value)) {
 			const copy = new Array<unknown>(value.length);
-			seen.set(value, copy);
-			for (let i = 0; i < value.length; i++) copy[i] = deepCloneWith(value[i], seen);
+			seen?.set(value, copy);
+			for (let i = 0; i < value.length; i++) copy[i] = copyChild(value[i], seen);
 			return copy;
 		}
 	}
@@ -800,38 +782,47 @@ function deepCloneWith(value: unknown, seen: Map<object, unknown>): unknown {
 	if (isBinary(value)) return copyBinary(value);
 
 	if (isMap(value)) {
+		if (seen === undefined) return adoptPrototype(new Map(value), value);
 		const copy = adoptPrototype(new Map<unknown, unknown>(), value);
 		seen.set(value, copy);
 		value.forEach(function (entryValue, entryKey) {
-			copy.set(deepCloneWith(entryKey, seen), deepCloneWith(entryValue, seen));
+			copy.set(copyWith(entryKey, seen), copyWith(entryValue, seen));
 		});
 		return copy;
 	}
 
 	if (isSet(value)) {
+		if (seen === undefined) return adoptPrototype(new Set(value), value);
 		const copy = adoptPrototype(new Set<unknown>(), value);
 		seen.set(value, copy);
 		value.forEach(function (member) {
-			copy.add(deepCloneWith(member, seen));
+			copy.add(copyWith(member, seen));
 		});
 		return copy;
 	}
 
-	if (isError(value)) {
-		const copy: object = Object.create(Object.getPrototypeOf(value));
-		seen.set(value, copy);
-		for (const key of Reflect.ownKeys(value)) {
+	const error = isError(value);
+	const copy: object = !error && Array.isArray(value) ? adoptPrototype(new Array(value.length), value) : Object.create(Object.getPrototypeOf(value));
+	seen?.set(value, copy);
+	// Errors keep all their own properties (`message` and `stack` are not enumerable), as they are defined (getters included).
+	for (const key of error ? Reflect.ownKeys(value) : ownEnumerableKeys(value)) {
+		if (error) {
 			const descriptor = Object.getOwnPropertyDescriptor(value, key) as PropertyDescriptor;
-			if ('value' in descriptor) descriptor.value = deepCloneWith(descriptor.value, seen);
+			if ('value' in descriptor) descriptor.value = copyChild(descriptor.value, seen);
 			Object.defineProperty(copy, key, descriptor);
-		}
-		return copy;
+		} else defineValue(copy, key, copyChild((value as Properties)[key], seen));
 	}
-
-	const copy: object = Array.isArray(value) ? adoptPrototype(new Array(value.length), value) : Object.create(Object.getPrototypeOf(value));
-	seen.set(value, copy);
-	for (const key of ownEnumerableKeys(value)) defineValue(copy, key, deepCloneWith(read(value, key), seen));
 	return copy;
+}
+
+/**
+ * Copies a child of a value being copied by {@link copyWith}: deeply when `seen` is given, otherwise it is kept as it is.
+ * @param {unknown} value - The child value
+ * @param {Map<object, unknown>} [seen] - The objects already copied by a deep copy
+ * @returns {unknown} The child to store in the copy
+ */
+function copyChild(value: unknown, seen?: Map<object, unknown>): unknown {
+	return seen === undefined ? value : copyWith(value, seen);
 }
 
 /**
@@ -855,7 +846,7 @@ function deepCloneWith(value: unknown, seen: Map<object, unknown>): unknown {
  * isEqual(copy, original); // => true
  */
 export function deepClone<T>(value: T): T {
-	return deepCloneWith(value, new Map()) as T;
+	return copyWith(value, new Map()) as T;
 }
 
 /**
@@ -872,10 +863,10 @@ function deepMergeInto(result: object, source: object, ancestors: Set<object>): 
 
 	for (const key of ownEnumerableKeys(source)) {
 		if (UNSAFE_KEYS.has(key)) continue;
-		const sourceValue = read(source, key);
+		const sourceValue = (source as Properties)[key];
 
 		if (isPlainObject(sourceValue)) {
-			const current = hasOwn(result, key) ? read(result, key) : undefined;
+			const current = hasOwn(result, key) ? (result as Properties)[key] : undefined;
 			const base = isPlainObject(current) ? current : Object.create(Object.getPrototypeOf(sourceValue));
 			definePlain(result, key, deepMergeInto(base, sourceValue, ancestors));
 		} else {
@@ -1029,7 +1020,7 @@ function propertiesEqual(a: object, b: object, stack: ComparisonStack): boolean 
 
 	for (const key of keysA) {
 		if (!Object.prototype.propertyIsEnumerable.call(b, key)) return false;
-		if (!equalWith(read(a, key), read(b, key), stack)) return false;
+		if (!equalWith((a as Properties)[key], (b as Properties)[key], stack)) return false;
 	}
 	return true;
 }
@@ -1231,7 +1222,7 @@ export function pickBy<T extends object>(object: T, predicate: (value: T[keyof T
 	assertFunction('pickBy', 'predicate', predicate);
 	const result: Partial<T> = {};
 	for (const key of ownEnumerableKeys(object)) {
-		const value = read(object, key) as T[keyof T];
+		const value = (object as Properties)[key] as T[keyof T];
 		if (predicate(value, key as keyof T, object)) definePlain(result, key, value);
 	}
 	return result;
@@ -1332,7 +1323,7 @@ function flattenInto(source: object, keys: ReadonlyArray<string>, prefix: string
 	if (ancestors.includes(source)) throw new TypeError('flattenObject: cannot flatten a circular structure');
 	ancestors.push(source);
 	for (const key of keys) {
-		const value = read(source, key);
+		const value = (source as Properties)[key];
 		const path = prefix + key;
 		const nested = isContainer(value) ? Object.keys(value) : undefined;
 		if (nested !== undefined && nested.length > 0) flattenInto(value as object, nested, path + separator, separator, result, ancestors);
@@ -1412,7 +1403,7 @@ function resolveParent(target: unknown, segments: ReadonlyArray<string>): object
 	let current = target;
 	for (let index = 0; index < segments.length - 1; index++) {
 		if (!(isObject(current) || isFunction(current)) || !hasOwn(current, segments[index])) return undefined;
-		current = read(current, segments[index]);
+		current = (current as Properties)[segments[index]];
 	}
 	return isObject(current) || isFunction(current) ? current : undefined;
 }
@@ -1492,8 +1483,8 @@ function diffWalk(a: object, b: object, prefix: string, missing: string[], chang
 			missing.push(path);
 			continue;
 		}
-		const left = read(a, key);
-		const right = read(b, key);
+		const left = (a as Properties)[key];
+		const right = (b as Properties)[key];
 		if (left === right) continue;
 		if ((Array.isArray(left) && Array.isArray(right)) || (isPlainObject(left) && isPlainObject(right))) {
 			diffWalk(left, right, path + '.', missing, changed, ancestors);
