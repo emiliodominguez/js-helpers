@@ -73,6 +73,21 @@ function assertCount(caller: string, name: string, value: number, min: number, a
 	}
 }
 
+/**
+ * Adapts an {@link AwaitableIterable} for `for await`: async iterables are returned as is, and sync iterables are wrapped so
+ * each item is awaited inside a `for...of` loop, which closes the sync source when an item rejects or iteration stops early
+ * (the built-in async-from-sync wrapper of older engines leaves the source open when an item rejects).
+ * @template T
+ * @param {AwaitableIterable<T>} iterable - An async iterable, or a sync iterable of values and/or promises
+ * @returns {AsyncIterable<T>} An async iterable of the (awaited) items
+ */
+function awaitItems<T>(iterable: AwaitableIterable<T>): AsyncIterable<T> {
+	if (isAsyncIterable(iterable)) return iterable;
+	return (async function* (): AsyncGenerator<T, void, undefined> {
+		for (const value of iterable) yield await value;
+	})();
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Sources
 // ---------------------------------------------------------------------------------------------------------------------
@@ -119,6 +134,7 @@ export function repeatValue<T>(value: T, times = Infinity): IterableIterator<T> 
 /**
  * Lazily repeat the items of an iterable forever. The first pass is cached, so the source is iterated only once
  * (one-shot iterators such as generators can be cycled). An empty source gives an empty iterator (not an infinite loop).
+ * Every item of the first pass is kept in memory, so an infinite source is never repeated and its cache grows without bound.
  * @template T
  * @param {Iterable<T>} iterable - The items to cycle through
  * @returns {IterableIterator<T>} An infinite iterator (or an empty one when the source is empty)
@@ -136,7 +152,8 @@ export function cycle<T>(iterable: Iterable<T>): IterableIterator<T> {
 			yield value;
 		}
 		if (cache.length === 0) return;
-		for (;;) yield* cache;
+		// Plain loops rather than `yield*`, so `throw()` rethrows its error instead of a TypeError from the array iterator.
+		for (;;) for (const value of cache) yield value;
 	})();
 }
 
@@ -244,7 +261,8 @@ export function flatMap<T, U>(iterable: Iterable<T>, fn: (value: T, index: numbe
 		for (const value of iterable) {
 			const inner = fn(value, index++);
 			assertIterable('flatMap', inner, 'fn(...)');
-			yield* inner;
+			// Not `yield*`: `throw()` must close the inner iterator and rethrow, not be forwarded into it.
+			for (const item of inner) yield item;
 		}
 	})();
 }
@@ -555,7 +573,8 @@ export function scan<T, A>(iterable: Iterable<T>, reducer: (accumulator: A, valu
 export function concat<T>(...iterables: Array<Iterable<T>>): IterableIterator<T> {
 	for (const iterable of iterables) assertIterable('concat', iterable, 'iterables');
 	return (function* (): Generator<T, void, undefined> {
-		for (const iterable of iterables) yield* iterable;
+		// Not `yield*`: `throw()` must close the current source and rethrow, not be forwarded into it.
+		for (const iterable of iterables) for (const value of iterable) yield value;
 	})();
 }
 
@@ -805,7 +824,7 @@ export function mapAsync<T, U>(iterable: AwaitableIterable<T>, fn: (value: T, in
 	assertFunction('mapAsync', 'fn', fn);
 	return (async function* (): AsyncGenerator<U, void, undefined> {
 		let index = 0;
-		for await (const value of iterable) yield await fn(value, index++);
+		for await (const value of awaitItems(iterable)) yield await fn(value, index++);
 	})();
 }
 
@@ -847,7 +866,7 @@ export function filterAsync<T>(iterable: AwaitableIterable<T>, predicate: (value
 	assertFunction('filterAsync', 'predicate', predicate);
 	return (async function* (): AsyncGenerator<T, void, undefined> {
 		let index = 0;
-		for await (const value of iterable) if (await predicate(value, index++)) yield value;
+		for await (const value of awaitItems(iterable)) if (await predicate(value, index++)) yield value;
 	})();
 }
 
@@ -868,7 +887,7 @@ export function takeAsync<T>(iterable: AwaitableIterable<T>, n: number): AsyncIt
 	return (async function* (): AsyncGenerator<T, void, undefined> {
 		if (n === 0) return;
 		let taken = 0;
-		for await (const value of iterable) {
+		for await (const value of awaitItems(iterable)) {
 			yield value;
 			if (++taken >= n) return;
 		}
@@ -891,7 +910,7 @@ export function chunkAsync<T>(iterable: AwaitableIterable<T>, size: number): Asy
 	assertCount('chunkAsync', 'size', size, 1);
 	return (async function* (): AsyncGenerator<T[], void, undefined> {
 		let buffer: T[] = [];
-		for await (const value of iterable) {
+		for await (const value of awaitItems(iterable)) {
 			buffer.push(value);
 			if (buffer.length === size) {
 				const full = buffer;
@@ -918,7 +937,7 @@ export function toArrayAsync<T>(iterable: AwaitableIterable<T>): Promise<T[]> {
 	assertAwaitableIterable('toArrayAsync', iterable);
 	return (async function (): Promise<T[]> {
 		const result: T[] = [];
-		for await (const value of iterable) result.push(value);
+		for await (const value of awaitItems(iterable)) result.push(value);
 		return result;
 	})();
 }

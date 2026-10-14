@@ -235,6 +235,17 @@ describe('random', function () {
 				expect(other()).toBe(first[0]);
 			});
 
+			it('should reject sparse snapshots instead of reading holes as 0 (regression)', function () {
+				const rng = helpers.createRandom('restore');
+				const before = rng.state();
+				for (const snapshot of [new Array(4), Object.assign(new Array(4), { 0: 1, 2: 2, 3: 3 })]) {
+					expect(function () {
+						rng.restore(snapshot as any);
+					}).toThrow(TypeError);
+				}
+				expect(rng.state()).toEqual(before);
+			});
+
 			it('should reject malformed snapshots', function () {
 				const rng = helpers.createRandom('restore');
 				const invalid: unknown[] = [null, 'abcd', [1, 2, 3], [1, 2, 3, 4, 5], [1, 2, 3, -1], [1, 2, 3, 2 ** 32], [1, 2, 3, 0.5], [1, 2, 3, '4']];
@@ -316,6 +327,20 @@ describe('random', function () {
 				}
 			);
 			expect(uuid).toMatch(UUID_V4);
+		});
+
+		it('should not rely on the return value of getRandomValues (regression: polyfills returning undefined crashed)', function () {
+			const uuid = withCrypto(
+				{
+					getRandomValues: function (array: Uint8Array): void {
+						array.fill(0xff);
+					}
+				},
+				function () {
+					return helpers.randomUUID();
+				}
+			);
+			expect(uuid).toBe('ffffffff-ffff-4fff-bfff-ffffffffffff');
 		});
 
 		it('should set the version and variant bits regardless of the random bytes', function () {

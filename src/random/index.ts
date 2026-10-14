@@ -195,20 +195,20 @@ function fromState(seedState: SeededRandomState): SeededRandom {
 				return shuffle(array, generator);
 			},
 			fork: function fork(): SeededRandom {
-				// Mix the parent's outputs with distinct odd constants so the child state never mirrors the parent's.
+				// Mix the parent's outputs with distinct constants so the child state never mirrors the parent's.
 				return fromState([nextUint32() ^ 0x9e3779b9, nextUint32() ^ 0x243f6a88, nextUint32() ^ 0xb7e15162, nextUint32()]);
 			},
 			state: function state(): SeededRandomState {
 				return Object.freeze([a >>> 0, b >>> 0, c >>> 0, d >>> 0] as const);
 			},
 			restore: function restore(snapshot: SeededRandomState): void {
-				if (
-					!Array.isArray(snapshot) ||
-					snapshot.length !== 4 ||
-					!snapshot.every(function (word: unknown) {
-						return Number.isInteger(word) && (word as number) >= 0 && (word as number) < UINT32_RANGE;
-					})
-				) {
+				// An index loop (not `every`, which skips holes) so sparse arrays are rejected too.
+				let valid = Array.isArray(snapshot) && snapshot.length === 4;
+				for (let i = 0; valid && i < 4; i++) {
+					const word: unknown = snapshot[i];
+					valid = Number.isInteger(word) && (word as number) >= 0 && (word as number) < UINT32_RANGE;
+				}
+				if (!valid) {
 					throw new TypeError('SeededRandom.restore: `snapshot` must be an array of four unsigned 32-bit integers');
 				}
 				a = snapshot[0] | 0;
@@ -237,7 +237,7 @@ function fromState(seedState: SeededRandomState): SeededRandom {
  * rng(); // a float in [0, 1), always the same for this seed
  * rng.int(1, 6); // a die roll
  * rng.shuffle([1, 2, 3]); // a deterministic permutation
- * [3, 1, 2].sort(function () { return rng() - 0.5; }); // usable wherever `Math.random` is expected
+ * randomGaussian(0, 1, rng); // usable wherever a `Math.random`-like generator is expected
  */
 export function createRandom(seed: number | string): SeededRandom {
 	if (typeof seed === 'number') {
@@ -297,7 +297,9 @@ export function randomUUID(): string {
 	const candidate = (globalThis as unknown as { crypto?: Partial<CryptoLike> | null }).crypto;
 	if (candidate != null && typeof candidate.randomUUID === 'function') return candidate.randomUUID();
 
-	const bytes = getCrypto('randomUUID').getRandomValues(new Uint8Array(16));
+	// Use our own buffer rather than the return value, which some `getRandomValues` polyfills leave undefined.
+	const bytes = new Uint8Array(16);
+	getCrypto('randomUUID').getRandomValues(bytes);
 	bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
 	bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
 	let hex = '';

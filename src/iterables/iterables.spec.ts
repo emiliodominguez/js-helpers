@@ -129,6 +129,16 @@ describe('iterables', function () {
 			expect(stats.closed).toBe(1);
 		});
 
+		it('rethrows the error given to throw() while replaying the cache (regression: was a TypeError)', function () {
+			const cycled = helpers.cycle([1, 2]);
+			expect([cycled.next().value, cycled.next().value, cycled.next().value]).toEqual([1, 2, 1]);
+			const error = new Error('stop');
+			expect(function () {
+				cycled.throw?.(error);
+			}).toThrow(error);
+			expect(cycled.next()).toEqual({ done: true, value: undefined });
+		});
+
 		it('throws a TypeError for a non-iterable', function () {
 			expect(function () {
 				helpers.cycle(5 as any);
@@ -299,6 +309,21 @@ describe('iterables', function () {
 				return inner.iterable;
 			});
 			expect(helpers.toArray(helpers.take(flat, 3))).toEqual([0, 1, 2]);
+			expect(outer.stats.closed).toBe(1);
+			expect(inner.stats.closed).toBe(1);
+		});
+
+		it('closes the inner and outer iterators and rethrows the error given to throw() (regression: was a TypeError)', function () {
+			const outer = spy([1, 2]);
+			const inner = spy(helpers.count());
+			const flat = helpers.flatMap(outer.iterable, function () {
+				return inner.iterable;
+			});
+			flat.next();
+			const error = new Error('stop');
+			expect(function () {
+				flat.throw?.(error);
+			}).toThrow(error);
 			expect(outer.stats.closed).toBe(1);
 			expect(inner.stats.closed).toBe(1);
 		});
@@ -800,6 +825,26 @@ describe('iterables', function () {
 			expect(b.stats.opened).toBe(1);
 		});
 
+		it('closes the current source on throw() instead of forwarding the error into it (regression)', function () {
+			let finalized = false;
+			const swallowing = (function* () {
+				try {
+					yield 1;
+				} catch {
+					yield 2;
+				} finally {
+					finalized = true;
+				}
+			})();
+			const chained = helpers.concat(swallowing);
+			chained.next();
+			const error = new Error('stop');
+			expect(function () {
+				chained.throw?.(error);
+			}).toThrow(error);
+			expect(finalized).toBe(true);
+		});
+
 		it('throws a TypeError for a non-iterable argument', function () {
 			expect(function () {
 				helpers.concat([1], {} as any);
@@ -936,6 +981,18 @@ describe('iterables', function () {
 			result.return?.();
 			expect(result.next()).toEqual({ done: true, value: undefined });
 			expect(stats.closed).toBe(1);
+		});
+
+		it.each(transforms)('%s (throw() closes the source and rethrows the given error)', function (_name, transform) {
+			const { iterable, stats } = spy(helpers.count());
+			const result = transform(iterable);
+			result.next();
+			const error = new Error('stop');
+			expect(function () {
+				result.throw?.(error);
+			}).toThrow(error);
+			expect(stats.closed).toBe(1);
+			expect(result.next()).toEqual({ done: true, value: undefined });
 		});
 
 		it.each(transforms)('%s (return before the first next does not open the source)', function (_name, transform) {
@@ -1186,6 +1243,69 @@ describe('iterables', function () {
 	});
 
 	describe('async helpers', function () {
+		describe('close a sync source when one of its promises rejects (regression: the source was left open)', function () {
+			const consumers: Array<[string, (source: Iterable<Promise<number>>) => Promise<unknown>]> = [
+				[
+					'mapAsync',
+					function (source) {
+						return helpers.toArrayAsync(helpers.mapAsync(source, double));
+					}
+				],
+				[
+					'filterAsync',
+					function (source) {
+						return helpers.toArrayAsync(helpers.filterAsync(source, isEven));
+					}
+				],
+				[
+					'takeAsync',
+					function (source) {
+						return helpers.toArrayAsync(helpers.takeAsync(source, 5));
+					}
+				],
+				[
+					'chunkAsync',
+					function (source) {
+						return helpers.toArrayAsync(helpers.chunkAsync(source, 2));
+					}
+				],
+				['toArrayAsync', helpers.toArrayAsync]
+			];
+
+			it.each(consumers)('%s', async function (_name, consume) {
+				let finalized = 0;
+				const failure = new Error('item failed');
+				const source = (function* () {
+					try {
+						yield Promise.resolve(1);
+						yield Promise.reject(failure);
+						yield Promise.resolve(3);
+					} finally {
+						finalized++;
+					}
+				})();
+				await expect(consume(source)).rejects.toBe(failure);
+				expect(finalized).toBe(1);
+			});
+
+			it('also closes it on early exit', async function () {
+				let finalized = 0;
+				const source = (function* () {
+					try {
+						yield Promise.resolve(1);
+						yield 2;
+					} finally {
+						finalized++;
+					}
+				})();
+				for await (const value of helpers.mapAsync(source, double)) {
+					expect(value).toBe(2);
+					break;
+				}
+				expect(finalized).toBe(1);
+			});
+		});
+
 		describe('mapAsync', function () {
 			it('maps with an async function, one item at a time, passing the index', async function () {
 				let running = 0;
