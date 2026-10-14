@@ -492,6 +492,9 @@ describe('Color helpers', function () {
 
 		it('should append the alpha, rounded to 3 decimals, for translucent colours', function () {
 			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.5 })).toBe('rgb(1 2 3 / 0.5)');
+			// Alphas that round (to 3 decimals) to 1 are omitted; the largest one that does not is kept.
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.9995 })).toBe('rgb(1 2 3)');
+			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.9994999999999999 })).toBe('rgb(1 2 3 / 0.999)');
 			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0 })).toBe('rgb(1 2 3 / 0)');
 			expect(helpers.toCssRgb('#00000080')).toBe('rgb(0 0 0 / 0.502)');
 			expect(helpers.toCssRgb({ r: 1, g: 2, b: 3, a: 0.12345 })).toBe('rgb(1 2 3 / 0.123)');

@@ -735,4 +735,87 @@ describe('Math helpers (property-based)', function () {
 			);
 		});
 	});
+
+	describe('round 8 fast paths', function () {
+		const anyDouble = fc.oneof(fc.double(), fc.constantFrom(0, -0, NaN, Infinity, -Infinity, 1, -1), smallInt);
+
+		/**
+		 * Sorts numbers the way the implementation used to for every input length: a typed-array sort (numeric, `-0`
+		 * before `0`, `NaN` last).
+		 * @param {number[]} numbers - The numbers
+		 * @returns {number[]} A sorted copy
+		 */
+		function typedSorted(numbers: number[]): number[] {
+			return Array.from(Float64Array.from(numbers).sort());
+		}
+
+		it('median and mode should follow the typed-array order on both sides of the short-input threshold', function () {
+			fc.assert(
+				fc.property(fc.array(fc.oneof(anyDouble, fc.constantFrom(0, -0, 0.5)), { maxLength: 70 }), function (numbers) {
+					const sorted = typedSorted(numbers);
+					const n = sorted.length;
+					let expected = NaN;
+					if (n > 0 && !Number.isNaN(sorted[n - 1])) {
+						const low = sorted[(n - 1) >> 1];
+						const high = sorted[n >> 1];
+						expected = n % 2 === 1 ? low : Number.isFinite(low + high) ? (low + high) / 2 : low / 2 + high / 2;
+					}
+					expect(Object.is(helpers.median(numbers), expected)).toBe(true);
+					const mode = helpers.mode(numbers);
+					expect(mode).toEqual(typedSorted(mode));
+					expect(mode).toEqual(helpers.mode(numbers.slice().reverse()));
+				})
+			);
+		});
+
+		it('quantile should pick the order statistics of a typed-array sort', function () {
+			fc.assert(
+				fc.property(fc.array(fc.oneof(anyDouble, fc.constant(NaN)), { minLength: 1, maxLength: 70 }), function (numbers) {
+					const sorted = typedSorted(numbers);
+					// q = 0 and q = 1 return the extreme order statistics themselves (NaN when any element is NaN).
+					const hasNaN = numbers.some(Number.isNaN);
+					expect(Object.is(helpers.quantile(numbers, 0), hasNaN ? NaN : sorted[0])).toBe(true);
+					expect(Object.is(helpers.quantile(numbers, 1), hasNaN ? NaN : sorted[sorted.length - 1])).toBe(true);
+				})
+			);
+		});
+
+		/**
+		 * Reference Neumaier summation (no fast path).
+		 * @param {number[]} numbers - The numbers to add up
+		 * @returns {number} The compensated sum
+		 */
+		function neumaier(numbers: number[]): number {
+			let total = 0;
+			let compensation = 0;
+			for (const value of numbers) {
+				const next = total + value;
+				compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
+				total = next;
+			}
+			return Number.isFinite(total) ? total + compensation : total;
+		}
+
+		it('sum should equal plain Neumaier summation, also after a run of int32 values', function () {
+			const int32 = fc.integer({ min: -(2 ** 31), max: 2 ** 31 - 1 });
+			fc.assert(
+				fc.property(fc.array(int32, { maxLength: 40 }), fc.array(anyDouble, { maxLength: 40 }), function (integers, rest) {
+					const numbers = integers.concat(rest);
+					expect(Object.is(helpers.sum(numbers), neumaier(numbers))).toBe(true);
+					expect(Object.is(helpers.sum(integers), neumaier(integers))).toBe(true);
+				})
+			);
+		});
+
+		it('sum should be exact on int32 arrays (BigInt reference)', function () {
+			fc.assert(
+				fc.property(fc.array(fc.integer({ min: -(2 ** 31), max: 2 ** 31 - 1 }), { maxLength: 200 }), function (integers) {
+					const exact = integers.reduce(function (total, value) {
+						return total + BigInt(value);
+					}, BigInt(0));
+					expect(helpers.sum(integers)).toBe(Number(exact));
+				})
+			);
+		});
+	});
 });

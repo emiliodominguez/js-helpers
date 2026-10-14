@@ -109,12 +109,6 @@ const MODERN_FUNCTION_PATTERN = new RegExp(
 /** How many of each CSS angle unit make a full turn (`''` is a unitless hue, which means degrees). */
 const UNITS_PER_TURN: Readonly<Record<string, number>> = { '': 360, deg: 360, grad: 400, rad: 2 * Math.PI, turn: 1 };
 
-/** Minimum contrast ratios from WCAG 2.x success criteria 1.4.3 (AA) and 1.4.6 (AAA). */
-const CONTRAST_THRESHOLDS: Readonly<Record<ContrastLevel, { normal: number; large: number }>> = {
-	AA: { normal: 4.5, large: 3 },
-	AAA: { normal: 7, large: 4.5 }
-};
-
 /**
  * Reads a numeric colour channel, rejecting non-numbers and `NaN`.
  * @param {string} name - Function name for the error message
@@ -144,17 +138,6 @@ function toByte(value: number): number {
 	// Inlined clamp (about twice as fast as `Math.round(clamp(value, 0, 255))` on this hot path).
 	if (value >= 255) return 255;
 	return value > 0 ? Math.round(value) : 0;
-}
-
-/**
- * Formats a byte as two lowercase hex digits.
- * @param {number} value - An integer in `[0, 255]`
- * @returns {string} Two hex digits
- * @example
- * hexByte(10); // => '0a'
- */
-function hexByte(value: number): string {
-	return value.toString(16).padStart(2, '0');
 }
 
 /** Cache of {@link linearChannel} results, indexed by channel value (filled on first use, at most 256 entries). */
@@ -288,8 +271,7 @@ function parseCssFunction(text: string): Rgba | undefined {
 	const perTurn = UNITS_PER_TURN[units[0]];
 	if (perTurn === undefined || (units[1] !== '%' && (legacy || units[1] !== '')) || (units[2] !== '%' && (legacy || units[2] !== ''))) return undefined;
 	// Reduce the hue in its own unit first, so huge values cannot overflow when converted to degrees.
-	const { r, g, b } = hslValuesToRgb((modulo(values[0], perTurn) * 360) / perTurn, values[1], values[2]);
-	return { r, g, b, a };
+	return hslValuesToRgb((modulo(values[0], perTurn) * 360) / perTurn, values[1], values[2], { r: 0, g: 0, b: 0, a });
 }
 
 /**
@@ -304,7 +286,7 @@ function parseCssFunction(text: string): Rgba | undefined {
  */
 function parseCssColor(caller: string, name: string, input: string): Rgba {
 	const text = input.trim();
-	const color = parseHexDigits(text) ?? (text.toLowerCase() === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : parseCssFunction(text));
+	const color = parseHexDigits(text) ?? (text.length === 11 && text.toLowerCase() === 'transparent' ? { r: 0, g: 0, b: 0, a: 0 } : parseCssFunction(text));
 	if (color === undefined) {
 		throw new TypeError(`${caller}: \`${name}\` must be a CSS colour (hex, rgb(), hsl() or 'transparent'), got ${JSON.stringify(input)}`);
 	}
@@ -387,8 +369,13 @@ export function toRgba(input: ColorInput): Rgba {
  */
 export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
 	const { r, g, b, a } = toRgba(color);
-	const includeAlpha = options.alpha ?? a < 1;
-	return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}${includeAlpha ? hexByte(Math.round(a * 255)) : ''}`;
+	const alphaByte =
+		(options.alpha ?? a < 1)
+			? Math.round(a * 255)
+					.toString(16)
+					.padStart(2, '0')
+			: '';
+	return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}${alphaByte}`;
 }
 
 /**
@@ -400,8 +387,8 @@ export function toHex(color: ColorInput, options: ToHexOptions = {}): string {
  * cssAlpha(0.5); // => ' / 0.5'
  */
 function cssAlpha(alpha: number): string {
-	const rounded = round(alpha, 3);
-	return rounded < 1 ? ` / ${rounded}` : '';
+	// Exactly the alphas that round (decimally) to `1`, without calling `round` for opaque colours.
+	return alpha < 0.9995 ? ` / ${round(alpha, 3)}` : '';
 }
 
 /**
@@ -438,7 +425,7 @@ export function toCssRgb(color: ColorInput): string {
  */
 export function toCssHsl(color: ColorInput): string {
 	const rgba = toRgba(color);
-	const { h, s, l } = rgbToHsl(rgba);
+	const { h, s, l } = hslOf(rgba);
 	return `hsl(${round(h, 1)} ${round(s, 1)}% ${round(l, 1)}%${cssAlpha(rgba.a)})`;
 }
 
@@ -454,10 +441,20 @@ export function toCssHsl(color: ColorInput): string {
  * rgbToHsl('#808080'); // => { h: 0, s: 0, l: 50.19607843137255 }
  */
 export function rgbToHsl(color: ColorInput): Hsl {
-	const rgba = toRgba(color);
-	const r = rgba.r / 255;
-	const g = rgba.g / 255;
-	const b = rgba.b / 255;
+	return hslOf(toRgba(color));
+}
+
+/**
+ * Converts a normalized colour (integer channels in `[0, 255]`) to HSL, as {@link rgbToHsl} does.
+ * @param {Rgb} rgb - The colour, already normalized by {@link toRgba}
+ * @returns {Hsl} Hue in `[0, 360)`, saturation and lightness in `[0, 100]`
+ * @example
+ * hslOf({ r: 255, g: 0, b: 0 }); // => { h: 0, s: 100, l: 50 }
+ */
+function hslOf(rgb: Rgb): Hsl {
+	const r = rgb.r / 255;
+	const g = rgb.g / 255;
+	const b = rgb.b / 255;
 	const high = Math.max(r, g, b);
 	const low = Math.min(r, g, b);
 	const lightness = (high + low) / 2;
@@ -469,7 +466,9 @@ export function rgbToHsl(color: ColorInput): Hsl {
 	if (high === r) hue = (g - b) / delta;
 	else if (high === g) hue = (b - r) / delta + 2;
 	else hue = (r - g) / delta + 4;
-	return { h: modulo(hue * 60, 360), s: clamp(saturation * 100, 0, 100), l: lightness * 100 };
+	// `hue * 60` lies in `(-60, 300]` (and is never within rounding distance of `-0` or `-360`), so wrapping it into `[0, 360)`
+	// takes one addition; the saturation is positive, so it only needs capping.
+	return { h: hue < 0 ? hue * 60 + 360 : hue * 60, s: Math.min(saturation * 100, 100), l: lightness * 100 };
 }
 
 /**
@@ -488,24 +487,31 @@ export function hslToRgb(hsl: Hsl): Rgb {
 	if (typeof hsl !== 'object' || hsl === null) throw new TypeError(`hslToRgb: \`hsl\` must be an { h, s, l } object, got ${describe(hsl)}`);
 	const hue = readChannel('hslToRgb', 'hsl.h', hsl.h);
 	if (!Number.isFinite(hue)) throw new RangeError(`hslToRgb: \`hsl.h\` must be finite, got ${hue}`);
-	return hslValuesToRgb(hue, readChannel('hslToRgb', 'hsl.s', hsl.s), readChannel('hslToRgb', 'hsl.l', hsl.l));
+	return hslValuesToRgb(hue, readChannel('hslToRgb', 'hsl.s', hsl.s), readChannel('hslToRgb', 'hsl.l', hsl.l), { r: 0, g: 0, b: 0 });
 }
 
 /**
  * Converts (validated) HSL components to RGB, as {@link hslToRgb} does: the hue is normalized into `[0, 360)` and
- * saturation and lightness are clamped to `[0, 100]`.
+ * saturation and lightness are clamped to `[0, 100]`. The channels are written into `target` (any other property, such
+ * as an alpha, is kept), which saves an allocation and keeps the shape of the callers' result objects.
+ * @template T - Type of the target object
  * @param {number} hue - A finite hue in degrees
  * @param {number} saturation - Saturation in percent (not `NaN`)
  * @param {number} lightness - Lightness in percent (not `NaN`)
- * @returns {Rgb} The colour with integer channels in `[0, 255]`
+ * @param {T} target - The object receiving the `r`, `g` and `b` channels (mutated)
+ * @returns {T} `target`, with integer channels in `[0, 255]`
  * @example
- * hslValuesToRgb(120, 100, 25); // => { r: 0, g: 128, b: 0 }
+ * hslValuesToRgb(120, 100, 25, { r: 0, g: 0, b: 0 }); // => { r: 0, g: 128, b: 0 }
  */
-function hslValuesToRgb(hue: number, saturation: number, lightness: number): Rgb {
-	const h = modulo(hue, 360);
+function hslValuesToRgb<T extends Rgb>(hue: number, saturation: number, lightness: number, target: T): T {
+	// The floating-point `%` inside `modulo` is slow: skip it for hues already in range.
+	const h = hue >= 0 && hue < 360 ? hue : modulo(hue, 360);
 	const l = clamp(lightness, 0, 100) / 100;
 	const chroma = (clamp(saturation, 0, 100) / 100) * Math.min(l, 1 - l);
-	return { r: hslChannel(0, h, l, chroma), g: hslChannel(8, h, l, chroma), b: hslChannel(4, h, l, chroma) };
+	target.r = hslChannel(0, h, l, chroma);
+	target.g = hslChannel(8, h, l, chroma);
+	target.b = hslChannel(4, h, l, chroma);
+	return target;
 }
 
 /**
@@ -519,7 +525,9 @@ function hslValuesToRgb(hue: number, saturation: number, lightness: number): Rgb
  * hslChannel(0, 0, 0.5, 0.5); // => 255
  */
 function hslChannel(offset: number, h: number, l: number, chroma: number): number {
-	const k = (offset + h / 30) % 12;
+	// `offset + h / 30` lies in `[0, 20)`: one exact subtraction replaces the (slow, floating-point) `% 12`.
+	let k = offset + h / 30;
+	if (k >= 12) k -= 12;
 	return toByte((l - chroma * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255);
 }
 
@@ -563,23 +571,9 @@ export function mix(colorA: ColorInput, colorB: ColorInput, weight = 0.5): Rgba 
 function shiftLightness(color: ColorInput, delta: number): Rgba {
 	const rgba = toRgba(color);
 	// No shortcut is needed for `delta = 0`: the HSL round trip is exact for every 8-bit colour.
-	const hsl = rgbToHsl(rgba);
-	const rgb = hslToRgb({ h: hsl.h, s: hsl.s, l: clamp(hsl.l + delta, 0, 100) });
-	return { r: rgb.r, g: rgb.g, b: rgb.b, a: rgba.a };
-}
-
-/**
- * Validates the `amount` argument of {@link lighten} and {@link darken}.
- * @param {string} name - Function name for the error message
- * @param {number} amount - The amount to validate
- * @returns {void}
- * @throws {TypeError} when `amount` is not a number
- * @throws {RangeError} when `amount` is not in `[0, 100]`
- * @example
- * assertAmount('lighten', 10); // ok
- */
-function assertAmount(name: string, amount: number): void {
-	assertNumber(name, 'amount', amount, amount >= 0 && amount <= 100, 'a number in [0, 100]');
+	const hsl = hslOf(rgba);
+	// `toRgba` returns a fresh object: overwrite its channels, keeping its alpha.
+	return hslValuesToRgb(hsl.h, hsl.s, hsl.l + delta, rgba);
 }
 
 /**
@@ -596,7 +590,7 @@ function assertAmount(name: string, amount: number): void {
  * lighten('#ffffff', 10); // => { r: 255, g: 255, b: 255, a: 1 }
  */
 export function lighten(color: ColorInput, amount: number): Rgba {
-	assertAmount('lighten', amount);
+	assertNumber('lighten', 'amount', amount, amount >= 0 && amount <= 100, 'a number in [0, 100]');
 	return shiftLightness(color, amount);
 }
 
@@ -613,7 +607,7 @@ export function lighten(color: ColorInput, amount: number): Rgba {
  * darken('#ff0000', 20); // => { r: 153, g: 0, b: 0, a: 1 }
  */
 export function darken(color: ColorInput, amount: number): Rgba {
-	assertAmount('darken', amount);
+	assertNumber('darken', 'amount', amount, amount >= 0 && amount <= 100, 'a number in [0, 100]');
 	return shiftLightness(color, -amount);
 }
 
@@ -630,7 +624,9 @@ export function darken(color: ColorInput, amount: number): Rgba {
 export function withAlpha(color: ColorInput, alpha: number): Rgba {
 	assertNumber('withAlpha', 'alpha', alpha, alpha >= 0 && alpha <= 1, 'a number in [0, 1]');
 	const rgba = toRgba(color);
-	return { r: rgba.r, g: rgba.g, b: rgba.b, a: alpha + 0 };
+	// `toRgba` returns a fresh object.
+	rgba.a = alpha + 0;
+	return rgba;
 }
 
 /**
@@ -711,6 +707,6 @@ export function getReadableTextColor<L extends ColorInput = '#ffffff', D extends
 export function meetsContrast(foreground: ColorInput, background: ColorInput, options: MeetsContrastOptions = {}): boolean {
 	const { level = 'AA', largeText = false } = options;
 	if (level !== 'AA' && level !== 'AAA') throw new RangeError(`meetsContrast: \`level\` must be 'AA' or 'AAA', got ${String(level)}`);
-	const threshold = largeText ? CONTRAST_THRESHOLDS[level].large : CONTRAST_THRESHOLDS[level].normal;
+	const threshold = level === 'AA' ? (largeText ? 3 : 4.5) : largeText ? 4.5 : 7;
 	return contrastRatio(foreground, background) >= threshold;
 }

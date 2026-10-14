@@ -92,6 +92,11 @@ function sizedCases(label, ours, others) {
 
 export default [
 	...sizedCases('sum', sum, { 'es-toolkit': esToolkit.sum, lodash: lodash.sum }),
+	{
+		name: 'sum (1k integers)',
+		fn: bind(sum, integers),
+		competitors: { 'es-toolkit': bind(esToolkit.sum, integers), lodash: bind(lodash.sum, integers) }
+	},
 	...sizedCases('average', average, { 'es-toolkit': esToolkit.mean, lodash: lodash.mean }),
 	...sizedCases('median', median, { 'es-toolkit': esToolkit.median }),
 	{

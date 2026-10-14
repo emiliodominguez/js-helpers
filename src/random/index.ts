@@ -157,55 +157,55 @@ function fromState(seedState: SeededRandomState): SeededRandom {
 		return nextUint32() / UINT32_RANGE;
 	}
 
-	return Object.freeze(
-		Object.assign(generator, {
-			int: function int(min: number, max: number): number {
-				assertNumber('SeededRandom.int', 'min', min, Number.isFinite(min), 'a finite number');
-				assertNumber('SeededRandom.int', 'max', max, Number.isFinite(max), 'a finite number');
-				const low = Math.ceil(min);
-				const high = Math.floor(max);
-				if (low > high) throw new RangeError(`SeededRandom.int: no integer exists in [${min}, ${max}]`);
-				if (!Number.isSafeInteger(low) || !Number.isSafeInteger(high) || high - low > Number.MAX_SAFE_INTEGER) {
-					throw new RangeError(`SeededRandom.int: [${min}, ${max}] must lie within safe integers and span at most 2 ** 53 values`);
-				}
-				return low + below(high - low + 1);
-			},
-			float: function float(min: number, max: number): number {
-				return randomBetween(min, max, generator);
-			},
-			bool: function bool(probability: number = 0.5): boolean {
-				return randomBoolean(probability, generator);
-			},
-			pick: function pick<T>(array: ReadonlyArray<T>): T | undefined {
-				return sample(array, generator);
-			},
-			shuffle: function shuffleCopy<T>(array: ReadonlyArray<T>): T[] {
-				return shuffle(array, generator);
-			},
-			fork: function fork(): SeededRandom {
-				// Mix the parent's outputs with distinct constants so the child state never mirrors the parent's.
-				return fromState([nextUint32() ^ 0x9e3779b9, nextUint32() ^ 0x243f6a88, nextUint32() ^ 0xb7e15162, nextUint32()]);
-			},
-			state: function state(): SeededRandomState {
-				return Object.freeze([a >>> 0, b >>> 0, c >>> 0, d >>> 0] as const);
-			},
-			restore: function restore(snapshot: SeededRandomState): void {
-				// An index loop (not `every`, which skips holes) so sparse arrays are rejected too.
-				let valid = Array.isArray(snapshot) && snapshot.length === 4;
-				for (let i = 0; valid && i < 4; i++) {
-					const word: unknown = snapshot[i];
-					valid = Number.isInteger(word) && (word as number) >= 0 && (word as number) < UINT32_RANGE;
-				}
-				if (!valid) {
-					throw new TypeError('SeededRandom.restore: `snapshot` must be an array of four unsigned 32-bit integers');
-				}
-				a = snapshot[0] | 0;
-				b = snapshot[1] | 0;
-				c = snapshot[2] | 0;
-				d = snapshot[3] | 0;
-			}
-		})
-	);
+	// Plain assignments: much cheaper than `Object.assign` with an object literal. The methods are per-instance closures
+	// (not prototype methods) so that they keep working when detached (`const { int } = rng`).
+	const rng = generator as SeededRandom;
+	rng.int = function int(min: number, max: number): number {
+		assertNumber('SeededRandom.int', 'min', min, Number.isFinite(min), 'a finite number');
+		assertNumber('SeededRandom.int', 'max', max, Number.isFinite(max), 'a finite number');
+		const low = Math.ceil(min);
+		const high = Math.floor(max);
+		if (low > high) throw new RangeError(`SeededRandom.int: no integer exists in [${min}, ${max}]`);
+		if (!Number.isSafeInteger(low) || !Number.isSafeInteger(high) || high - low > Number.MAX_SAFE_INTEGER) {
+			throw new RangeError(`SeededRandom.int: [${min}, ${max}] must lie within safe integers and span at most 2 ** 53 values`);
+		}
+		return low + below(high - low + 1);
+	};
+	rng.float = function float(min: number, max: number): number {
+		return randomBetween(min, max, generator);
+	};
+	rng.bool = function bool(probability: number = 0.5): boolean {
+		return randomBoolean(probability, generator);
+	};
+	rng.pick = function pick<T>(array: ReadonlyArray<T>): T | undefined {
+		return sample(array, generator);
+	};
+	rng.shuffle = function shuffleCopy<T>(array: ReadonlyArray<T>): T[] {
+		return shuffle(array, generator);
+	};
+	rng.fork = function fork(): SeededRandom {
+		// Mix the parent's outputs with distinct constants so the child state never mirrors the parent's.
+		return fromState([nextUint32() ^ 0x9e3779b9, nextUint32() ^ 0x243f6a88, nextUint32() ^ 0xb7e15162, nextUint32()]);
+	};
+	rng.state = function state(): SeededRandomState {
+		return Object.freeze([a >>> 0, b >>> 0, c >>> 0, d >>> 0] as const);
+	};
+	rng.restore = function restore(snapshot: SeededRandomState): void {
+		// An index loop (not `every`, which skips holes) so sparse arrays are rejected too.
+		let valid = Array.isArray(snapshot) && snapshot.length === 4;
+		for (let i = 0; valid && i < 4; i++) {
+			const word: unknown = snapshot[i];
+			valid = Number.isInteger(word) && (word as number) >= 0 && (word as number) < UINT32_RANGE;
+		}
+		if (!valid) {
+			throw new TypeError('SeededRandom.restore: `snapshot` must be an array of four unsigned 32-bit integers');
+		}
+		a = snapshot[0] | 0;
+		b = snapshot[1] | 0;
+		c = snapshot[2] | 0;
+		d = snapshot[3] | 0;
+	};
+	return Object.freeze(rng);
 }
 
 /**
@@ -392,9 +392,8 @@ function generateId(count: number, characters: string[], crypto: CryptoLike): st
 	const mask = (2 << (31 - Math.clz32((length - 1) | 1))) - 1;
 	const indexes = new Uint8Array(count);
 	if (mask === length - 1) {
-		// Every masked byte is a valid index: no rejection needed.
+		// Every masked byte is a valid index: no rejection needed (the mask is applied when the bytes are mapped to characters).
 		fillRandom(crypto, indexes);
-		for (let i = 0; i < count; i++) indexes[i] &= mask;
 	} else {
 		// Over-request bytes so a single batch usually suffices (the expected acceptance rate is `length / (mask + 1)` > 1/2).
 		const bytes = new Uint8Array(Math.min(Math.ceil((1.6 * mask * count) / length), MAX_RANDOM_VALUES_BYTES));
@@ -422,11 +421,12 @@ function generateId(count: number, characters: string[], crypto: CryptoLike): st
 			decoderClass = Decoder;
 			utf8Decoder = new (Decoder as new () => TextDecoderLike)();
 		}
-		for (let i = 0; i < count; i++) indexes[i] = codes[indexes[i]];
+		// Accepted indexes are below `length`, so masking them again is a no-op.
+		for (let i = 0; i < count; i++) indexes[i] = codes[indexes[i] & mask];
 		return (utf8Decoder as TextDecoderLike).decode(indexes);
 	}
 	let id = '';
-	for (let i = 0; i < count; i++) id += characters[indexes[i]];
+	for (let i = 0; i < count; i++) id += characters[indexes[i] & mask];
 	return id;
 }
 

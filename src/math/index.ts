@@ -35,37 +35,46 @@ function shiftDecimal(value: number, exponent: number): number {
  */
 function nextDown(value: number): number {
 	if (value === 0) return -Number.MIN_VALUE;
-	const view = new DataView(new ArrayBuffer(8));
-	view.setFloat64(0, value);
-	const bits = view.getBigUint64(0);
-	view.setBigUint64(0, value > 0 ? bits - BigInt(1) : bits + BigInt(1));
-	return view.getFloat64(0);
+	const double = new Float64Array([value]);
+	// Doubles of one sign are ordered like their bit patterns: step the magnitude down (positive) or up (negative).
+	new BigInt64Array(double.buffer)[0] += value > 0 ? -1n : 1n;
+	return double[0];
 }
 
 /**
- * Returns an ascending sorted copy of some numbers. Typed-array sorting is numeric and much faster than `Array#sort`
- * with a comparator; it places `NaN` last and `-0` before `0`, so the order never depends on the input order.
- * @param {ArrayLike<number>} numbers - The numbers to sort (not mutated)
- * @returns {Float64Array} A new, sorted array
+ * Whether `a` sorts after `b` in the total numeric order used by {@link sortedCopy}: ascending, `-0` before `0`, `NaN` last.
+ * @param {number} a - A number
+ * @param {number} b - Another number
+ * @returns {boolean} `true` when `a` sorts strictly after `b`
  * @example
- * sortedCopy([3, NaN, 1]); // => new Float64Array([1, 3, NaN])
+ * sortsAfter(0, -0); // => true
  */
-function sortedCopy(numbers: ArrayLike<number>): Float64Array {
-	return Float64Array.from(numbers).sort();
+function sortsAfter(a: number, b: number): boolean {
+	// `1 / 0 > 1 / -0`; a `NaN` (the only value not equal to itself) is larger than any number.
+	return a > b || (a === b ? 1 / a > 1 / b : a !== a && b === b);
 }
 
 /**
- * Throws unless both arguments `a` and `b` are integers.
- * @param {string} caller - Name of the calling function, used in the error message
- * @param {number} a - First value to check
- * @param {number} b - Second value to check
- * @returns {void}
- * @throws {TypeError} when `a` or `b` is not a number
- * @throws {RangeError} when `a` or `b` is not an integer
+ * Returns an ascending sorted copy of some numbers, in numeric order with `NaN` last and `-0` before `0`, so the order
+ * never depends on the input order. Typed-array sorting is much faster than `Array#sort` with a comparator, but allocating
+ * a typed array dominates for short inputs, which are insertion-sorted into a plain array instead.
+ * @param {ArrayLike<number>} numbers - The numbers to sort (not mutated)
+ * @returns {ArrayLike<number>} A new, sorted array
+ * @example
+ * Array.from(sortedCopy([3, NaN, 1])); // => [1, 3, NaN]
  */
-function assertIntegers(caller: string, a: number, b: number): void {
-	assertNumber(caller, 'a', a, Number.isInteger(a), 'an integer');
-	assertNumber(caller, 'b', b, Number.isInteger(b), 'an integer');
+function sortedCopy(numbers: ArrayLike<number>): ArrayLike<number> {
+	const length = numbers.length;
+	if (length > 32) return Float64Array.from(numbers).sort();
+	const sorted: number[] = [];
+	for (let i = 0; i < length; i++) {
+		// The same conversion as the typed array's (`+` throws on BigInts too).
+		const value = +numbers[i];
+		let j = i;
+		for (; j > 0 && sortsAfter(sorted[j - 1], value); j--) sorted[j] = sorted[j - 1];
+		sorted[j] = value;
+	}
+	return sorted;
 }
 
 /**
@@ -89,15 +98,10 @@ export function sum(numbers: ReadonlyArray<number>): number {
 	for (let i = 0; i < numbers.length; i++) {
 		const value = numbers[i];
 		const next = total + value;
-		if (Math.abs(total) >= Math.abs(value)) {
-			compensation += total - next + value;
-		} else {
-			compensation += value - next + total;
-		}
+		compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
 		total = next;
 	}
-	if (!Number.isFinite(total)) return total;
-	return total + compensation;
+	return Number.isFinite(total) ? total + compensation : total;
 }
 
 /**
@@ -122,42 +126,27 @@ export function sum(numbers: ReadonlyArray<number>): number {
  */
 export function round(number: number, decimals = 0): number {
 	assertNumber('round', 'decimals', decimals, Number.isInteger(decimals), 'an integer');
-	if (!Number.isFinite(number)) return number;
-
-	const negative = number < 0 || Object.is(number, -0);
-	const magnitude = Math.abs(number);
-	const rounded = roundMagnitude(magnitude, decimals);
-	// `undefined`: the number already has fewer fractional digits than requested, so rounding is the identity.
-	if (rounded === undefined) return number;
+	// Fast path: `number * 10 ** decimals` (exact power of ten, correctly rounded product) is within a few ulps of the
+	// decimal-shifted value, so unless it lies within a safety margin of a `.5` tie, both round to the same integer `k`, and
+	// `k / 10 ** decimals` (a correctly rounded division) is exactly the double nearest to the decimal `k e-decimals`.
+	// Away from ties, `Math.round` (ties towards +Infinity) agrees with rounding half away from zero, signs and `-0` included.
+	// Near ties, for huge values (the margin exceeds `0.5` beyond `2 ** 45`), for non-finite numbers and for `decimals` outside
+	// `0..22` (no exact power of ten: the product is `NaN`, which fails the margin test), the decimal strings are edited instead.
+	const scale = POWERS_OF_TEN[decimals];
+	const scaled = number * scale;
+	if (Math.abs(scaled - Math.floor(scaled) - 0.5) > Math.abs(scaled) * 2 ** -46) return Math.round(scaled) / scale;
+	// `1 / -0` is `-Infinity`.
+	const negative = 1 / number < 0;
+	const shifted = shiftDecimal(Math.abs(number), decimals);
+	// Non-finite input (whose string is not a number), or the number already has fewer fractional digits than requested:
+	// rounding is the identity.
+	if (!Number.isFinite(shifted)) return number;
+	const rounded = shiftDecimal(Math.round(shifted), -decimals);
 	return negative ? -rounded : rounded;
 }
 
 /** `10 ** k` for `k` in `0..22`, the powers of ten that are exactly representable as doubles. */
 const POWERS_OF_TEN: ReadonlyArray<number> = [1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22];
-
-/**
- * Rounds a non-negative finite number half up to `decimals` places, as {@link round} does, on its decimal representation.
- *
- * Fast path: `magnitude * 10 ** decimals` (exact power of ten, correctly rounded product) is within a few ulps of the
- * decimal-shifted value, so unless it lies within a safety margin of a `.5` tie, both round to the same integer `k`, and
- * `k / 10 ** decimals` (a correctly rounded division) is exactly the double nearest to the decimal `k e-decimals`.
- * Near ties, for huge values (the margin exceeds `0.5` beyond `2 ** 45`) and for `decimals` outside `0..22` (no exact
- * power of ten: the product is `NaN`, which fails the margin test), the decimal strings are edited instead.
- * @param {number} magnitude - A finite number `>= 0`
- * @param {number} decimals - An integer number of decimal places (may be negative)
- * @returns {number | undefined} The rounded magnitude, or `undefined` when the shifted value overflows (rounding is then the identity)
- * @example
- * roundMagnitude(1.005, 2); // => 1.01
- */
-function roundMagnitude(magnitude: number, decimals: number): number | undefined {
-	const scale = POWERS_OF_TEN[decimals];
-	const scaled = magnitude * scale;
-	const fraction = scaled - Math.floor(scaled);
-	if (Math.abs(fraction - 0.5) > scaled * 2 ** -46) return Math.round(scaled) / scale;
-	const shifted = shiftDecimal(magnitude, decimals);
-	if (!Number.isFinite(shifted)) return undefined;
-	return shiftDecimal(Math.round(shifted), -decimals);
-}
 
 /**
  * Calculates the arithmetic mean of an array of numbers (using the compensated {@link sum}).
@@ -498,9 +487,7 @@ export function mapRange(value: number, inMin: number, inMax: number, outMin: nu
  * inRange(-3, -2, -6); // => true // bounds swapped to [-6, -2)
  */
 export function inRange(value: number, start: number, end: number): boolean {
-	const low = Math.min(start, end);
-	const high = Math.max(start, end);
-	return value >= low && value < high;
+	return start <= end ? value >= start && value < end : value >= end && value < start;
 }
 
 /**
@@ -629,7 +616,8 @@ export function standardDeviation(numbers: ReadonlyArray<number>, options: Varia
  * gcd(0, 5); // => 5
  */
 export function gcd(a: number, b: number): number {
-	assertIntegers('gcd', a, b);
+	assertNumber('gcd', 'a', a, Number.isInteger(a), 'an integer');
+	assertNumber('gcd', 'b', b, Number.isInteger(b), 'an integer');
 	let x = Math.abs(a);
 	let y = Math.abs(b);
 	while (y !== 0) {
@@ -653,7 +641,8 @@ export function gcd(a: number, b: number): number {
  * lcm(0, 5); // => 0
  */
 export function lcm(a: number, b: number): number {
-	assertIntegers('lcm', a, b);
+	assertNumber('lcm', 'a', a, Number.isInteger(a), 'an integer');
+	assertNumber('lcm', 'b', b, Number.isInteger(b), 'an integer');
 	const divisor = gcd(a, b);
 	// The divisor is `0` only for lcm(0, 0).
 	return divisor === 0 ? 0 : Math.abs((a / divisor) * b);
@@ -846,11 +835,7 @@ export function cumulativeSum(numbers: Iterable<number>): number[] {
 	let compensation = 0;
 	for (const value of numbers) {
 		const next = total + value;
-		if (Math.abs(total) >= Math.abs(value)) {
-			compensation += total - next + value;
-		} else {
-			compensation += value - next + total;
-		}
+		compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
 		total = next;
 		result.push(Number.isFinite(total) ? total + compensation : total);
 	}
@@ -1066,7 +1051,7 @@ export function roundToStep(value: number, step: number): number {
 	assertNumber('roundToStep', 'step', step, step > 0 && step < Infinity, 'a finite number > 0');
 	if (!Number.isFinite(value)) return value;
 	// Work on the magnitude and restore the sign at the end, exactly like `round` (ties away from zero, `-0` preserved).
-	const negative = value < 0 || Object.is(value, -0);
+	const negative = 1 / value < 0;
 	const magnitude = Math.abs(value);
 	const stepDecimals = decimalPlaces(step);
 	const shift = Math.max(decimalPlaces(magnitude), stepDecimals);

@@ -413,17 +413,20 @@ function truncate(value: number): number {
 }
 
 /**
- * Moves `date` to the last millisecond of its local day (normally 23:59:59.999), computed as the start of the
- * next local day minus 1 ms so that it is correct even when the clock is set back around midnight.
+ * Moves `date` to the last millisecond of its local day, or of the `days - 1`-th local day after it (normally 23:59:59.999),
+ * computed as the start of the following local day minus 1 ms so that it is correct even when the clock is set back around midnight.
  * @param {Date} date - A valid date, which is mutated (callers pass a fresh copy)
- * @returns {Date} `date`, now at the end of its local day
+ * @param {number} [days=1] - `1` for the end of the same day, `2` for the end of the next day, and so on
+ * @returns {Date} `date`, now at the end of the requested local day
  * @throws {RangeError} when the end of the day is outside the representable range
  * @example
  * lastInstantOfDay(new Date(2024, 0, 1, 12)); // => new Date(2024, 0, 1, 23, 59, 59, 999)
+ * lastInstantOfDay(new Date(2024, 0, 1, 12), 3); // => new Date(2024, 0, 3, 23, 59, 59, 999)
  */
-function lastInstantOfDay(date: Date): Date {
-	// Hour 24 is the next local midnight: a single wall-clock conversion instead of `setDate(+1)` then `setHours(0)`.
-	date.setHours(24, 0, 0, 0);
+function lastInstantOfDay(date: Date, days = 1): Date {
+	// Hour `24 * days` is the local midnight `days` days later: a single wall-clock conversion instead of `setDate()` then
+	// `setHours(0)`, so no intermediate wall-clock time can be moved by a DST gap.
+	date.setHours(24 * days, 0, 0, 0);
 	date.setTime(date.getTime() - 1);
 
 	return ensureInRange(date);
@@ -504,7 +507,7 @@ export function addMonths(date: DateInput, amount: number): Date {
 
 	const totalMonths = result.getMonth() + amount;
 	const year = result.getFullYear() + Math.floor(totalMonths / 12);
-	const month = ((totalMonths % 12) + 12) % 12;
+	const month = mod(totalMonths, 12);
 
 	result.setFullYear(year, month, Math.min(result.getDate(), daysInMonth(year, month)));
 
@@ -717,8 +720,8 @@ export function endOfDay(date: DateInput): Date {
 export function startOfMonth(date: DateInput): Date {
 	const result = toValidDate(date);
 
-	result.setDate(1);
-	result.setHours(0, 0, 0, 0);
+	// Hour `-24 * n` of the current day is the midnight `n` days earlier: a single wall-clock conversion.
+	result.setHours(-24 * (result.getDate() - 1), 0, 0, 0);
 
 	return ensureInRange(result);
 }
@@ -735,9 +738,7 @@ export function startOfMonth(date: DateInput): Date {
 export function endOfMonth(date: DateInput): Date {
 	const result = toValidDate(date);
 
-	result.setDate(daysInMonth(result.getFullYear(), result.getMonth()));
-
-	return lastInstantOfDay(result);
+	return lastInstantOfDay(result, daysInMonth(result.getFullYear(), result.getMonth()) - result.getDate() + 1);
 }
 
 /**
@@ -756,8 +757,8 @@ export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Da
 
 	const result = toValidDate(date);
 
-	result.setDate(result.getDate() - ((result.getDay() - weekStartsOn + 7) % 7));
-	result.setHours(0, 0, 0, 0);
+	// Hour `-24 * n` of the current day is the midnight `n` days earlier: a single wall-clock conversion.
+	result.setHours(-24 * ((result.getDay() - weekStartsOn + 7) % 7), 0, 0, 0);
 
 	return ensureInRange(result);
 }
@@ -775,11 +776,7 @@ export function startOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Da
 export function endOfWeek(date: DateInput, weekStartsOn: WeekdayIndex = 0): Date {
 	assertWeekday('endOfWeek', weekStartsOn);
 
-	const result = startOfWeek(date, weekStartsOn);
-
-	result.setDate(result.getDate() + 6);
-
-	return lastInstantOfDay(result);
+	return lastInstantOfDay(startOfWeek(date, weekStartsOn), 7);
 }
 
 /**
@@ -1344,10 +1341,9 @@ export function startOfQuarter(date: DateInput): Date {
  */
 export function endOfQuarter(date: DateInput): Date {
 	const source = toValidDate(date);
-	const year = source.getFullYear();
-	const lastMonth = source.getMonth() - (source.getMonth() % 3) + 2;
 
-	return lastInstantOfDay(localMidnight(year, lastMonth, daysInMonth(year, lastMonth)));
+	// The instant before the first midnight of the next quarter.
+	return lastInstantOfDay(localMidnight(source.getFullYear(), source.getMonth() - (source.getMonth() % 3) + 3, 1), 0);
 }
 
 /**
@@ -1476,7 +1472,7 @@ export function isToday(date: DateInput, now: DateInput = new Date()): boolean {
  * isPast(5, 5); // => false
  */
 export function isPast(date: DateInput, now: DateInput = new Date()): boolean {
-	return timeOf(date) < timeOf(now);
+	return isBefore(date, now);
 }
 
 /**
@@ -1491,7 +1487,7 @@ export function isPast(date: DateInput, now: DateInput = new Date()): boolean {
  * isFuture(5, 5); // => false
  */
 export function isFuture(date: DateInput, now: DateInput = new Date()): boolean {
-	return timeOf(date) > timeOf(now);
+	return isAfter(date, now);
 }
 
 /**

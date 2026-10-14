@@ -20,6 +20,16 @@ describe('Math helpers', function () {
 			expect(helpers.sum([])).toBe(0);
 		});
 
+		it('should stay exact for int32 values, also after a non-integer and on long arrays', function () {
+			expect(helpers.sum([2 ** 31 - 1, 2 ** 31 - 1, -(2 ** 31)])).toBe(2 ** 31 - 2);
+			expect(helpers.sum([1, 2, 0.5, 2 ** 31 - 1, 1e100, -1e100])).toBe(2 ** 31 + 2.5);
+			const many = new Array(2 ** 21 + 1).fill(2 ** 31 - 1);
+			many[0] = 0.5;
+			many[1] = -0.5;
+			expect(helpers.sum(many)).toBe((2 ** 21 - 1) * (2 ** 31 - 1));
+			expect(helpers.sum(new Array(2 ** 21 + 1).fill(-1))).toBe(-(2 ** 21) - 1);
+		});
+
 		it('should compensate floating-point rounding errors', function () {
 			expect(helpers.sum([0.1, 0.2, 0.3])).toBe(0.6);
 			expect(helpers.sum([1e100, 1, -1e100])).toBe(1);
@@ -314,6 +324,20 @@ describe('Math helpers', function () {
 	});
 
 	describe('randomBetween', function () {
+		it('should compute minimum + r * (maximum - minimum) for finite spans', function () {
+			// The overflow-safe form `minimum * (1 - r) + maximum * r` would round differently here (0.27999999999999997, 1.5999999999999999).
+			expect(
+				helpers.randomBetween(0.1, 0.7, function () {
+					return 0.3;
+				})
+			).toBe(0.28);
+			expect(
+				helpers.randomBetween(1, 3, function () {
+					return 0.3;
+				})
+			).toBe(1.6);
+		});
+
 		it('should generate a random number between two specified numbers', function () {
 			for (let i = 0; i < 100; i++) {
 				const value = helpers.randomBetween(1, 10);
@@ -495,6 +519,12 @@ describe('Math helpers', function () {
 	});
 
 	describe('inRange', function () {
+		it('should check both swapped bounds', function () {
+			expect(helpers.inRange(-10, 0, -5)).toBe(false);
+			expect(helpers.inRange(-3, 0, -5)).toBe(true);
+			expect(helpers.inRange(0, 0, -5)).toBe(false);
+		});
+
 		it('should check the half-open range [start, end)', function () {
 			expect(helpers.inRange(3, 2, 4)).toBe(true);
 			expect(helpers.inRange(2, 2, 4)).toBe(true);
@@ -528,6 +558,26 @@ describe('Math helpers', function () {
 		it('should return the middle value for odd lengths', function () {
 			expect(helpers.median([3, 1, 2])).toBe(2);
 			expect(helpers.median([7])).toBe(7);
+		});
+
+		it('should order short and long inputs alike (NaN last, -0 before 0)', function () {
+			const descending = Array.from({ length: 41 }, function (_, index) {
+				return 40 - index;
+			});
+			expect(helpers.median(descending)).toBe(20);
+			// Long inputs (typed-array sort) must be sorted too: the middle element of this one is 12 before sorting.
+			const scrambled = Array.from({ length: 41 }, function (_, index) {
+				return (index * 17) % 41;
+			});
+			expect(helpers.median(scrambled)).toBe(20);
+			expect(helpers.quantile(scrambled, 0.1)).toBe(4);
+			expect(helpers.median(descending.slice(0, 32))).toBe(24.5);
+			expect(helpers.median(descending.concat(NaN))).toBeNaN();
+			expect(helpers.median([NaN, 1, 2])).toBeNaN();
+			expect(Object.is(helpers.median([0, -0, 0]), 0)).toBe(true);
+			expect(Object.is(helpers.median([0, -0, -0]), -0)).toBe(true);
+			expect(Object.is(helpers.median(new Array(17).fill(0).concat(new Array(16).fill(-0))), 0)).toBe(true);
+			expect(Object.is(helpers.median(new Array(16).fill(0).concat(new Array(17).fill(-0))), -0)).toBe(true);
 		});
 
 		it('should return the mean of the middle values for even lengths', function () {
@@ -656,6 +706,18 @@ describe('Math helpers', function () {
 	});
 
 	describe('lcm', function () {
+		it('should name the offending argument when it is not an integer', function () {
+			expect(function () {
+				helpers.lcm(1.5, 2);
+			}).toThrow(new RangeError('lcm: `a` must be an integer, got 1.5'));
+			expect(function () {
+				helpers.lcm(2, 1.5);
+			}).toThrow(new RangeError('lcm: `b` must be an integer, got 1.5'));
+			expect(function () {
+				helpers.gcd(2, '3' as unknown as number);
+			}).toThrow(new TypeError('gcd: `b` must be an integer, got string'));
+		});
+
 		it('should compute the least common multiple', function () {
 			expect(helpers.lcm(4, 6)).toBe(12);
 			expect(helpers.lcm(-3, 5)).toBe(15);
