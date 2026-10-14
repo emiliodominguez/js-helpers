@@ -1,8 +1,10 @@
+import { retry, withTimeout, type RetryOptions } from '../async/index.js';
 import {
 	debounce,
 	defaultMemoizeKey,
 	memoize as memoizeFunction,
 	noop,
+	once as onceFunction,
 	throttle,
 	type DebounceOptions,
 	type Debounced,
@@ -10,7 +12,7 @@ import {
 	type Throttled,
 	type ThrottleOptions
 } from '../functions/index.js';
-import type { AnyFunction } from '../utils/index.js';
+import type { AnyFunction, RandomGenerator } from '../utils/index.js';
 
 /**
  * Supported decorator flavours, detected from the arguments a decorator receives:
@@ -58,6 +60,20 @@ export interface UniversalMethodDecorator {
 	<T extends AnyFunction>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
 	<T extends AnyFunction>(value: T, context: ClassMethodDecoratorContext): T;
 }
+
+/**
+ * A method decorator for methods returning a promise, usable both with TypeScript's `experimentalDecorators` (and Babel legacy) and
+ * with TC39 standard decorators. Returned by {@link retryable} and {@link timeout}.
+ */
+export interface AsyncMethodDecorator {
+	<T extends (...args: never[]) => PromiseLike<unknown>>(target: object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
+	<T extends (...args: never[]) => PromiseLike<unknown>>(value: T, context: ClassMethodDecoratorContext): T;
+}
+
+/**
+ * Largest delay accepted by `setTimeout` (2^31 - 1 ms).
+ */
+const MAX_TIMEOUT = 2 ** 31 - 1;
 
 /**
  * Key used for the per-instance state of methods called with a non-object `this` (e.g. detached calls in sloppy code).
@@ -406,8 +422,10 @@ export function memoize(targetOrValue: unknown, keyOrContext: unknown, descripto
  *
  * - Legacy decorators: the method is replaced by a lazy getter that, on first access through an instance, binds the method and caches
  *   it as a (non-enumerable, writable) own property of that instance. Accessing it through the prototype returns the unbound method,
- *   and `super.method` accesses from an overriding subclass bind without caching (so the override is not shadowed).
+ *   and `super.method` accesses from an overriding subclass bind without caching (so the override is not shadowed). On non-extensible
+ *   (e.g. frozen) instances, a freshly bound method is returned on every access.
  * - Standard decorators: an initializer binds the method on each new instance (unless a subclass overrides it). Private methods are rejected.
+ *   When combining decorators, put `@bound` first (outermost), so that it sees the final method.
  * @template T - The method type
  * @param {object | T} targetOrValue - Legacy: the prototype (or constructor); standard: the method
  * @param {string | symbol | ClassMethodDecoratorContext} keyOrContext - Legacy: the method name; standard: the decorator context
@@ -474,7 +492,8 @@ export function bound(targetOrValue: unknown, keyOrContext: unknown, descriptor?
 
 		const boundMethod = method.bind(this) as UnknownMethod;
 
-		if (resolveDescriptor(this, key)?.get === get) {
+		// Cache only on extensible instances that still resolve to this getter (frozen/sealed instances get a fresh bound method).
+		if (Object.isExtensible(this) && resolveDescriptor(this, key)?.get === get) {
 			Object.defineProperty(this, key, { value: boundMethod, configurable: true, writable: true, enumerable: false });
 		}
 
@@ -597,4 +616,134 @@ export function deprecated(message?: string): UniversalMethodDecorator {
 			return method.apply(this, args);
 		};
 	});
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// once / retryable / timeout
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Wraps a method so that it runs at most once per instance.
+ * @param {UnknownMethod} method - The original method
+ * @returns {UnknownMethod} The restricted method
+ */
+function wrapOnce(method: UnknownMethod): UnknownMethod {
+	const perInstance = new WeakMap<object, UnknownMethod>();
+
+	return function onceMethod(this: unknown, ...args: unknown[]): unknown {
+		const owner = ownerOf(this);
+		let wrapped = perInstance.get(owner);
+
+		if (wrapped === undefined) {
+			wrapped = onceFunction(method);
+			perInstance.set(owner, wrapped);
+		}
+
+		return wrapped.apply(this, args);
+	};
+}
+
+/**
+ * Makes the decorated method run at most once per instance (per class for static methods), like `once` from the functions module:
+ * later calls on the same instance return the first result (or rethrow the first error) without running the method again, and a
+ * re-entrant call made by the method itself returns `undefined`. Each instance has its own state, garbage-collected with it.
+ * Works with TypeScript/Babel legacy decorators and with TC39 standard decorators.
+ * @template T - The method type
+ * @param {object | T} targetOrValue - Legacy: the prototype (or constructor); standard: the method
+ * @param {string | symbol | ClassMethodDecoratorContext} keyOrContext - Legacy: the method name; standard: the decorator context
+ * @param {TypedPropertyDescriptor<T>} [descriptor] - Legacy: the method descriptor
+ * @returns {TypedPropertyDescriptor<T> | T} Legacy: the new descriptor; standard: the wrapped method
+ * @throws {TypeError} when applied to something other than a method
+ * @example
+ * ```ts
+ * class Connection {
+ *   @once
+ *   connect(): Promise<void> { return this.socket.open(); }
+ * }
+ * ```
+ */
+export function once<T extends AnyFunction>(targetOrValue: object, keyOrContext: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T>;
+export function once<T extends AnyFunction>(targetOrValue: T, keyOrContext: ClassMethodDecoratorContext): T;
+/**
+ * Implementation of {@link once} (see the first overload for the full documentation).
+ * @param {unknown} targetOrValue - Legacy: the prototype (or constructor); standard: the method
+ * @param {unknown} keyOrContext - Legacy: the method name; standard: the decorator context
+ * @param {unknown} [descriptor] - Legacy: the method descriptor
+ * @returns {unknown} Legacy: the new descriptor; standard: the wrapped method
+ * @throws {TypeError} when applied to something other than a method
+ */
+export function once(targetOrValue: unknown, keyOrContext: unknown, descriptor?: unknown): unknown {
+	return decorateMethod('once', wrapOnce, targetOrValue, keyOrContext, descriptor);
+}
+
+/**
+ * Creates a decorator for async methods that retries failed calls with {@link retry} (exponential backoff, optional jitter,
+ * `shouldRetry`, `onRetry`, `signal`). Every attempt calls the original method with the same `this` and arguments. The decorated method
+ * always returns a native promise. Invalid options are reported when the method is called (as a rejection), like `retry` does.
+ * @param {RetryOptions} [options] - Options forwarded to {@link retry}
+ * @param {RandomGenerator} [random=Math.random] - Random source used for jitter
+ * @returns {AsyncMethodDecorator} The decorator (legacy and standard)
+ * @throws {TypeError} when applied to something other than a method
+ * @example
+ * ```ts
+ * class Api {
+ *   @retryable({ retries: 3, delay: 200, jitter: true })
+ *   getUser(id: string): Promise<User> { return this.http.get(`/users/${id}`); }
+ * }
+ * ```
+ */
+export function retryable(options: RetryOptions = {}, random: RandomGenerator = Math.random): AsyncMethodDecorator {
+	const snapshot: RetryOptions = { ...options };
+
+	return createMethodDecorator('retryable', function (method: UnknownMethod): UnknownMethod {
+		return function retryableMethod(this: unknown, ...args: unknown[]): Promise<unknown> {
+			// eslint-disable-next-line @typescript-eslint/no-this-alias -- every attempt needs the caller's `this`
+			const self = this;
+
+			return retry(
+				function (): unknown {
+					return method.apply(self, args);
+				},
+				snapshot,
+				random
+			);
+		};
+	}) as unknown as AsyncMethodDecorator;
+}
+
+/**
+ * Creates a decorator for async methods that rejects with a {@link TimeoutError} when the returned promise does not settle within
+ * `ms` milliseconds (using {@link withTimeout}; the timer is always cleared, but the underlying operation is not cancelled).
+ * A synchronous throw of the method becomes a rejection. `this` is preserved.
+ * @param {number} ms - The time limit in milliseconds (`0` to `2^31 - 1`)
+ * @param {string} [message] - Message of the `TimeoutError` (defaults to `Operation timed out after <ms> ms`)
+ * @returns {AsyncMethodDecorator} The decorator (legacy and standard)
+ * @throws {RangeError} when `ms` is negative, `NaN` or larger than `2^31 - 1`
+ * @throws {TypeError} when applied to something other than a method
+ * @example
+ * ```ts
+ * class Api {
+ *   @timeout(5000)
+ *   fetchReport(): Promise<Report> { ... }
+ * }
+ * ```
+ */
+export function timeout(ms: number, message?: string): AsyncMethodDecorator {
+	if (typeof ms !== 'number' || !(ms >= 0 && ms <= MAX_TIMEOUT)) {
+		throw new RangeError(`@timeout: \`ms\` must be a number between 0 and ${MAX_TIMEOUT}, got ${String(ms)}`);
+	}
+
+	return createMethodDecorator('timeout', function (method: UnknownMethod): UnknownMethod {
+		return function timeoutMethod(this: unknown, ...args: unknown[]): Promise<unknown> {
+			let result: unknown;
+
+			try {
+				result = method.apply(this, args);
+			} catch (error) {
+				return Promise.reject(error);
+			}
+
+			return withTimeout(result, ms, message);
+		};
+	}) as unknown as AsyncMethodDecorator;
 }

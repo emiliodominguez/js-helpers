@@ -11,6 +11,28 @@ type UnknownFunction = (this: unknown, ...args: unknown[]) => unknown;
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 /**
+ * Largest delay accepted by `setTimeout` (2^31 - 1 ms, about 24.8 days). Hosts fire larger delays after ~1 ms, so longer waits are
+ * split into several timers.
+ */
+const MAX_TIMEOUT = 2 ** 31 - 1;
+
+/**
+ * Starts a timer, clamping `delay` to {@link MAX_TIMEOUT}. Callers must re-check the elapsed time when it fires.
+ * @param {() => void} callback - The timer callback
+ * @param {number} delay - The requested delay in milliseconds
+ * @returns {TimerHandle} The timer handle
+ */
+function startTimer(callback: () => void, delay: number): TimerHandle {
+	return setTimeout(callback, Math.min(delay, MAX_TIMEOUT));
+}
+
+/**
+ * Strings that the default memoize key serialiser uses as markers for values JSON cannot represent (bigints, `NaN`, `±Infinity`,
+ * `-0`, top-level `undefined`), optionally preceded by backslashes. Real strings of this shape get one extra leading backslash.
+ */
+const SPECIAL_KEY_TOKEN = /^\\*(?:-?\d+n|NaN|-?Infinity|-0|undefined)$/;
+
+/**
  * Throws a `RangeError` unless `value` is a finite number `>= 0`.
  * @param {string} caller - Name of the public function, used in the error message
  * @param {string} name - Name of the validated parameter
@@ -330,10 +352,13 @@ export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, Retu
 /**
  * The default cache-key resolver used by {@link memoize} (and the `memoize` decorator).
  *
- * - A single primitive argument is used as the key itself, so `1` and `'1'`, `undefined` and `null`, or `NaN` are all distinct keys.
- * - Anything else (zero or several arguments, or an object) is serialised with `JSON.stringify(args)` (bigints are serialised as `'<n>n'`).
+ * - A single primitive argument (other than `-0`) is used as the key itself, so `1` and `'1'`, `undefined` and `null`, or `NaN` are all
+ *   distinct keys.
+ * - Anything else (zero or several arguments, an object, or `-0`) is serialised with `JSON.stringify(args)`. Values JSON cannot represent
+ *   get distinct markers: bigints become `'<n>n'`, and `NaN`, `Infinity`, `-Infinity`, `-0` and top-level `undefined` arguments become
+ *   those words; strings that look like such a marker are escaped with a leading backslash, so no two distinct primitives share a key.
  *
- * Limitations of the serialised form: functions, symbols and `undefined` inside arrays/objects collapse to `null` or are dropped,
+ * Limitations of the serialised form: functions, symbols and `undefined` nested inside arrays/objects collapse to `null` or are dropped,
  * `Map`/`Set` serialise as `{}`, objects are compared structurally (not by identity), key order matters, and circular structures throw.
  * Supply a custom `resolver` for such arguments.
  * @param {...unknown} args - The call arguments
@@ -342,18 +367,33 @@ export type Memoized<F extends AnyFunction, C extends MemoizeCache<unknown, Retu
  * @example
  * defaultMemoizeKey(1); // 1
  * defaultMemoizeKey('a', 2); // '["a",2]'
+ * defaultMemoizeKey(NaN, 2); // '["NaN",2]'
  */
 export function defaultMemoizeKey(...args: unknown[]): unknown {
 	if (args.length === 1) {
 		const [value] = args;
 		const isPrimitive = value === null || (typeof value !== 'object' && typeof value !== 'function');
 
-		// Strings starting with '[' could clash with a serialised argument list, so they go through the serialiser too.
-		if (isPrimitive && !(typeof value === 'string' && value.startsWith('['))) return value;
+		// Strings starting with '[' could clash with a serialised argument list, so they go through the serialiser too;
+		// -0 would be merged with 0 by `Map` (SameValueZero), so it is serialised as well.
+		if (isPrimitive && !(typeof value === 'string' && value.startsWith('[')) && !Object.is(value, -0)) return value;
 	}
 
-	return JSON.stringify(args, function (_key: string, value: unknown): unknown {
-		return typeof value === 'bigint' ? `${value.toString()}n` : value;
+	return JSON.stringify(args, function (this: unknown, _key: string, value: unknown): unknown {
+		switch (typeof value) {
+			case 'bigint':
+				return `${value.toString()}n`;
+			case 'number':
+				if (Object.is(value, -0)) return '-0';
+				return Number.isFinite(value) ? value : String(value);
+			case 'string':
+				return SPECIAL_KEY_TOKEN.test(value) ? `\\${value}` : value;
+			case 'undefined':
+				// Only top-level arguments: nested `undefined` keeps JSON semantics (dropped from objects, `null` in arrays).
+				return this === args ? 'undefined' : value;
+			default:
+				return value;
+		}
 	});
 }
 
@@ -463,7 +503,6 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	const call = fn as unknown as UnknownFunction;
 	let windowStart: number | undefined;
 	let timer: TimerHandle | undefined;
-	let hasPending = false;
 	let pendingThis: unknown;
 	let pendingArgs: unknown[] = [];
 	let result: unknown;
@@ -477,7 +516,6 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	 */
 	function invoke(thisArg: unknown, args: unknown[], time: number): unknown {
 		windowStart = time;
-		hasPending = false;
 		pendingThis = undefined;
 		pendingArgs = [];
 		result = call.apply(thisArg, args);
@@ -490,9 +528,19 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	 * @returns {void}
 	 */
 	function onWindowEnd(): void {
+		// The timer only runs while a trailing call is pending (a leading invocation or cancel() clears it first).
 		timer = undefined;
 
-		if (hasPending) invoke(pendingThis, pendingArgs, Date.now());
+		const now = Date.now();
+		const remaining = (windowStart as number) + wait - now;
+
+		// A long window is covered by several clamped timers; re-arm until it really ends (unless the clock went backwards).
+		if (remaining > 0 && remaining <= wait) {
+			schedule(remaining);
+			return;
+		}
+
+		invoke(pendingThis, pendingArgs, now);
 	}
 
 	/**
@@ -501,7 +549,7 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 	 * @returns {void}
 	 */
 	function schedule(delay: number): void {
-		if (timer === undefined) timer = setTimeout(onWindowEnd, delay);
+		if (timer === undefined) timer = startTimer(onWindowEnd, delay);
 	}
 
 	/**
@@ -526,7 +574,6 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 		}
 
 		if (trailing) {
-			hasPending = true;
 			// eslint-disable-next-line @typescript-eslint/no-this-alias -- the trailing invocation needs the latest call's `this`
 			pendingThis = this;
 			pendingArgs = args;
@@ -541,7 +588,6 @@ export function throttle<F extends AnyFunction>(fn: F, wait: number, options: Th
 			if (timer !== undefined) clearTimeout(timer);
 			timer = undefined;
 			windowStart = undefined;
-			hasPending = false;
 			pendingThis = undefined;
 			pendingArgs = [];
 		}
@@ -680,7 +726,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 		if (shouldInvoke(time)) {
 			trailingEdge(time);
 		} else {
-			timer = setTimeout(onTimer, remainingWait(time));
+			timer = startTimer(onTimer, remainingWait(time));
 		}
 	}
 
@@ -702,20 +748,20 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 			if (timer === undefined) {
 				// Leading edge of a new burst.
 				lastInvokeTime = time;
-				timer = setTimeout(onTimer, wait);
+				timer = startTimer(onTimer, wait);
 
 				return leading ? invoke(time) : result;
 			}
 
 			if (maxing) {
 				clearTimeout(timer);
-				timer = setTimeout(onTimer, wait);
+				timer = startTimer(onTimer, wait);
 
 				return invoke(time);
 			}
 		}
 
-		if (timer === undefined) timer = setTimeout(onTimer, wait);
+		if (timer === undefined) timer = startTimer(onTimer, wait);
 
 		return result;
 	}
@@ -757,6 +803,7 @@ export function debounce<F extends AnyFunction>(fn: F, wait: number, options: De
 /**
  * Creates a function that invokes `fn` only on its first call and returns that first result on every later call.
  * If the first call throws, every later call rethrows the same error. `this` is forwarded to the single invocation.
+ * A re-entrant call (made by `fn` itself, before its first invocation has returned) does not invoke `fn` again and returns `undefined`.
  * @template F - The type of the function
  * @param {F} fn - The function to restrict
  * @returns {F} A function that invokes `fn` at most once
@@ -770,20 +817,22 @@ export function once<F extends AnyFunction>(fn: F): F {
 	assertFunction('once', fn);
 
 	const call = fn as unknown as UnknownFunction;
-	let state: { ok: true; value: unknown } | { ok: false; error: unknown } | undefined;
+	let state: { status: 'running' } | { status: 'done'; value: unknown } | { status: 'failed'; error: unknown } | undefined;
 
 	return function onceWrapper(this: unknown, ...args: unknown[]): unknown {
 		if (state === undefined) {
+			state = { status: 'running' };
+
 			try {
-				state = { ok: true, value: call.apply(this, args) };
+				state = { status: 'done', value: call.apply(this, args) };
 			} catch (error) {
-				state = { ok: false, error };
+				state = { status: 'failed', error };
 			}
 		}
 
-		if (state.ok) return state.value;
+		if (state.status === 'failed') throw state.error;
 
-		throw state.error;
+		return state.status === 'done' ? state.value : undefined;
 	} as unknown as F;
 }
 
@@ -885,4 +934,214 @@ export function identity<T>(value: T): T {
  */
 export function noop(..._args: unknown[]): void {
 	// Intentionally empty.
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// attempt / times / flip / unary / constant / memoizeLast
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * A Go-style result tuple: `[error, undefined]` when the operation failed, `[undefined, value]` when it succeeded.
+ * Check `error !== undefined` (or use the value directly when your function cannot return `undefined`). Note that `throw undefined`
+ * produces `[undefined, undefined]`, which is indistinguishable from a successful `undefined` result.
+ * @template T - The success value type
+ * @example
+ * const [error, data] = attempt(JSON.parse, text);
+ * if (error !== undefined) console.error(error); else use(data);
+ */
+export type Result<T> = [error: unknown, result: undefined] | [error: undefined, result: T];
+
+/**
+ * Calls `fn(...args)` and captures its outcome as a {@link Result} tuple instead of throwing. Never throws: if `fn` is not a function,
+ * the `TypeError` is returned as the error. `fn` is called with an `undefined` `this`. For async functions use `attemptAsync`
+ * (from the async module): here a returned promise is just the success value.
+ * @template A - The parameter types of `fn`
+ * @template R - The return type of `fn`
+ * @param {(...args: A) => R} fn - The function to call
+ * @param {...A} args - The arguments to call it with
+ * @returns {Result<R>} `[undefined, result]` on success, `[error, undefined]` when `fn` threw
+ * @example
+ * attempt(JSON.parse, '{"a":1}'); // [undefined, { a: 1 }]
+ * attempt(JSON.parse, '{'); // [SyntaxError, undefined]
+ */
+export function attempt<A extends unknown[], R>(fn: (...args: A) => R, ...args: A): Result<R> {
+	try {
+		assertFunction('attempt', fn);
+
+		return [undefined, fn(...args)];
+	} catch (error) {
+		return [error, undefined];
+	}
+}
+
+/**
+ * Calls `fn` `n` times with the indexes `0` to `n - 1` and collects the results in a new array.
+ * @template R - The return type of `fn`
+ * @param {number} n - Number of calls (an integer between `0` and `2^32 - 1`)
+ * @param {(index: number) => R} fn - Called with each index
+ * @returns {R[]} The results, in index order
+ * @throws {RangeError} when `n` is not an integer between `0` and `2^32 - 1`
+ * @throws {TypeError} when `fn` is not a function
+ * @example
+ * times(3, function (i) { return i * i; }); // [0, 1, 4]
+ * times(0, Math.random); // []
+ */
+export function times<R>(n: number, fn: (index: number) => R): R[] {
+	assertCount('times', 'n', n);
+	if (n > 2 ** 32 - 1) throw new RangeError(`times: \`n\` must be at most ${2 ** 32 - 1}, got ${n}`);
+	assertFunction('times', fn);
+
+	const result = new Array<R>(n);
+
+	for (let i = 0; i < n; i++) result[i] = fn(i);
+
+	return result;
+}
+
+/**
+ * Reverses a tuple type. Non-tuple arrays (rest parameters) are returned unchanged, and optional trailing elements are dropped.
+ * @template T - The tuple to reverse
+ * @example
+ * type R = Reverse<[number, string, boolean]>; // [boolean, string, number]
+ */
+export type Reverse<T extends unknown[]> = number extends T['length'] ? T : T extends [infer Head, ...infer Tail] ? [...Reverse<Tail>, Head] : [];
+
+/**
+ * Creates a function that invokes `fn` with the arguments it receives in reverse order. `this` is forwarded.
+ * Only the arguments actually passed are reversed, so `flip(f)(a, b)` calls `f(b, a)` whatever `f.length` is. `flip(flip(f))` behaves like `f`.
+ * @template A - The parameter types of `fn`
+ * @template R - The return type of `fn`
+ * @param {(...args: A) => R} fn - The function whose arguments should be flipped
+ * @returns {(...args: Reverse<A>) => R} The flipped function
+ * @throws {TypeError} when `fn` is not a function
+ * @example
+ * function divide(a: number, b: number): number { return a / b; }
+ * flip(divide)(2, 10); // 5
+ */
+export function flip<A extends unknown[], R>(fn: (...args: A) => R): (...args: Reverse<A>) => R {
+	assertFunction('flip', fn);
+
+	const call = fn as unknown as UnknownFunction;
+
+	return function flipped(this: unknown, ...args: unknown[]): unknown {
+		return call.apply(this, args.reverse());
+	} as unknown as (...args: Reverse<A>) => R;
+}
+
+/**
+ * Creates a function that invokes `fn` with only its first argument, ignoring the others. `this` is forwarded.
+ * Useful with callbacks that receive extra arguments, such as `Array.prototype.map`'s index.
+ * @template T - The type of the first argument
+ * @template R - The return type of `fn`
+ * @param {(arg: T) => R} fn - The function to restrict
+ * @returns {(arg: T) => R} A function accepting (and forwarding) a single argument
+ * @throws {TypeError} when `fn` is not a function
+ * @example
+ * ['1', '2', '3'].map(unary(parseInt)); // [1, 2, 3] (instead of [1, NaN, NaN])
+ */
+export function unary<T, R>(fn: (arg: T) => R): (arg: T) => R {
+	assertFunction('unary', fn);
+
+	return function unaryWrapper(this: unknown, arg: T): R {
+		return (fn as (this: unknown, arg: T) => R).call(this, arg);
+	};
+}
+
+/**
+ * Creates a function that ignores its arguments and always returns `value` (the same reference every time).
+ * @template T - The value type
+ * @param {T} value - The value to return
+ * @returns {(...args: unknown[]) => T} A function returning `value`
+ * @example
+ * const zero = constant(0);
+ * [1, 2].map(zero); // [0, 0]
+ */
+export function constant<T>(value: T): (..._args: unknown[]) => T {
+	return function constantValue(): T {
+		return value;
+	};
+}
+
+/**
+ * Compares two argument lists element-wise with SameValueZero (`===`, except that `NaN` equals `NaN`). Lists of different lengths differ.
+ * @param {ReadonlyArray<unknown>} next - The new arguments
+ * @param {ReadonlyArray<unknown>} previous - The cached arguments
+ * @returns {boolean} `true` when both lists hold the same values
+ * @example
+ * shallowEqualArgs([1, NaN], [1, NaN]); // true
+ */
+export function shallowEqualArgs(next: ReadonlyArray<unknown>, previous: ReadonlyArray<unknown>): boolean {
+	if (next.length !== previous.length) return false;
+
+	for (let i = 0; i < next.length; i++) {
+		if (!sameValueZero(next[i], previous[i])) return false;
+	}
+
+	return true;
+}
+
+/**
+ * SameValueZero equality: like `===`, but `NaN` equals `NaN`.
+ * @param {unknown} a - First value
+ * @param {unknown} b - Second value
+ * @returns {boolean} Whether the values are SameValueZero-equal
+ */
+function sameValueZero(a: unknown, b: unknown): boolean {
+	return a === b || (a !== a && b !== b);
+}
+
+/**
+ * A function memoized with {@link memoizeLast}.
+ * @template F - The original function type
+ */
+export type MemoizedLast<F extends AnyFunction> = F & {
+	/** Forgets the cached call, so the next call invokes the function. */
+	clear(): void;
+};
+
+/**
+ * Creates a function that remembers only its latest call: when called again with equal arguments (and the same `this`), it returns the
+ * cached result without invoking `fn`; otherwise it invokes `fn` and replaces the cache. Unlike {@link memoize}, memory use is constant.
+ * Arguments are compared with `isEqual` (default: same length and SameValueZero element by element, see {@link shallowEqualArgs});
+ * `this` is compared with SameValueZero. If `fn` throws, nothing is cached and the previous cache entry is kept.
+ * @template F - The type of the function to memoize
+ * @param {F} fn - The function to memoize
+ * @param {(next: Parameters<F>, previous: Parameters<F>) => boolean} [isEqual=shallowEqualArgs] - Decides whether two argument lists are equal
+ * @returns {MemoizedLast<F>} The memoized function, with a `.clear()` method
+ * @throws {TypeError} when `fn` or `isEqual` is not a function
+ * @example
+ * const area = memoizeLast(function (w: number, h: number): number { return w * h; });
+ * area(2, 3); // 6 (computed)
+ * area(2, 3); // 6 (cached)
+ * area(3, 3); // 9 (computed, replaces the cache)
+ */
+export function memoizeLast<F extends AnyFunction>(fn: F, isEqual: (next: Parameters<F>, previous: Parameters<F>) => boolean = shallowEqualArgs): MemoizedLast<F> {
+	assertFunction('memoizeLast', fn);
+	assertFunction('memoizeLast', isEqual);
+
+	const call = fn as unknown as UnknownFunction;
+	const equal = isEqual as unknown as (next: unknown[], previous: unknown[]) => boolean;
+	let cache: { thisArg: unknown; args: unknown[]; result: unknown } | undefined;
+
+	/**
+	 * The memoized wrapper.
+	 * @param {...unknown} args - The call arguments
+	 * @returns {unknown} The cached or freshly computed result
+	 */
+	function memoizedLast(this: unknown, ...args: unknown[]): unknown {
+		if (cache !== undefined && sameValueZero(cache.thisArg, this) && equal(args, cache.args)) return cache.result;
+
+		const result = call.apply(this, args);
+		cache = { thisArg: this, args, result };
+
+		return result;
+	}
+
+	Object.defineProperty(memoizedLast, 'clear', {
+		value: function clear(): void {
+			cache = undefined;
+		}
+	});
+
+	return memoizedLast as unknown as MemoizedLast<F>;
 }

@@ -1,4 +1,5 @@
 import * as decorators from '.';
+import { sleep } from '../async/index.js';
 
 class Test {
 	@decorators.readonly
@@ -344,6 +345,14 @@ describe('Decorators', function () {
 			expect(Object.keys(test)).not.toContain('getId');
 		});
 
+		it('should work on frozen instances (previously threw when caching the bound method)', function () {
+			const frozen = Object.freeze(new Test(5));
+			const { getId } = frozen;
+			expect(getId()).toBe(5);
+			expect(frozen.getId()).toBe(5);
+			expect(Object.prototype.hasOwnProperty.call(frozen, 'getId')).toBe(false);
+		});
+
 		it('should return the unbound method through the prototype', function () {
 			const fromPrototype = Test.prototype.getId;
 			expect(fromPrototype.call(new Test(3))).toBe(3);
@@ -532,6 +541,306 @@ describe('Decorators', function () {
 			expect(wrapped()).toBe('x');
 			expect(wrapped()).toBe('x');
 			expect(warnSpy.mock.calls).toEqual([['legacyApi is deprecated.']]);
+		});
+	});
+});
+
+describe('Decorators (round 2)', function () {
+	afterEach(function () {
+		jest.clearAllTimers();
+		jest.useRealTimers();
+	});
+
+	describe('once', function () {
+		class Service {
+			static staticRuns = 0;
+			runs = 0;
+
+			name: string;
+
+			constructor(name: string) {
+				this.name = name;
+			}
+
+			@decorators.once
+			init(suffix: string): string {
+				this.runs++;
+				return `${this.name}${suffix}`;
+			}
+
+			@decorators.once
+			fail(): never {
+				this.runs++;
+				throw new Error(`fail ${this.name}`);
+			}
+
+			@decorators.once
+			static setup(): number {
+				Service.staticRuns++;
+				return Service.staticRuns;
+			}
+		}
+
+		it('should run once per instance and return the first result', function () {
+			const a = new Service('a');
+			const b = new Service('b');
+			expect([a.init('!'), a.init('?'), b.init('?')]).toEqual(['a!', 'a!', 'b?']);
+			expect([a.runs, b.runs]).toEqual([1, 1]);
+		});
+
+		it('should rethrow the first error on later calls', function () {
+			const a = new Service('a');
+			expect(function () {
+				a.fail();
+			}).toThrow('fail a');
+			expect(function () {
+				a.fail();
+			}).toThrow('fail a');
+			expect(a.runs).toBe(1);
+		});
+
+		it('should run static methods once per class', function () {
+			expect([Service.setup(), Service.setup()]).toEqual([1, 1]);
+		});
+
+		it('should work with subclass overrides calling super', function () {
+			class Sub extends Service {
+				override init(suffix: string): string {
+					return `sub:${super.init(suffix)}`;
+				}
+			}
+
+			const sub = new Sub('s');
+			expect([sub.init('1'), sub.init('2')]).toEqual(['sub:s1', 'sub:s1']);
+			expect(sub.runs).toBe(1);
+		});
+
+		it('should work as a standard decorator and reject non-methods', function () {
+			const spy = jest.fn(function () {
+				return 'x';
+			});
+			const wrapped = decorators.once(spy, fakeContext('method', 'm').context);
+			const a = {};
+			expect([wrapped.call(a), wrapped.call(a), wrapped.call({})]).toEqual(['x', 'x', 'x']);
+			expect(spy).toHaveBeenCalledTimes(2);
+			expect(function () {
+				(decorators.once as any)({}, 'getter', { get: function () {} });
+			}).toThrow(TypeError);
+			expect(function () {
+				(decorators.once as any)(undefined, fakeContext('getter', 'g').context);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('retryable', function () {
+		class Client {
+			attempts = 0;
+
+			private readonly failures: number;
+
+			constructor(failures: number) {
+				this.failures = failures;
+			}
+
+			@decorators.retryable({ retries: 3 })
+			async fetch(id: number): Promise<string> {
+				this.attempts++;
+				if (this.attempts <= this.failures) throw new Error(`attempt ${this.attempts} failed`);
+				return `item ${id} after ${this.attempts}`;
+			}
+
+			@decorators.retryable()
+			async fetchDefault(): Promise<number> {
+				this.attempts++;
+				if (this.attempts < 2) throw new Error('once');
+				return this.attempts;
+			}
+		}
+
+		it('should retry with the same this and arguments', async function () {
+			await expect(new Client(2).fetch(7)).resolves.toBe('item 7 after 3');
+			await expect(new Client(0).fetch(1)).resolves.toBe('item 1 after 1');
+			await expect(new Client(1).fetchDefault()).resolves.toBe(2);
+		});
+
+		it('should reject with the last error once retries are exhausted', async function () {
+			const client = new Client(10);
+			await expect(client.fetch(1)).rejects.toThrow('attempt 4 failed');
+			expect(client.attempts).toBe(4);
+		});
+
+		it('should wait between attempts, with jitter from the random source', async function () {
+			jest.useFakeTimers();
+
+			const times: number[] = [];
+			const start = Date.now();
+			const method = jest.fn(async function () {
+				times.push(Date.now() - start);
+				if (times.length < 3) throw new Error('again');
+				return 'ok';
+			});
+			const wrapped = decorators.retryable({ delay: 100, jitter: true }, function () {
+				return 0.5;
+			})(method, fakeContext('method', 'm').context);
+			const promise = wrapped();
+			await jest.advanceTimersByTimeAsync(1000);
+			await expect(promise).resolves.toBe('ok');
+			expect(times).toEqual([0, 50, 150]);
+		});
+
+		it('should snapshot the options and report invalid options on call', async function () {
+			const options = { retries: 0 };
+			const decorator = decorators.retryable(options);
+			options.retries = 5;
+			const method = jest.fn(async function () {
+				throw new Error('no retry');
+			});
+			await expect(decorator(method, fakeContext('method', 'm').context)()).rejects.toThrow('no retry');
+			expect(method).toHaveBeenCalledTimes(1);
+
+			const invalid = decorators.retryable({ retries: -1 })(method, fakeContext('method', 'm').context);
+			await expect(invalid()).rejects.toThrow(RangeError);
+		});
+
+		it('should turn synchronous throws into rejections and reject non-methods', async function () {
+			const wrapped = (decorators.retryable({ retries: 1 }) as any)(function () {
+				throw new Error('sync');
+			}, fakeContext('method', 'm').context);
+			await expect(wrapped()).rejects.toThrow('sync');
+			expect(function () {
+				(decorators.retryable() as any)({}, 'field', undefined);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('timeout', function () {
+		class Api {
+			private readonly latency: number;
+
+			constructor(latency: number) {
+				this.latency = latency;
+			}
+
+			@decorators.timeout(100)
+			async load(value: string): Promise<string> {
+				await sleep(this.latency);
+				return `${value}:${this.latency}`;
+			}
+		}
+
+		it('should resolve when the method settles in time, preserving this, and clear the timer', async function () {
+			jest.useFakeTimers();
+
+			const promise = new Api(50).load('x');
+			await jest.advanceTimersByTimeAsync(50);
+			await expect(promise).resolves.toBe('x:50');
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('should reject with a TimeoutError when too slow', async function () {
+			jest.useFakeTimers();
+
+			const promise = new Api(500).load('x');
+			const assertion = expect(promise).rejects.toMatchObject({ name: 'TimeoutError', message: 'Operation timed out after 100 ms' });
+			await jest.advanceTimersByTimeAsync(100);
+			await assertion;
+		});
+
+		it('should use a custom message and forward rejections and synchronous throws', async function () {
+			jest.useFakeTimers();
+
+			const slow = decorators.timeout(10, 'too slow')(function () {
+				return new Promise(function () {});
+			}, fakeContext('method', 'm').context);
+			const assertion = expect(slow()).rejects.toThrow('too slow');
+			await jest.advanceTimersByTimeAsync(10);
+			await assertion;
+
+			const rejecting = decorators.timeout(10)(function () {
+				return Promise.reject(new Error('rejected'));
+			}, fakeContext('method', 'm').context);
+			await expect(rejecting()).rejects.toThrow('rejected');
+
+			const throwing = (decorators.timeout(10) as any)(function () {
+				throw new Error('thrown');
+			}, fakeContext('method', 'm').context);
+			await expect(throwing()).rejects.toThrow('thrown');
+		});
+
+		it.each([-1, NaN, 2 ** 31, '10' as any])('should throw a RangeError eagerly for ms = %p', function (ms) {
+			expect(function () {
+				decorators.timeout(ms);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('edge cases: symbols, statics, getters, subclasses', function () {
+		const key = Symbol('compute');
+
+		class Edge {
+			calls = 0;
+
+			@decorators.memoize
+			[key](n: number): number {
+				this.calls++;
+				return n * 2;
+			}
+
+			@decorators.bound
+			static staticBound(): string {
+				return (this as unknown as { name: string }).name;
+			}
+
+			@decorators.debounced(10)
+			static staticDebounced(value: number): void {
+				staticDebouncedCalls.push(value);
+			}
+		}
+
+		const staticDebouncedCalls: number[] = [];
+
+		it('should support symbol-keyed methods (including in log messages)', function () {
+			const logSpy = jest.spyOn(console, 'log').mockImplementation(function () {});
+			const edge = new Edge();
+			expect([edge[key](2), edge[key](2)]).toEqual([4, 4]);
+			expect(edge.calls).toBe(1);
+
+			const descriptor = decorators.log({}, key, { value: function () {}, writable: true, configurable: true });
+			(descriptor.value as () => void)();
+			expect(logSpy).toHaveBeenCalledWith('Symbol(compute) method called with arguments:', []);
+		});
+
+		it('should bind static methods inherited by subclasses to the subclass', function () {
+			class SubEdge extends Edge {}
+
+			const { staticBound } = SubEdge;
+			expect(staticBound()).toBe('SubEdge');
+			expect(Edge.staticBound()).toBe('Edge');
+		});
+
+		it('should debounce static methods', function () {
+			jest.useFakeTimers();
+
+			Edge.staticDebounced(1);
+			Edge.staticDebounced(2);
+			jest.advanceTimersByTime(10);
+			expect(staticDebouncedCalls).toEqual([2]);
+		});
+
+		it('should reject getters for every method decorator', function () {
+			const getter = {
+				get: function () {
+					return 1;
+				},
+				configurable: true
+			};
+			[decorators.log, decorators.memoize, decorators.once, decorators.bound, decorators.debounced(1), decorators.throttled(1), decorators.deprecated()].forEach(
+				function (decorator: any) {
+					expect(function () {
+						decorator({}, 'value', getter);
+					}).toThrow(TypeError);
+				}
+			);
 		});
 	});
 });

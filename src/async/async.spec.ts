@@ -1,4 +1,19 @@
-import { AbortError, createDeferred, mapWithConcurrency, retry, sleep, TimeoutError, withTimeout } from '.';
+import {
+	AbortError,
+	attemptAsync,
+	createDeferred,
+	createLimiter,
+	debounceAsync,
+	mapWithConcurrency,
+	pollUntil,
+	promiseAllObject,
+	promiseAllSettledObject,
+	retry,
+	sequence,
+	sleep,
+	TimeoutError,
+	withTimeout
+} from '.';
 import type { AbortSignalLike } from '../utils/index.js';
 
 /**
@@ -286,6 +301,21 @@ describe('Async helpers', function () {
 			expect(fn).toHaveBeenCalledTimes(1);
 		});
 
+		it('should not call shouldRetry/onRetry when aborted during a failing attempt (previously announced a retry)', async function () {
+			const controller = new AbortController();
+			const onRetry = jest.fn();
+			const shouldRetry = jest.fn(function () {
+				return true;
+			});
+			const fn = jest.fn(async function () {
+				controller.abort(new Error('aborted mid-attempt'));
+				throw new Error('fail');
+			});
+			await expect(retry(fn, { signal: controller.signal, onRetry, shouldRetry })).rejects.toThrow('aborted mid-attempt');
+			expect(onRetry).not.toHaveBeenCalled();
+			expect(shouldRetry).not.toHaveBeenCalled();
+		});
+
 		it('should reject with an AbortError when aborted between attempts without a reason', async function () {
 			const signal = { aborted: false, addEventListener: jest.fn(), removeEventListener: jest.fn() };
 			const fn = jest.fn(async function () {
@@ -399,6 +429,514 @@ describe('Async helpers', function () {
 
 		it('should reject with a TypeError when mapper is not a function', async function () {
 			await expect(mapWithConcurrency([1], null as any)).rejects.toThrow(TypeError);
+		});
+	});
+});
+
+describe('Async helpers (round 2)', function () {
+	afterEach(function () {
+		jest.clearAllTimers();
+		jest.useRealTimers();
+	});
+
+	describe('attemptAsync', function () {
+		it('should resolve with [undefined, value] for promises and functions', async function () {
+			await expect(attemptAsync(Promise.resolve(1))).resolves.toEqual([undefined, 1]);
+			await expect(
+				attemptAsync(async function () {
+					return 'a';
+				})
+			).resolves.toEqual([undefined, 'a']);
+			await expect(
+				attemptAsync(function () {
+					return 2;
+				})
+			).resolves.toEqual([undefined, 2]);
+		});
+
+		it('should resolve with [error, undefined] for rejections and synchronous throws', async function () {
+			const error = new Error('x');
+			await expect(attemptAsync(Promise.reject(error))).resolves.toEqual([error, undefined]);
+			await expect(
+				attemptAsync(function () {
+					throw error;
+				})
+			).resolves.toEqual([error, undefined]);
+		});
+
+		it('should accept thenables', async function () {
+			const thenable: PromiseLike<number> = {
+				then: function (onFulfilled: any) {
+					return Promise.resolve(onFulfilled(5));
+				}
+			};
+			await expect(attemptAsync(thenable)).resolves.toEqual([undefined, 5]);
+		});
+	});
+
+	describe('createLimiter', function () {
+		it('should run at most `concurrency` tasks and expose the counts', async function () {
+			const limit = createLimiter(2);
+			const deferreds = [createDeferred<number>(), createDeferred<number>(), createDeferred<number>()];
+			const promises = deferreds.map(function (deferred) {
+				return limit(function () {
+					return deferred.promise;
+				});
+			});
+			expect([limit.activeCount, limit.pendingCount]).toEqual([2, 1]);
+
+			deferreds[0].resolve(0);
+			await promises[0];
+			await Promise.resolve();
+			expect([limit.activeCount, limit.pendingCount]).toEqual([2, 0]);
+
+			deferreds[1].resolve(1);
+			deferreds[2].resolve(2);
+			await expect(Promise.all(promises)).resolves.toEqual([0, 1, 2]);
+			await Promise.resolve();
+			expect([limit.activeCount, limit.pendingCount]).toEqual([0, 0]);
+		});
+
+		it('should start tasks in FIFO order and forward arguments', async function () {
+			const limit = createLimiter(1);
+			const started: number[] = [];
+			const results = await Promise.all(
+				[1, 2, 3, 4].map(function (n) {
+					return limit(
+						async function (value: number, factor: number) {
+							started.push(value);
+							await Promise.resolve();
+							return value * factor;
+						},
+						n,
+						10
+					);
+				})
+			);
+			expect(started).toEqual([1, 2, 3, 4]);
+			expect(results).toEqual([10, 20, 30, 40]);
+		});
+
+		it('should turn synchronous throws and rejections into rejections and free the slot', async function () {
+			const limit = createLimiter(1);
+			const first = limit(function () {
+				throw new Error('sync');
+			});
+			const second = limit(function () {
+				return Promise.reject(new Error('async'));
+			});
+			const third = limit(function () {
+				return 'ok';
+			});
+			await expect(first).rejects.toThrow('sync');
+			await expect(second).rejects.toThrow('async');
+			await expect(third).resolves.toBe('ok');
+		});
+
+		it('should reject with a TypeError for non-function tasks', async function () {
+			await expect(createLimiter(1)(42 as any)).rejects.toThrow(TypeError);
+		});
+
+		it('should discard queued tasks on clearQueue (never settling by default)', async function () {
+			const limit = createLimiter(1);
+			const blocker = createDeferred<void>();
+			const spy = jest.fn();
+			const running = limit(function () {
+				return blocker.promise;
+			});
+			const queued = limit(spy);
+			expect(limit.pendingCount).toBe(1);
+			limit.clearQueue();
+			expect(limit.pendingCount).toBe(0);
+			blocker.resolve();
+			await running;
+			expect(await stateOf(queued)).toBe('pending');
+			expect(spy).not.toHaveBeenCalled();
+		});
+
+		it('should reject discarded tasks with an AbortError when rejectOnClear is set', async function () {
+			const limit = createLimiter(1, { rejectOnClear: true });
+			const blocker = createDeferred<void>();
+			limit(function () {
+				return blocker.promise;
+			});
+			const queued = limit(jest.fn());
+			limit.clearQueue();
+			await expect(queued).rejects.toBeInstanceOf(AbortError);
+			blocker.resolve();
+		});
+
+		it('should support Infinity and long queues', async function () {
+			const unlimited = createLimiter(Infinity);
+			const deferreds = Array.from({ length: 5 }, function () {
+				return createDeferred<void>();
+			});
+			deferreds.forEach(function (deferred) {
+				unlimited(function () {
+					return deferred.promise;
+				});
+			});
+			expect(unlimited.activeCount).toBe(5);
+
+			const limit = createLimiter(3);
+			const results = await Promise.all(
+				Array.from({ length: 3000 }, function (_, i) {
+					return limit(function () {
+						return i;
+					});
+				})
+			);
+			expect(results[2999]).toBe(2999);
+			expect(limit.pendingCount).toBe(0);
+		});
+
+		it.each([0, -1, 1.5, NaN])('should throw a RangeError for concurrency = %p', function (concurrency) {
+			expect(function () {
+				createLimiter(concurrency);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('pollUntil', function () {
+		it('should resolve with the first truthy value, checking every interval', async function () {
+			jest.useFakeTimers();
+
+			let calls = 0;
+			const check = jest.fn(function () {
+				calls++;
+				return calls >= 3 ? `done after ${calls}` : null;
+			});
+			const promise = pollUntil(check, { interval: 50 });
+			expect(check).toHaveBeenCalledTimes(1);
+			await jest.advanceTimersByTimeAsync(50);
+			expect(check).toHaveBeenCalledTimes(2);
+			await jest.advanceTimersByTimeAsync(50);
+			await expect(promise).resolves.toBe('done after 3');
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('should wait for async checks without overlapping them', async function () {
+			jest.useFakeTimers();
+
+			let running = 0;
+			let maxRunning = 0;
+			let calls = 0;
+			const promise = pollUntil(
+				async function () {
+					running++;
+					maxRunning = Math.max(maxRunning, running);
+					await sleep(30);
+					running--;
+					calls++;
+					return calls === 2 ? 0 : calls === 3;
+				},
+				{ interval: 10 }
+			);
+			await jest.advanceTimersByTimeAsync(200);
+			await expect(promise).resolves.toBe(true);
+			expect(maxRunning).toBe(1);
+		});
+
+		it('should use the default interval', async function () {
+			jest.useFakeTimers();
+
+			let ready = false;
+			const promise = pollUntil(function () {
+				return ready;
+			});
+			await jest.advanceTimersByTimeAsync(99);
+			ready = true;
+			expect(await stateOf(promise)).toBe('pending');
+			await jest.advanceTimersByTimeAsync(1);
+			await expect(promise).resolves.toBe(true);
+		});
+
+		it('should reject with a TimeoutError and clean up', async function () {
+			jest.useFakeTimers();
+
+			const check = jest.fn(function () {
+				return false;
+			});
+			const promise = pollUntil(check, { interval: 10, timeout: 35 });
+			const assertion = expect(promise).rejects.toBeInstanceOf(TimeoutError);
+			await jest.advanceTimersByTimeAsync(35);
+			await assertion;
+			expect(jest.getTimerCount()).toBe(0);
+			expect(check).toHaveBeenCalledTimes(4);
+		});
+
+		it('should time out while an async check is still running and ignore its late result', async function () {
+			jest.useFakeTimers();
+
+			const promise = pollUntil(
+				function () {
+					return sleep(100).then(function () {
+						return 'late';
+					});
+				},
+				{ timeout: 20 }
+			);
+			const assertion = expect(promise).rejects.toBeInstanceOf(TimeoutError);
+			await jest.advanceTimersByTimeAsync(200);
+			await assertion;
+
+			const lateFailure = pollUntil(
+				function () {
+					return sleep(100).then(function () {
+						throw new Error('late failure');
+					});
+				},
+				{ timeout: 20 }
+			);
+			const lateAssertion = expect(lateFailure).rejects.toBeInstanceOf(TimeoutError);
+			await jest.advanceTimersByTimeAsync(200);
+			await lateAssertion;
+		});
+
+		it('should reject with the error of a failing check', async function () {
+			await expect(
+				pollUntil(function () {
+					throw new Error('sync fail');
+				})
+			).rejects.toThrow('sync fail');
+			await expect(
+				pollUntil(function () {
+					return Promise.reject(new Error('async fail'));
+				})
+			).rejects.toThrow('async fail');
+		});
+
+		it('should reject with the abort reason, before or during polling', async function () {
+			jest.useFakeTimers();
+
+			const pre = new AbortController();
+			pre.abort(new Error('pre'));
+			const check = jest.fn();
+			await expect(pollUntil(check, { signal: pre.signal })).rejects.toThrow('pre');
+			expect(check).not.toHaveBeenCalled();
+
+			const controller = new AbortController();
+			const promise = pollUntil(check, { signal: controller.signal, timeout: 1000 });
+			await jest.advanceTimersByTimeAsync(150);
+			controller.abort();
+			await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+			expect(jest.getTimerCount()).toBe(0);
+		});
+
+		it('should remove the abort listener once settled', async function () {
+			const signal = { aborted: false, addEventListener: jest.fn(), removeEventListener: jest.fn() };
+			await pollUntil(
+				function () {
+					return 1;
+				},
+				{ signal }
+			);
+			expect(signal.removeEventListener).toHaveBeenCalledWith('abort', signal.addEventListener.mock.calls[0][1]);
+		});
+
+		it.each([[{ interval: -1 }], [{ interval: NaN }], [{ timeout: -5 }], [{ timeout: 2 ** 31 }]])('should reject with a RangeError for %p', async function (options) {
+			await expect(pollUntil(jest.fn(), options)).rejects.toThrow(RangeError);
+		});
+
+		it('should reject with a TypeError for a non-function check', async function () {
+			await expect(pollUntil(null as any)).rejects.toThrow(TypeError);
+		});
+	});
+
+	describe('promiseAllObject / promiseAllSettledObject', function () {
+		it('should await every value and keep the keys', async function () {
+			const sym = Symbol('s');
+			const result = await promiseAllObject({ a: Promise.resolve(1), b: 'plain', [sym]: Promise.resolve(true) });
+			expect(result).toEqual({ a: 1, b: 'plain', [sym]: true });
+			expect(result[sym]).toBe(true);
+			const typed: { a: number; b: string } = result;
+			expect(typed.a).toBe(1);
+			await expect(promiseAllObject({})).resolves.toEqual({});
+		});
+
+		it('should reject with the first rejection', async function () {
+			await expect(promiseAllObject({ a: Promise.resolve(1), b: Promise.reject(new Error('b')) })).rejects.toThrow('b');
+		});
+
+		it('should keep __proto__ as an own key and ignore inherited and non-enumerable keys', async function () {
+			const input = JSON.parse('{"__proto__": 1, "x": 2}');
+			const inherited = Object.create({ inheritedKey: 1 }, { hidden: { value: 2, enumerable: false }, shown: { value: 3, enumerable: true } });
+			const result = await promiseAllObject(input);
+			expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+			expect(Object.keys(result)).toEqual(['__proto__', 'x']);
+			await expect(promiseAllObject(inherited)).resolves.toEqual({ shown: 3 });
+		});
+
+		it('should settle every value', async function () {
+			const error = new Error('x');
+			await expect(promiseAllSettledObject({ a: Promise.resolve(1), b: Promise.reject(error), c: 3 })).resolves.toEqual({
+				a: { status: 'fulfilled', value: 1 },
+				b: { status: 'rejected', reason: error },
+				c: { status: 'fulfilled', value: 3 }
+			});
+		});
+
+		it.each([null, 1, 'str', [1]])('should reject with a TypeError for %p', async function (input) {
+			await expect(promiseAllObject(input as any)).rejects.toThrow(TypeError);
+			await expect(promiseAllSettledObject(input as any)).rejects.toThrow(TypeError);
+		});
+	});
+
+	describe('debounceAsync', function () {
+		it('should share one invocation between all calls of a burst', async function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn(async function (query: string) {
+				return `results for ${query}`;
+			});
+			const search = debounceAsync(fn, 100);
+			const first = search('a');
+			const second = search('ab');
+			await jest.advanceTimersByTimeAsync(50);
+			const third = search('abc');
+			await jest.advanceTimersByTimeAsync(100);
+			await expect(Promise.all([first, second, third])).resolves.toEqual(['results for abc', 'results for abc', 'results for abc']);
+			expect(fn).toHaveBeenCalledTimes(1);
+
+			const next = search('x');
+			expect(next).not.toBe(first);
+			await jest.advanceTimersByTimeAsync(100);
+			await expect(next).resolves.toBe('results for x');
+		});
+
+		it('should reject every caller when fn throws or rejects, and preserve this', async function () {
+			jest.useFakeTimers();
+
+			const failing = debounceAsync(function (this: { name: string }) {
+				throw new Error(`sync ${this.name}`);
+			}, 10);
+			const obj = { name: 'obj', failing };
+			const a = obj.failing();
+			const b = obj.failing();
+			const assertions = Promise.all([expect(a).rejects.toThrow('sync obj'), expect(b).rejects.toThrow('sync obj')]);
+			await jest.advanceTimersByTimeAsync(10);
+			await assertions;
+
+			const rejecting = debounceAsync(function () {
+				return Promise.reject(new Error('async'));
+			}, 10);
+			const c = rejecting();
+			const assertion = expect(c).rejects.toThrow('async');
+			await jest.advanceTimersByTimeAsync(10);
+			await assertion;
+		});
+
+		it('should start a new burst for calls made while fn runs', async function () {
+			jest.useFakeTimers();
+
+			let inner: Promise<number> | undefined;
+			const fn = jest.fn(function (n: number): number {
+				if (n === 1) inner = debounced(2);
+				return n;
+			});
+			const debounced = debounceAsync(fn, 10);
+			const outer = debounced(1);
+			await jest.advanceTimersByTimeAsync(10);
+			await expect(outer).resolves.toBe(1);
+			await jest.advanceTimersByTimeAsync(10);
+			await expect(inner).resolves.toBe(2);
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('should cancel with an AbortError and flush on demand', async function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn(function (n: number) {
+				return n * 2;
+			});
+			const debounced = debounceAsync(fn, 100);
+			const cancelled = debounced(1);
+			debounced.cancel();
+			await expect(cancelled).rejects.toBeInstanceOf(AbortError);
+			expect(jest.getTimerCount()).toBe(0);
+			debounced.cancel();
+
+			expect(debounced.flush()).toBeUndefined();
+			const flushed = debounced(4);
+			expect(debounced.flush()).toBe(flushed);
+			await expect(flushed).resolves.toBe(8);
+			expect(fn).toHaveBeenCalledTimes(1);
+		});
+
+		it('should validate its arguments', function () {
+			expect(function () {
+				debounceAsync(null as any, 10);
+			}).toThrow(TypeError);
+			expect(function () {
+				debounceAsync(jest.fn(), -1);
+			}).toThrow(RangeError);
+			expect(function () {
+				debounceAsync(jest.fn(), 2 ** 31);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('sequence', function () {
+		it('should run tasks one at a time, in order', async function () {
+			const log: string[] = [];
+
+			function task(name: string, ticks: number) {
+				return async function () {
+					log.push(`start ${name}`);
+					for (let i = 0; i < ticks; i++) await Promise.resolve();
+					log.push(`end ${name}`);
+					return name;
+				};
+			}
+
+			await expect(sequence([task('a', 3), task('b', 0), task('c', 1)])).resolves.toEqual(['a', 'b', 'c']);
+			expect(log).toEqual(['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+		});
+
+		it('should accept sync tasks, empty input and pull lazily from generators', async function () {
+			await expect(sequence([])).resolves.toEqual([]);
+			const pulled: number[] = [];
+
+			function* tasks() {
+				for (let i = 0; i < 3; i++) {
+					pulled.push(i);
+					yield function () {
+						return i * 10;
+					};
+				}
+			}
+
+			await expect(sequence(tasks())).resolves.toEqual([0, 10, 20]);
+			expect(pulled).toEqual([0, 1, 2]);
+		});
+
+		it('should stop at the first error and close the iterator', async function () {
+			const ran: number[] = [];
+			let closed = false;
+
+			function* tasks() {
+				try {
+					yield function () {
+						ran.push(1);
+					};
+					yield function () {
+						throw new Error('second');
+					};
+					yield function () {
+						ran.push(3);
+					};
+				} finally {
+					closed = true;
+				}
+			}
+
+			await expect(sequence(tasks())).rejects.toThrow('second');
+			expect(ran).toEqual([1]);
+			expect(closed).toBe(true);
+		});
+
+		it('should reject with a TypeError for non-function tasks', async function () {
+			await expect(sequence([jest.fn(), 42 as any])).rejects.toThrow('task at index 1 is not a function');
 		});
 	});
 });

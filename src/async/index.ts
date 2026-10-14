@@ -1,4 +1,7 @@
+import { debounce, type Result } from '../functions/index.js';
 import type { AbortSignalLike, RandomGenerator } from '../utils/index.js';
+
+export type { Result } from '../functions/index.js';
 
 /**
  * Largest delay accepted by `setTimeout` (2^31 - 1 ms, about 24.8 days); larger values fire immediately on most hosts.
@@ -231,7 +234,10 @@ export async function retry<T>(fn: (attempt: number) => Promise<T> | T, options:
 		try {
 			return await fn(attempt);
 		} catch (error) {
-			if (attempt > retries || (shouldRetry !== undefined && !shouldRetry(error, attempt))) throw error;
+			if (attempt > retries) throw error;
+			// Aborted while the attempt was running: no retry will happen, so don't ask about or announce one.
+			if (signal?.aborted) throw abortReason(signal);
+			if (shouldRetry !== undefined && !shouldRetry(error, attempt)) throw error;
 
 			onRetry?.(error, attempt);
 
@@ -290,6 +296,488 @@ export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item
 	for (let i = 0; i < Math.min(concurrency, list.length); i++) workers.push(worker());
 
 	await Promise.all(workers);
+
+	return results;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// attemptAsync / createLimiter / pollUntil / promiseAllObject / debounceAsync / sequence
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Throws a `TypeError` unless `value` is callable.
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {string} name - Name of the validated parameter
+ * @param {unknown} value - The value to validate
+ * @returns {void}
+ * @throws {TypeError} when `value` is not a function
+ */
+function assertFunction(caller: string, name: string, value: unknown): asserts value is (...args: never[]) => unknown {
+	if (typeof value !== 'function') throw new TypeError(`${caller}: expected \`${name}\` to be a function, got ${typeof value}`);
+}
+
+/**
+ * Awaits a promise (or calls a possibly async function and awaits its result) and captures the outcome as a {@link Result} tuple.
+ * The returned promise never rejects: synchronous throws and rejections both become `[error, undefined]`.
+ * @template T - The resolved value type
+ * @param {PromiseLike<T> | (() => PromiseLike<T> | T)} fnOrPromise - A promise, or a function to call (with no arguments)
+ * @returns {Promise<Result<T>>} `[undefined, value]` on success, `[error, undefined]` on failure
+ * @example
+ * const [error, user] = await attemptAsync(fetchUser(id));
+ * const [readError, text] = await attemptAsync(function () { return fs.promises.readFile(path, 'utf8'); });
+ */
+export async function attemptAsync<T>(fnOrPromise: PromiseLike<T> | (() => PromiseLike<T> | T)): Promise<Result<T>> {
+	try {
+		const value = typeof fnOrPromise === 'function' ? await fnOrPromise() : await fnOrPromise;
+
+		return [undefined, value];
+	} catch (error) {
+		return [error, undefined];
+	}
+}
+
+/**
+ * Options accepted by {@link createLimiter}.
+ */
+export interface LimiterOptions {
+	/** When `true`, {@link Limiter.clearQueue} rejects the promises of the discarded tasks with an {@link AbortError}. Defaults to `false` (they never settle). */
+	rejectOnClear?: boolean;
+}
+
+/**
+ * A concurrency limiter as returned by {@link createLimiter}.
+ */
+export interface Limiter {
+	/**
+	 * Runs `fn(...args)` as soon as fewer than `concurrency` tasks are active (immediately and synchronously when a slot is free),
+	 * and settles like its result. Synchronous throws become rejections.
+	 */
+	<A extends unknown[], T>(fn: (...args: A) => PromiseLike<T> | T, ...args: A): Promise<T>;
+	/** Number of tasks currently running. */
+	readonly activeCount: number;
+	/** Number of tasks waiting for a free slot. */
+	readonly pendingCount: number;
+	/** Discards the waiting tasks (running tasks are not affected). */
+	clearQueue(): void;
+}
+
+/**
+ * A queued limiter task.
+ */
+interface LimiterTask {
+	readonly run: () => void;
+	readonly reject: (reason: unknown) => void;
+}
+
+/**
+ * Creates a limiter that runs at most `concurrency` tasks at the same time, starting waiting tasks in FIFO order (like `p-limit`).
+ * @param {number} concurrency - Maximum number of tasks running at once (an integer >= 1, or `Infinity`)
+ * @param {LimiterOptions} [options] - `rejectOnClear` (default `false`)
+ * @returns {Limiter} The `limit(fn, ...args)` function, with `activeCount`, `pendingCount` and `clearQueue()`
+ * @throws {RangeError} when `concurrency` is not an integer >= 1 or `Infinity`
+ * @example
+ * const limit = createLimiter(2);
+ * const pages = await Promise.all(urls.map(function (url) { return limit(fetchText, url); }));
+ */
+export function createLimiter(concurrency: number, options: LimiterOptions = {}): Limiter {
+	if (!(concurrency === Infinity || (Number.isInteger(concurrency) && concurrency >= 1))) {
+		throw new RangeError(`createLimiter: \`concurrency\` must be an integer >= 1 or Infinity, got ${String(concurrency)}`);
+	}
+
+	const rejectOnClear = options.rejectOnClear ?? false;
+	let queue: LimiterTask[] = [];
+	let head = 0;
+	let active = 0;
+
+	/**
+	 * Starts waiting tasks while slots are free.
+	 * @returns {void}
+	 */
+	function startNext(): void {
+		while (active < concurrency && head < queue.length) {
+			const task = queue[head];
+			head++;
+
+			// Compact the queue once the consumed prefix dominates, keeping dequeues O(1) amortised.
+			if (head > 1024 && head * 2 > queue.length) {
+				queue = queue.slice(head);
+				head = 0;
+			}
+
+			task.run();
+		}
+	}
+
+	/**
+	 * The limiter function.
+	 * @param {(...args: unknown[]) => unknown} fn - The task
+	 * @param {...unknown} args - Arguments for the task
+	 * @returns {Promise<unknown>} Settles like the task
+	 */
+	function limit(fn: (...args: unknown[]) => unknown, ...args: unknown[]): Promise<unknown> {
+		return new Promise<unknown>(function (resolve, reject) {
+			assertFunction('createLimiter', 'fn', fn);
+
+			/**
+			 * Runs the task in a slot and releases the slot once it settles.
+			 * @returns {void}
+			 */
+			function run(): void {
+				active++;
+
+				let outcome: Promise<unknown>;
+
+				try {
+					outcome = Promise.resolve(fn(...args));
+				} catch (error) {
+					outcome = Promise.reject(error);
+				}
+
+				outcome.then(resolve, reject).then(function () {
+					active--;
+					startNext();
+				});
+			}
+
+			if (active < concurrency) {
+				run();
+			} else {
+				queue.push({ run, reject });
+			}
+		});
+	}
+
+	Object.defineProperties(limit, {
+		activeCount: {
+			get: function (): number {
+				return active;
+			}
+		},
+		pendingCount: {
+			get: function (): number {
+				return queue.length - head;
+			}
+		},
+		clearQueue: {
+			value: function clearQueue(): void {
+				const discarded = queue.slice(head);
+
+				queue = [];
+				head = 0;
+
+				if (rejectOnClear) {
+					discarded.forEach(function (task) {
+						task.reject(new AbortError('The task was removed from the limiter queue.'));
+					});
+				}
+			}
+		}
+	});
+
+	return limit as unknown as Limiter;
+}
+
+/**
+ * Values considered falsy by JavaScript, removed from a type by {@link Truthy}.
+ */
+type Falsy = false | 0 | 0n | '' | null | undefined;
+
+/**
+ * `T` without its falsy members (`false`, `0`, `0n`, `''`, `null`, `undefined`).
+ * @template T - The type to narrow
+ * @example
+ * type T = Truthy<string | null>; // string
+ */
+export type Truthy<T> = Exclude<T, Falsy>;
+
+/**
+ * Options accepted by {@link pollUntil}.
+ */
+export interface PollOptions {
+	/** Delay in ms between the end of one check and the start of the next. Defaults to `100`. */
+	interval?: number;
+	/** Overall time limit in ms, after which the promise rejects with a {@link TimeoutError}. Defaults to `Infinity`. */
+	timeout?: number;
+	/** Stops polling, rejecting with the signal's `reason` (or an {@link AbortError}). */
+	signal?: AbortSignalLike;
+}
+
+/**
+ * Calls `check` immediately and then every `interval` ms (waiting for async checks to settle in between, so checks never overlap)
+ * until it returns (or resolves to) a truthy value, and resolves with that value. All timers and listeners are cleaned up on settle.
+ * @template T - The value produced by `check`
+ * @param {() => T | PromiseLike<T>} check - The condition to poll
+ * @param {PollOptions} [options] - `interval` (100), `timeout` (Infinity) and `signal`
+ * @returns {Promise<Truthy<Awaited<T>>>} The first truthy value
+ * @throws {TimeoutError} (as a rejection) when no truthy value was produced within `timeout` ms
+ * @throws {RangeError} (as a rejection) when `interval` is not a number between `0` and `2^31 - 1`, or `timeout` is neither such a number nor `Infinity`
+ * @throws {TypeError} (as a rejection) when `check` is not a function
+ * @throws {unknown} (as a rejection) the error thrown or rejected by `check`, or the abort reason of `signal`
+ * @example
+ * const element = await pollUntil(function () { return document.querySelector('#app'); }, { interval: 50, timeout: 5000 });
+ */
+export function pollUntil<T>(check: () => T | PromiseLike<T>, options: PollOptions = {}): Promise<Truthy<Awaited<T>>> {
+	return new Promise<Truthy<Awaited<T>>>(function (resolve, reject) {
+		const { interval = 100, timeout = Infinity, signal } = options;
+
+		assertFunction('pollUntil', 'check', check);
+		assertDelay('pollUntil', 'interval', interval);
+		if (timeout !== Infinity) assertDelay('pollUntil', 'timeout', timeout);
+
+		if (signal?.aborted) {
+			reject(abortReason(signal));
+			return;
+		}
+
+		let settled = false;
+		let pollTimer: ReturnType<typeof setTimeout> | undefined;
+		const deadlineTimer =
+			timeout === Infinity
+				? undefined
+				: setTimeout(function () {
+						finish(reject, new TimeoutError(`pollUntil: condition not met within ${timeout} ms`));
+					}, timeout);
+
+		/**
+		 * Settles the promise once and releases timers and the abort listener.
+		 * @param {(value: never) => void} settle - `resolve` or `reject`
+		 * @param {unknown} value - The value or reason
+		 * @returns {void}
+		 */
+		function finish(settle: (value: never) => void, value: unknown): void {
+			if (settled) return;
+
+			settled = true;
+			clearTimeout(pollTimer);
+			clearTimeout(deadlineTimer);
+			signal?.removeEventListener('abort', onAbort);
+			settle(value as never);
+		}
+
+		/**
+		 * Abort listener.
+		 * @returns {void}
+		 */
+		function onAbort(): void {
+			finish(reject, abortReason(signal as AbortSignalLike));
+		}
+
+		/**
+		 * Runs one check and schedules the next one if needed.
+		 * @returns {void}
+		 */
+		function poll(): void {
+			pollTimer = undefined;
+
+			let outcome: Promise<Awaited<T>>;
+
+			try {
+				outcome = Promise.resolve(check()) as Promise<Awaited<T>>;
+			} catch (error) {
+				outcome = Promise.reject(error);
+			}
+
+			outcome.then(
+				function (value) {
+					if (settled) return;
+					if (value) {
+						finish(resolve, value);
+					} else {
+						pollTimer = setTimeout(poll, interval);
+					}
+				},
+				function (error: unknown) {
+					finish(reject, error);
+				}
+			);
+		}
+
+		signal?.addEventListener('abort', onAbort, { once: true });
+		poll();
+	});
+}
+
+/**
+ * Collects own enumerable string and symbol keys of a plain input object for the `promiseAll*Object` helpers.
+ * @param {string} caller - Name of the public function, used in the error message
+ * @param {unknown} obj - The input
+ * @returns {PropertyKey[]} The keys
+ * @throws {TypeError} when `obj` is not a non-array object
+ */
+function objectKeys(caller: string, obj: unknown): PropertyKey[] {
+	if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+		throw new TypeError(`${caller}: expected a non-array object, got ${Array.isArray(obj) ? 'an array' : obj === null ? 'null' : typeof obj}`);
+	}
+
+	return Reflect.ownKeys(obj).filter(function (key) {
+		return Object.prototype.propertyIsEnumerable.call(obj, key);
+	});
+}
+
+/**
+ * Builds a plain object from parallel key/value lists, defining properties so that keys like `__proto__` stay ordinary own properties.
+ * @param {PropertyKey[]} keys - The keys
+ * @param {unknown[]} values - The values, in key order
+ * @returns {Record<PropertyKey, unknown>} The new object
+ */
+function zipObject(keys: PropertyKey[], values: unknown[]): Record<PropertyKey, unknown> {
+	const result: Record<PropertyKey, unknown> = {};
+
+	keys.forEach(function (key, i) {
+		Object.defineProperty(result, key, { value: values[i], enumerable: true, writable: true, configurable: true });
+	});
+
+	return result;
+}
+
+/**
+ * Like `Promise.all`, but for an object of promises (or values): resolves with an object with the same keys and the awaited values.
+ * Rejects with the first rejection. Own enumerable string and symbol keys are used; the input is not mutated.
+ * @template T - The input object type
+ * @param {T} obj - An object whose values are promises or plain values
+ * @returns {Promise<{ [K in keyof T]: Awaited<T[K]> }>} The awaited values, keyed like `obj`
+ * @throws {TypeError} (as a rejection) when `obj` is not a non-array object
+ * @example
+ * const { user, posts } = await promiseAllObject({ user: getUser(id), posts: getPosts(id) });
+ */
+export async function promiseAllObject<T extends object>(obj: T): Promise<{ -readonly [K in keyof T]: Awaited<T[K]> }> {
+	const keys = objectKeys('promiseAllObject', obj);
+	const values = await Promise.all(
+		keys.map(function (key) {
+			return (obj as Record<PropertyKey, unknown>)[key];
+		})
+	);
+
+	return zipObject(keys, values) as { -readonly [K in keyof T]: Awaited<T[K]> };
+}
+
+/**
+ * Like `Promise.allSettled`, but for an object of promises (or values): resolves with an object with the same keys and a
+ * `PromiseSettledResult` for each value. Never rejects (except for invalid input). Own enumerable string and symbol keys are used.
+ * @template T - The input object type
+ * @param {T} obj - An object whose values are promises or plain values
+ * @returns {Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }>} The settled results, keyed like `obj`
+ * @throws {TypeError} (as a rejection) when `obj` is not a non-array object
+ * @example
+ * const results = await promiseAllSettledObject({ a: Promise.resolve(1), b: Promise.reject(new Error('x')) });
+ * results.a; // { status: 'fulfilled', value: 1 }
+ * results.b; // { status: 'rejected', reason: Error('x') }
+ */
+export async function promiseAllSettledObject<T extends object>(obj: T): Promise<{ -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> }> {
+	const keys = objectKeys('promiseAllSettledObject', obj);
+	const values = await Promise.allSettled(
+		keys.map(function (key) {
+			return (obj as Record<PropertyKey, unknown>)[key];
+		})
+	);
+
+	return zipObject(keys, values) as { -readonly [K in keyof T]: PromiseSettledResult<Awaited<T[K]>> };
+}
+
+/**
+ * A debounced async function as returned by {@link debounceAsync}.
+ * @template F - The original function type
+ */
+export interface DebouncedAsync<F extends (...args: never[]) => unknown> {
+	(this: ThisParameterType<F>, ...args: Parameters<F>): Promise<Awaited<ReturnType<F>>>;
+	/** Cancels the pending invocation; the promises of the current burst reject with an {@link AbortError}. */
+	cancel(): void;
+	/** Performs the pending invocation now and returns its shared promise (`undefined` when nothing is pending). */
+	flush(): Promise<Awaited<ReturnType<F>>> | undefined;
+}
+
+/**
+ * Creates a debounced version of a (possibly async) function: `fn` is invoked `wait` ms after the last call of a burst, with the latest
+ * `this` and arguments, and every call of the burst returns a promise that settles with the result of that single invocation.
+ * Calls made while an invocation is running start a new burst.
+ * @template F - The type of the function to debounce
+ * @param {F} fn - The function to debounce
+ * @param {number} wait - The quiet period in milliseconds (`0` to `2^31 - 1`)
+ * @returns {DebouncedAsync<F>} The debounced function, with `.cancel()` and `.flush()`
+ * @throws {TypeError} when `fn` is not a function
+ * @throws {RangeError} when `wait` is negative, `NaN` or larger than `2^31 - 1`
+ * @example
+ * const search = debounceAsync(function (query: string) { return api.search(query); }, 300);
+ * input.addEventListener('input', async function () { render(await search(input.value)); });
+ */
+export function debounceAsync<F extends (...args: never[]) => unknown>(fn: F, wait: number): DebouncedAsync<F> {
+	assertFunction('debounceAsync', 'fn', fn);
+	assertDelay('debounceAsync', 'wait', wait);
+
+	const call = fn as unknown as (this: unknown, ...args: unknown[]) => unknown;
+	let burst: Deferred<unknown> | undefined;
+
+	const debounced = debounce(function (this: unknown, ...args: unknown[]): void {
+		const current = burst as Deferred<unknown>;
+
+		// Calls made from now on (including from within `fn`) belong to a new burst.
+		burst = undefined;
+
+		try {
+			current.resolve(call.apply(this, args));
+		} catch (error) {
+			current.reject(error);
+		}
+	}, wait);
+
+	/**
+	 * The debounced wrapper.
+	 * @param {...unknown} args - The call arguments
+	 * @returns {Promise<unknown>} The shared promise of the current burst
+	 */
+	function debouncedAsync(this: unknown, ...args: unknown[]): Promise<unknown> {
+		if (burst === undefined) burst = createDeferred<unknown>();
+
+		const { promise } = burst;
+		debounced.apply(this, args);
+
+		return promise;
+	}
+
+	Object.defineProperties(debouncedAsync, {
+		cancel: {
+			value: function cancel(): void {
+				debounced.cancel();
+				burst?.reject(new AbortError('The debounced call was cancelled.'));
+				burst = undefined;
+			}
+		},
+		flush: {
+			value: function flush(): Promise<unknown> | undefined {
+				const promise = burst?.promise;
+
+				debounced.flush();
+
+				return promise;
+			}
+		}
+	});
+
+	return debouncedAsync as unknown as DebouncedAsync<F>;
+}
+
+/**
+ * Runs (possibly async) tasks one at a time, in iteration order, and resolves with their results in the same order. Each task is
+ * only pulled from the iterable (and started) after the previous one has settled, so lazy iterables and generators are supported.
+ * Rejects with the first error, without starting the remaining tasks.
+ * @template T - The task result type
+ * @param {Iterable<() => PromiseLike<T> | T>} tasks - The tasks to run
+ * @returns {Promise<T[]>} The results, in order
+ * @throws {TypeError} (as a rejection) when a task is not a function
+ * @throws {unknown} (as a rejection) the first error thrown or rejected by a task
+ * @example
+ * const [a, b] = await sequence([function () { return migrate(1); }, function () { return migrate(2); }]);
+ */
+export async function sequence<T>(tasks: Iterable<() => PromiseLike<T> | T>): Promise<T[]> {
+	const results: T[] = [];
+	let index = 0;
+
+	for (const task of tasks) {
+		if (typeof task !== 'function') throw new TypeError(`sequence: task at index ${index} is not a function`);
+
+		results.push(await task());
+		index++;
+	}
 
 	return results;
 }

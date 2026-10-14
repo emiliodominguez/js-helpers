@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { compose, curry, debounce, memoize, negate, once, partial, pipe } from '.';
+import { attempt, compose, curry, debounce, defaultMemoizeKey, flip, memoize, memoizeLast, negate, once, partial, pipe, times } from '.';
 
 type IntFn = (x: number) => number;
 
@@ -223,6 +223,111 @@ describe('Functions helpers (properties)', function () {
 					jest.useRealTimers();
 				}),
 				{ numRuns: 50 }
+			);
+		});
+	});
+	describe('defaultMemoizeKey', function () {
+		it('maps distinct argument lists of primitives to distinct keys', function () {
+			const primitive = fc.oneof(
+				fc.integer({ min: -3, max: 3 }),
+				fc.constantFrom(NaN, Infinity, -Infinity, -0, null, undefined, true, 'NaN', '-0', 'undefined', '1n', '\\1n', 'Infinity', '[1]'),
+				fc.bigInt({ min: -3n, max: 3n }),
+				fc.string({ maxLength: 3 })
+			);
+
+			fc.assert(
+				fc.property(fc.array(primitive, { maxLength: 3 }), fc.array(primitive, { maxLength: 3 }), function (a, b) {
+					const same =
+						a.length === b.length &&
+						a.every(function (value, i) {
+							return Object.is(value, b[i]);
+						});
+					expect(Object.is(defaultMemoizeKey(...a), defaultMemoizeKey(...b))).toBe(same);
+				})
+			);
+		});
+	});
+
+	describe('attempt', function () {
+		it('never throws and matches a try/catch reference', function () {
+			function risky(x: number): number {
+				if (x % 3 === 0) throw new Error(`bad ${x}`);
+				if (x % 5 === 0) throw x;
+				return x * 2;
+			}
+
+			fc.assert(
+				fc.property(smallInt, function (x) {
+					let expected: unknown[];
+					try {
+						expected = [undefined, risky(x)];
+					} catch (error) {
+						expected = [error, undefined];
+					}
+					expect(attempt(risky, x)).toEqual(expected);
+				})
+			);
+		});
+	});
+
+	describe('times', function () {
+		it('returns n results, calling fn with 0..n-1 in order', function () {
+			fc.assert(
+				fc.property(fc.nat({ max: 200 }), function (n) {
+					const seen: number[] = [];
+					const result = times(n, function (i) {
+						seen.push(i);
+						return i * 3;
+					});
+					expect(result).toHaveLength(n);
+					expect(seen).toEqual(
+						Array.from({ length: n }, function (_, i) {
+							return i;
+						})
+					);
+					expect(result).toEqual(
+						seen.map(function (i) {
+							return i * 3;
+						})
+					);
+				})
+			);
+		});
+	});
+
+	describe('flip', function () {
+		it('flip(flip(f)) behaves like f, and flip(f) reverses the arguments', function () {
+			function f(...xs: number[]): string {
+				return xs.join(',');
+			}
+
+			fc.assert(
+				fc.property(fc.array(smallInt, { maxLength: 6 }), function (args) {
+					expect(flip(flip(f))(...args)).toBe(f(...args));
+					expect(flip(f)(...args)).toBe(f(...args.slice().reverse()));
+				})
+			);
+		});
+	});
+
+	describe('memoizeLast', function () {
+		it('calls fn exactly when the arguments differ from the previous call', function () {
+			fc.assert(
+				fc.property(fc.array(fc.tuple(fc.integer({ min: 0, max: 2 }), fc.constantFrom(NaN, 0, 1)), { maxLength: 40 }), function (calls) {
+					const spy = jest.fn(function (a: number, b: number) {
+						return a + b;
+					});
+					const memoized = memoizeLast(spy);
+					let expectedCalls = 0;
+					let previous: [number, number] | undefined;
+
+					calls.forEach(function (pair) {
+						if (previous === undefined || !(Object.is(previous[0], pair[0]) && Object.is(previous[1], pair[1]))) expectedCalls++;
+						previous = pair;
+						expect(memoized(pair[0], pair[1])).toBe(pair[0] + pair[1]);
+					});
+					expect(spy).toHaveBeenCalledTimes(expectedCalls);
+				})
 			);
 		});
 	});

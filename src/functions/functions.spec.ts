@@ -379,6 +379,56 @@ describe('Functions helpers', function () {
 		});
 	});
 
+	describe('memoize key collisions (regressions)', function () {
+		it('should not confuse NaN, Infinity, -Infinity and null in multi-argument calls (previously all serialised to null)', function () {
+			const fn = jest.fn(function (a: unknown, b: number) {
+				return `${String(a)}:${b}`;
+			});
+			const memoized = helpers.memoize(fn);
+			expect([memoized(NaN, 1), memoized(Infinity, 1), memoized(-Infinity, 1), memoized(null, 1)]).toEqual(['NaN:1', 'Infinity:1', '-Infinity:1', 'null:1']);
+			expect(fn).toHaveBeenCalledTimes(4);
+		});
+
+		it('should not confuse undefined and null arguments in multi-argument calls', function () {
+			const fn = jest.fn(function (a: unknown, b: number) {
+				return `${String(a)}:${b}`;
+			});
+			const memoized = helpers.memoize(fn);
+			expect(memoized(undefined, 1)).toBe('undefined:1');
+			expect(memoized(null, 1)).toBe('null:1');
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('should not confuse bigints with strings that look like their serialised form', function () {
+			const fn = jest.fn(function (a: unknown, b: number) {
+				return `${typeof a}:${b}`;
+			});
+			const memoized = helpers.memoize(fn);
+			expect([memoized(1n, 2), memoized('1n', 2), memoized('\\1n', 2), memoized('NaN', 2), memoized(NaN, 2)]).toEqual([
+				'bigint:2',
+				'string:2',
+				'string:2',
+				'string:2',
+				'number:2'
+			]);
+			expect(fn).toHaveBeenCalledTimes(5);
+		});
+
+		it('should distinguish -0 from 0', function () {
+			const inverse = helpers.memoize(function (x: number): number {
+				return 1 / x;
+			});
+			expect(inverse(0)).toBe(Infinity);
+			expect(inverse(-0)).toBe(-Infinity);
+
+			const pair = helpers.memoize(function (x: number, y: number): number {
+				return 1 / x + y;
+			});
+			expect(pair(0, 1)).toBe(Infinity);
+			expect(pair(-0, 1)).toBe(-Infinity);
+		});
+	});
+
 	describe('defaultMemoizeKey', function () {
 		it('should use a single primitive as is', function () {
 			const sym = Symbol('s');
@@ -524,6 +574,34 @@ describe('Functions helpers', function () {
 			throttled(4);
 			expect(fn.mock.calls).toEqual([[1], [3], [4]]);
 			throttled.cancel();
+		});
+
+		it('should not fire the trailing call early for waits longer than 2^31 - 1 ms (previously fired after ~1 ms)', function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn();
+			const wait = 2 ** 31 + 1000;
+			const throttled = helpers.throttle(fn, wait, { trailing: true });
+			throttled(1);
+			throttled(2);
+			jest.advanceTimersByTime(10);
+			expect(fn.mock.calls).toEqual([[1]]);
+			jest.advanceTimersByTime(2 ** 31 - 1);
+			expect(fn.mock.calls).toEqual([[1]]);
+			jest.advanceTimersByTime(wait);
+			expect(fn.mock.calls).toEqual([[1], [2]]);
+		});
+
+		it('should perform an overdue trailing call when the clock went backwards', function () {
+			jest.useFakeTimers({ now: 10_000 });
+
+			const fn = jest.fn();
+			const throttled = helpers.throttle(fn, 100, { trailing: true });
+			throttled(1);
+			throttled(2);
+			jest.setSystemTime(0);
+			jest.advanceTimersByTime(100);
+			expect(fn.mock.calls).toEqual([[1], [2]]);
 		});
 
 		it('should always invoke with a zero wait', function () {
@@ -750,6 +828,35 @@ describe('Functions helpers', function () {
 			expect(fn.mock.calls).toEqual([[1], [2]]);
 		});
 
+		it('should not busy-poll for waits longer than 2^31 - 1 ms (previously re-armed a 1 ms timer over and over)', function () {
+			jest.useFakeTimers();
+
+			const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+			const fn = jest.fn();
+			const wait = 2 ** 31 + 1000;
+			const debounced = helpers.debounce(fn, wait);
+			debounced(1);
+			jest.advanceTimersByTime(10);
+			expect(fn).not.toHaveBeenCalled();
+			expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+			jest.advanceTimersByTime(2 ** 31 - 1);
+			expect(fn).not.toHaveBeenCalled();
+			jest.advanceTimersByTime(wait);
+			expect(fn.mock.calls).toEqual([[1]]);
+		});
+
+		it('should honour a maxWait longer than 2^31 - 1 ms', function () {
+			jest.useFakeTimers();
+
+			const fn = jest.fn();
+			const debounced = helpers.debounce(fn, 100, { maxWait: 2 ** 32 });
+			debounced(1);
+			jest.advanceTimersByTime(50);
+			debounced(2);
+			jest.advanceTimersByTime(100);
+			expect(fn.mock.calls).toEqual([[2]]);
+		});
+
 		it('should validate its arguments', function () {
 			expect(function () {
 				helpers.debounce(helpers.noop, -5);
@@ -785,6 +892,19 @@ describe('Functions helpers', function () {
 				})
 			};
 			expect(obj.get()).toBe(7);
+		});
+
+		it('should not invoke fn again on a re-entrant call (previously invoked it twice)', function () {
+			const inner: unknown[] = [];
+			const fn = jest.fn(function (): number {
+				inner.push(onced());
+				return 1;
+			});
+			const onced = helpers.once(fn);
+			expect(onced()).toBe(1);
+			expect(onced()).toBe(1);
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(inner).toEqual([undefined]);
 		});
 
 		it('should rethrow the first error on later calls', function () {
@@ -903,6 +1023,245 @@ describe('Functions helpers', function () {
 		it('should return undefined', function () {
 			expect(helpers.noop()).toBeUndefined();
 			expect(helpers.noop(1, 2, 3)).toBeUndefined();
+		});
+	});
+});
+
+describe('Functions helpers (round 2)', function () {
+	describe('defaultMemoizeKey markers', function () {
+		it('should serialise non-JSON values with distinct markers and escape look-alike strings', function () {
+			expect(helpers.defaultMemoizeKey(NaN, Infinity, -Infinity, -0, undefined)).toBe('["NaN","Infinity","-Infinity","-0","undefined"]');
+			expect(helpers.defaultMemoizeKey('NaN', 'Infinity', '-0', 'undefined', '12n', '\\12n')).toBe(
+				'["\\\\NaN","\\\\Infinity","\\\\-0","\\\\undefined","\\\\12n","\\\\\\\\12n"]'
+			);
+			expect(helpers.defaultMemoizeKey(-0)).toBe('["-0"]');
+			expect(helpers.defaultMemoizeKey(0)).toBe(0);
+			expect(helpers.defaultMemoizeKey('plain', 1.5)).toBe('["plain",1.5]');
+		});
+
+		it('should keep JSON semantics for nested undefined values', function () {
+			expect(helpers.defaultMemoizeKey({ a: undefined, b: 1 }, [undefined])).toBe('[{"b":1},[null]]');
+			expect(helpers.defaultMemoizeKey({ a: -0, b: NaN })).toBe('[{"a":"-0","b":"NaN"}]');
+		});
+	});
+
+	describe('attempt', function () {
+		it('should return [undefined, result] on success', function () {
+			expect(helpers.attempt(JSON.parse, '{"a":1}')).toEqual([undefined, { a: 1 }]);
+			expect(
+				helpers.attempt(
+					function (a: number, b: number) {
+						return a + b;
+					},
+					1,
+					2
+				)
+			).toEqual([undefined, 3]);
+		});
+
+		it('should return [error, undefined] when fn throws, including non-Error values', function () {
+			const [error, result] = helpers.attempt(JSON.parse, '{');
+			expect(error).toBeInstanceOf(SyntaxError);
+			expect(result).toBeUndefined();
+			expect(
+				helpers.attempt(function () {
+					throw 'plain';
+				})
+			).toEqual(['plain', undefined]);
+		});
+
+		it('should return a TypeError instead of throwing for non-functions', function () {
+			const [error] = helpers.attempt(42 as any);
+			expect(error).toBeInstanceOf(TypeError);
+		});
+
+		it('should return promises as plain success values', function () {
+			const promise = Promise.resolve(1);
+			expect(
+				helpers.attempt(function () {
+					return promise;
+				})
+			).toEqual([undefined, promise]);
+		});
+	});
+
+	describe('times', function () {
+		it('should call fn with each index and collect the results', function () {
+			expect(
+				helpers.times(4, function (i) {
+					return i * i;
+				})
+			).toEqual([0, 1, 4, 9]);
+			expect(helpers.times(0, helpers.identity)).toEqual([]);
+		});
+
+		it.each([-1, 1.5, NaN, Infinity, 2 ** 32])('should throw a RangeError for n = %p', function (n) {
+			expect(function () {
+				helpers.times(n, helpers.identity);
+			}).toThrow(RangeError);
+		});
+
+		it('should throw a TypeError for non-functions', function () {
+			expect(function () {
+				helpers.times(1, 'x' as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('flip', function () {
+		it('should reverse the arguments', function () {
+			function divide(a: number, b: number): number {
+				return a / b;
+			}
+
+			expect(helpers.flip(divide)(2, 10)).toBe(5);
+			const join = helpers.flip(function (...parts: string[]) {
+				return parts.join('');
+			});
+			expect(join('a', 'b', 'c')).toBe('cba');
+			expect(join()).toBe('');
+		});
+
+		it('should preserve this and validate fn', function () {
+			const obj = {
+				prefix: '>',
+				show: helpers.flip(function (this: { prefix: string }, a: string, b: string) {
+					return this.prefix + a + b;
+				})
+			};
+			expect(obj.show('1', '2')).toBe('>21');
+			expect(function () {
+				helpers.flip(null as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('unary', function () {
+		it('should forward only the first argument', function () {
+			expect(['1', '2', '3'].map(helpers.unary(parseInt))).toEqual([1, 2, 3]);
+			const spy = jest.fn();
+			(helpers.unary(spy) as any)(1, 2, 3);
+			expect(spy).toHaveBeenCalledWith(1);
+		});
+
+		it('should preserve this and validate fn', function () {
+			const obj = {
+				n: 2,
+				mul: helpers.unary(function (this: { n: number }, x: number) {
+					return this.n * x;
+				})
+			};
+			expect(obj.mul(4)).toBe(8);
+			expect(function () {
+				helpers.unary({} as any);
+			}).toThrow(TypeError);
+		});
+	});
+
+	describe('constant', function () {
+		it('should always return the same value, ignoring arguments', function () {
+			const obj = {};
+			const always = helpers.constant(obj);
+			expect(always()).toBe(obj);
+			expect(always(1, 2)).toBe(obj);
+			expect([1, 2].map(helpers.constant(0))).toEqual([0, 0]);
+		});
+	});
+
+	describe('shallowEqualArgs', function () {
+		it('should compare element-wise with SameValueZero', function () {
+			const o = {};
+			expect(helpers.shallowEqualArgs([1, NaN, o], [1, NaN, o])).toBe(true);
+			expect(helpers.shallowEqualArgs([0], [-0])).toBe(true);
+			expect(helpers.shallowEqualArgs([{}], [{}])).toBe(false);
+			expect(helpers.shallowEqualArgs([1], [1, 2])).toBe(false);
+			expect(helpers.shallowEqualArgs([], [])).toBe(true);
+		});
+	});
+
+	describe('memoizeLast', function () {
+		it('should cache only the latest call', function () {
+			const fn = jest.fn(function (a: number, b: number) {
+				return a * b;
+			});
+			const area = helpers.memoizeLast(fn);
+			expect(area(2, 3)).toBe(6);
+			expect(area(2, 3)).toBe(6);
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(area(3, 3)).toBe(9);
+			expect(area(2, 3)).toBe(6);
+			expect(fn).toHaveBeenCalledTimes(3);
+		});
+
+		it('should treat NaN as equal, objects by identity and different lengths as different', function () {
+			const fn = jest.fn(function (...args: unknown[]) {
+				return args.length;
+			});
+			const memoized = helpers.memoizeLast(fn);
+			const o = {};
+			memoized(NaN, o);
+			memoized(NaN, o);
+			expect(fn).toHaveBeenCalledTimes(1);
+			memoized(NaN, {});
+			expect(fn).toHaveBeenCalledTimes(2);
+			memoized(NaN);
+			expect(fn).toHaveBeenCalledTimes(3);
+		});
+
+		it('should recompute when this changes', function () {
+			const fn = jest.fn(function (this: { v: number }) {
+				return this.v;
+			});
+			const get = helpers.memoizeLast(fn);
+			const a = { v: 1, get };
+			const b = { v: 2, get };
+			expect([a.get(), a.get(), b.get(), a.get()]).toEqual([1, 1, 2, 1]);
+			expect(fn).toHaveBeenCalledTimes(3);
+		});
+
+		it('should use a custom isEqual', function () {
+			const fn = jest.fn(function (o: { id: number; label: string }) {
+				return o.label;
+			});
+			const memoized = helpers.memoizeLast(fn, function (next, previous) {
+				return next[0].id === previous[0].id;
+			});
+			expect(memoized({ id: 1, label: 'a' })).toBe('a');
+			expect(memoized({ id: 1, label: 'b' })).toBe('a');
+			expect(memoized({ id: 2, label: 'c' })).toBe('c');
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('should not cache throws and keep the previous entry', function () {
+			const fn = jest.fn(function (x: number) {
+				if (x < 0) throw new RangeError('negative');
+				return x * 2;
+			});
+			const memoized = helpers.memoizeLast(fn);
+			expect(memoized(1)).toBe(2);
+			expect(function () {
+				memoized(-1);
+			}).toThrow(RangeError);
+			expect(memoized(1)).toBe(2);
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('should forget the cache on clear()', function () {
+			const fn = jest.fn(helpers.identity);
+			const memoized = helpers.memoizeLast(fn);
+			memoized(1);
+			memoized.clear();
+			memoized(1);
+			expect(fn).toHaveBeenCalledTimes(2);
+		});
+
+		it('should validate its arguments', function () {
+			expect(function () {
+				helpers.memoizeLast(1 as any);
+			}).toThrow(TypeError);
+			expect(function () {
+				helpers.memoizeLast(helpers.identity, 'x' as any);
+			}).toThrow(TypeError);
 		});
 	});
 });
