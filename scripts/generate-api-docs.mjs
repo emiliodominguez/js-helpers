@@ -13,6 +13,8 @@ const MODULES = [
 	['functions', 'Function composition, currying, memoization and rate limiting.'],
 	['async', 'Promise utilities: retries, timeouts, polling, limiters, keyed Promise.all and async debounce.'],
 	['color', 'Hex/RGB/HSL conversion, mixing, lightening and WCAG contrast checks.'],
+	['format', 'Deterministic, cached Intl formatting: numbers, currency, percent, compact, units, lists, dates, ordinals.'],
+	['validate', 'Linear-time string validators (email, URL, UUID, IP, semver, ISO dates, Luhn, base64, ...) as type predicates.'],
 	['date', 'DST-safe, non-mutating local-time date arithmetic, formatting and parsing.'],
 	['iterables', 'Lazy, generator-based pipelines over any (async) iterable, with exact pull counts and early-exit cleanup.'],
 	['cache', 'O(1) LRU cache with optional TTL, eviction callbacks and an injectable clock; plugs into memoize.'],

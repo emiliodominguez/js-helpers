@@ -8,13 +8,14 @@
 
 Strictly-typed, zero-dependency TypeScript utilities, verified with property-based tests.
 
-**350+ functions** across 16 modules: `arrays`, `iterables`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `color`, `url`, `cache`, `emitter`, `store`, `random` and `decorators`.
+**380+ functions** across 18 modules: `arrays`, `iterables`, `objects`, `guards`, `strings`, `math`, `functions`, `async`, `date`, `format`, `validate`, `color`, `url`, `cache`, `emitter`, `store`, `random` and `decorators`.
 
 - **Correct first.** Unicode-aware strings, DST-safe dates, compensated summation, injection-safe string replacement, a deep merge that blocks prototype pollution, and deep clone/equality that handle circular references.
 - **Typed for real.** Type predicates that narrow, path-aware getters (`'user.posts.0.title'` resolves to `string | undefined`), tuple-typed `zip`, typed `curry`/`compose`/`pipe`, and a left-to-right `Merge` type.
-- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 1,850+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
+- **Property-tested.** Every non-trivial function is checked against algebraic laws, invariants or a naive reference implementation with [fast-check](https://fast-check.dev), on top of example-based edge-case tests. The suite is 2,500+ tests at 100% coverage, run in CI on Node 20–26 and in time zones with awkward DST rules.
+- **Docs that can't lie.** Every one of the 400+ JSDoc `@example` blocks is executed and its `// => result` comments are asserted (`yarn test:docs`), so the examples you see on hover are verified.
 - **Pure and predictable.** Nothing mutates its input unless the name says so. Bad arguments throw a descriptive `RangeError`/`TypeError` instead of returning garbage, looping forever or overflowing the stack.
-- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 28 kB gzipped; a typical module is 1–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
+- **Ultra lightweight.** Zero runtime dependencies. The ESM-only build ships one minified, unbundled file per module, so deep imports and tree-shaking keep only what you use. Every function combined is about 31 kB gzipped; a typical module is 1–3.5 kB (see [Size](#size)). JSDoc lives in the `.d.ts` files, so editor hover docs stay complete, and a size budget is enforced in CI.
 
 ## Install
 
@@ -60,6 +61,8 @@ objects.isEqual(new Map([[1, { a: [1] }]]), new Map([[1, { a: [1] }]])); // true
 | [`functions`](./docs/API.md#functions)   | `debounce`/`throttle` with `cancel`/`flush`, `memoize`, `memoizeLast`, `curry`, `compose`/`pipe`, `once`, `attempt`              |
 | [`async`](./docs/API.md#async)           | `retry` with backoff, `withTimeout`, `createLimiter`, `mapWithConcurrency`, `pollUntil`, `promiseAllObject`, `debounceAsync`     |
 | [`date`](./docs/API.md#date)             | DST-safe `addDays`/`addMonths`/`addBusinessDays`, ISO weeks, quarters, `getAge`, `formatDate`, `formatDuration`/`parseDuration`  |
+| [`format`](./docs/API.md#format)         | deterministic, cached Intl formatting: `formatCurrency`, `formatCompact`, `formatPercent`, `formatList`, `formatOrdinal`, …      |
+| [`validate`](./docs/API.md#validate)     | ReDoS-safe type predicates: `isEmail`, `isUrl`, `isUuid`, `isIP`, `isSemver`/`compareSemver`, ISO dates, Luhn, base64            |
 | [`color`](./docs/API.md#color)           | hex/RGB/HSL conversion, `mix`, `lighten`/`darken`, WCAG `contrastRatio`, `getReadableTextColor`, `meetsContrast`                 |
 | [`url`](./docs/API.md#url)               | `buildQueryString`/`parseQueryString` (pollution-safe), `withQuery`, `joinUrl`, `getQueryParam`                                  |
 | [`iterables`](./docs/API.md#iterables)   | lazy `map`/`filter`/`take`/`chunk`/`zip`/`windowed` over any (async) iterable, infinite sources, exact pull counts               |
@@ -80,6 +83,8 @@ import { retry, withTimeout, mapWithConcurrency } from '@emiliodominguez/js-help
 import { debounce } from '@emiliodominguez/js-helpers/functions';
 import { addMonths, formatDate } from '@emiliodominguez/js-helpers/date';
 import { getReadableTextColor } from '@emiliodominguez/js-helpers/color';
+import { formatCompact, formatCurrency } from '@emiliodominguez/js-helpers/format';
+import { compareSemver, isEmail } from '@emiliodominguez/js-helpers/validate';
 import { withQuery } from '@emiliodominguez/js-helpers/url';
 
 // Type-safe deep access: the return type is inferred from the path.
@@ -110,6 +115,12 @@ formatDate(addMonths(new Date(2024, 0, 31), 1), 'YYYY-MM-DD'); // '2024-02-29'
 // Accessible colors and clean URLs.
 getReadableTextColor('#1e3a8a'); // '#ffffff'
 withQuery('/search?page=2#results', { q: 'café', page: 3 }); // '/search?q=caf%C3%A9&page=3#results'
+
+// Deterministic formatting (en-US / UTC by default, never the host locale) and safe validation.
+formatCurrency(1234.5, 'EUR'); // '€1,234.50'
+formatCompact(1_250_000); // '1.3M'
+isEmail(input); // narrows `unknown` to `string`
+['1.0.0', '1.0.0-rc.1', '0.9.9'].sort(compareSemver); // ['0.9.9', '1.0.0-rc.1', '1.0.0']
 ```
 
 ### Building blocks
@@ -191,22 +202,24 @@ Zero dependencies. Sizes are for the minified ESM build; bundlers only include t
 | ------------ | -------: | ------: |
 | `arrays`     |   7.1 kB |  2.6 kB |
 | `async`      |   5.7 kB |  2.2 kB |
-| `cache`      |   2.1 kB |  0.9 kB |
+| `cache`      |   2.2 kB |  1.0 kB |
 | `color`      |   3.5 kB |  1.6 kB |
 | `date`       |  10.1 kB |  3.5 kB |
 | `decorators` |   4.7 kB |  1.5 kB |
 | `emitter`    |   2.1 kB |  1.0 kB |
+| `format`     |   3.5 kB |  1.3 kB |
 | `functions`  |   5.4 kB |  2.1 kB |
 | `guards`     |   4.3 kB |  1.5 kB |
-| `iterables`  |   5.4 kB |  1.8 kB |
+| `iterables`  |   5.5 kB |  1.8 kB |
 | `math`       |   8.3 kB |  2.9 kB |
 | `objects`    |  10.8 kB |  3.7 kB |
-| `random`     |   5.0 kB |  2.1 kB |
+| `random`     |   5.1 kB |  2.2 kB |
 | `store`      |   1.5 kB |  0.7 kB |
 | `strings`    |   9.0 kB |  3.6 kB |
 | `url`        |   2.8 kB |  1.3 kB |
+| `validate`   |   5.6 kB |  2.3 kB |
 
-All modules together are about 28 kB gzipped. CI enforces the total with `yarn check:size`.
+All modules together are about 31 kB gzipped. CI enforces the total with `yarn check:size`.
 
 ## Testing philosophy
 
@@ -225,7 +238,9 @@ Every module has two test files:
 ```bash
 yarn test            # all suites
 yarn test:coverage   # with coverage thresholds
-yarn validate        # lint + typecheck + tests + build (what CI runs)
+yarn test:tz         # the suite under UTC, New York, Lord Howe and Kolkata
+yarn test:docs       # execute every JSDoc @example
+yarn validate        # everything: lint, format, types, tests in 4 time zones, doctests, build, dist smoke test, size, exports
 ```
 
 ## Migrating from 1.x

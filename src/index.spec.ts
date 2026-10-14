@@ -4,6 +4,7 @@ import { createLRUCache } from './cache/index.js';
 import { retry, withTimeout, mapWithConcurrency } from './async/index.js';
 import { getReadableTextColor } from './color/index.js';
 import { addMonths, formatDate } from './date/index.js';
+import { formatCompact, formatCurrency } from './format/index.js';
 import { bound, memoize, readonly } from './decorators/index.js';
 import { createEmitter } from './emitter/index.js';
 import { debounce, memoize as memoizeFn } from './functions/index.js';
@@ -14,6 +15,7 @@ import { createRandom } from './random/index.js';
 import { createStore } from './store/index.js';
 import { toKebabCase, toSlug } from './strings/index.js';
 import { withQuery } from './url/index.js';
+import { compareSemver, isEmail } from './validate/index.js';
 
 describe('root entry', function () {
 	it('should expose every module as a namespace', function () {
@@ -25,6 +27,7 @@ describe('root entry', function () {
 			'date',
 			'decorators',
 			'emitter',
+			'format',
 			'functions',
 			'guards',
 			'iterables',
@@ -33,7 +36,8 @@ describe('root entry', function () {
 			'random',
 			'store',
 			'strings',
-			'url'
+			'url',
+			'validate'
 		]);
 		expect(root.strings.isEmpty).not.toBe(root.objects.isEmpty);
 		expect(root.objects.isString).toBe(root.guards.isString);
@@ -92,6 +96,10 @@ describe('README examples', function () {
 
 		expect(formatDate(addMonths(new Date(2024, 0, 31), 1), 'YYYY-MM-DD')).toBe('2024-02-29');
 		expect(getReadableTextColor('#1e3a8a')).toBe('#ffffff');
+		expect(formatCurrency(1234.5, 'EUR')).toBe('€1,234.50');
+		expect(formatCompact(1_250_000)).toBe('1.3M');
+		expect(isEmail('ada@example.com')).toBe(true);
+		expect(['1.0.0', '1.0.0-rc.1', '0.9.9'].sort(compareSemver)).toEqual(['0.9.9', '1.0.0-rc.1', '1.0.0']);
 		expect(withQuery('/search?page=2#results', { q: 'café', page: 3 })).toBe('/search?q=caf%C3%A9&page=3#results');
 	});
 

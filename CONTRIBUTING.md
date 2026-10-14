@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-yarn install   # also installs the husky pre-commit hook (lint-staged)
-yarn validate  # lint + typecheck + tests + build + dist smoke test + size budget — the same gates CI runs
+yarn install   # also installs the git hooks: lint-staged on commit, `yarn validate` on push
+yarn validate  # lint, format, types, tests in 4 time zones, doctests, build, dist smoke test, size budget, exports
 ```
 
 ## Module layout
@@ -41,7 +41,7 @@ ESLint enforces most of these:
 yarn test                         # all suites
 yarn test src/strings             # a single module
 yarn test:coverage                # with coverage thresholds
-TZ=Australia/Lord_Howe yarn test src/date
+yarn test:tz                      # the suite under UTC, New York, Lord Howe and Kolkata (works on Windows too)
 ```
 
 ### Executable examples

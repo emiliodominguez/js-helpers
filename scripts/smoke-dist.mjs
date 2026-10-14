@@ -12,7 +12,26 @@ import { round, sum } from '@emiliodominguez/js-helpers/math';
 import { deepClone, deepMerge, isEqual } from '@emiliodominguez/js-helpers/objects';
 import { toKebabCase, reverse } from '@emiliodominguez/js-helpers/strings';
 
-assert.deepEqual(Object.keys(root).sort(), ['arrays', 'async', 'cache', 'color', 'date', 'decorators', 'emitter', 'functions', 'guards', 'iterables', 'math', 'objects', 'random', 'store', 'strings', 'url']);
+assert.deepEqual(Object.keys(root).sort(), [
+	'arrays',
+	'async',
+	'cache',
+	'color',
+	'date',
+	'decorators',
+	'emitter',
+	'format',
+	'functions',
+	'guards',
+	'iterables',
+	'math',
+	'objects',
+	'random',
+	'store',
+	'strings',
+	'url',
+	'validate'
+]);
 assert.deepEqual(chunk([1, 2, 3], 2), [[1, 2], [3]]);
 assert.equal(round(1.005, 2), 1.01);
 assert.equal(sum([0.1, 0.2, 0.3]), 0.6);

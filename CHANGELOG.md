@@ -6,14 +6,17 @@ Full review and rewrite: every module is strictly typed, documented with complet
 
 ### Added
 
-- **New modules:** `guards`, `async`, `date`, `color`, `url`, `iterables`, `cache`, `emitter`, `store` and `random`. The `date` module replaces an empty stub.
+- **New modules:** `guards`, `async`, `date`, `color`, `url`, `iterables`, `cache`, `emitter`, `store`, `random`, `format` and `validate`. The `date` module replaces an empty stub.
 - **~300 new utilities.** See [docs/API.md](./docs/API.md).
 - **Packaging:**
     - ESM-only, minified, unbundled build (one file per module), with JSDoc kept in the declarations;
     - `exports` map with per-module deep imports;
     - namespaced root entry;
     - declaration maps.
-- **Docs:** API reference generated from the JSDoc (`yarn docs:api`) and a TypeDoc site (`yarn docs`).
+- **Docs:**
+    - API reference generated from the JSDoc (`yarn docs:api`) and a TypeDoc site (`yarn docs`);
+    - every JSDoc `@example` is executed and asserted (`yarn test:docs`). This caught four examples that were wrong.
+- **Local quality gate:** a pre-push hook runs `yarn validate`, which covers the tests in four time zones, the doctests and the dist checks.
 - **CI:**
     - runs on Node 20–26 and in DST-heavy time zones;
     - smoke-tests the built package;
