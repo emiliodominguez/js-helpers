@@ -1071,4 +1071,58 @@ describe('String helpers', function () {
 			expect(helpers.toPascalCase('ǌegoš ǳak')).toBe('ǋegošǲak');
 		});
 	});
+
+	describe('fast paths (ASCII, Unicode chunks, grapheme regions)', function () {
+		it('splits ASCII identifiers with the same rules as Unicode text', function () {
+			expect(helpers.toKebabCase('HTTP2 A0B1 aB1C 2Go abcDEF aBCd1E')).toBe('http2-a0b1-a-b1-c-2-go-abc-def-a-b-cd1-e');
+			// The same words once a non-ASCII character sends the text down the Unicode path.
+			expect(helpers.toKebabCase('HTTP2 A0B1 aB1C 2Go abcDEF aBCd1E é')).toBe('http2-a0b1-a-b1-c-2-go-abc-def-a-b-cd1-e-é');
+			expect(helpers.toSnakeCase('XMLHttpRequest é')).toBe('xml_http_request_é');
+		});
+
+		it('splits non-ASCII chunks at camelCase and acronym boundaries, keeping marks with their letter', function () {
+			expect(helpers.toSnakeCase('helloWörld naïveÜber')).toBe('hello_wörld_naïve_über');
+			expect(helpers.toSnakeCase('ÀBCdé')).toBe('àb_cdé');
+			// The capital followed by a combining mark still starts the last word of the acronym run.
+			expect(helpers.toSnakeCase('xAE\u0301b')).toBe('x_a_e\u0301b');
+			// Orphan marks at the start of a chunk belong to the first word.
+			expect(helpers.toSnakeCase('\u0301Abc')).toBe('\u0301abc');
+			expect(helpers.toSnakeCase('ÉCOLE_NORMALE')).toBe('école_normale');
+			// Text without any ASCII character, and chunks whose only inner capital follows a lower-case letter (upper and title case).
+			expect(helpers.toSnakeCase('日本語')).toBe('日本語');
+			expect(helpers.toCamelCase('ΟΔΟΣ')).toBe('οδος');
+			expect(helpers.toSnakeCase('aB é')).toBe('a_b_é');
+			expect(helpers.toSnakeCase('aǅb é')).toBe('a_ǆb_é');
+		});
+
+		it('lower-cases the joined words exactly like each word on its own (final sigma)', function () {
+			expect(helpers.toSnakeCase('ΟΔΟΣ ΑΒ')).toBe('οδος_αβ');
+			expect(helpers.toKebabCase('ΟΔΟΣ ΑΒ')).toBe('οδος-αβ');
+			expect(helpers.toCamelCase('ΟΔΟΣ ΑΒ')).toBe('οδοςΑβ');
+			expect(helpers.toSentenceCase('ΟΔΟΣ ΑΒ')).toBe('Οδος αβ');
+			expect(helpers.toSentenceCase('  ')).toBe('');
+			expect(helpers.toTitleCase('ΑΣ ΒΓ')).toBe('Ας Βγ');
+		});
+
+		it('lower-cases each word on its own when U+FEFF (white space, but case-ignorable) separates them', function () {
+			// Lower-casing 'ΑΣ\uFEFFΒ' at once would give a non-final sigma ('ασ\uFEFFβ').
+			expect(helpers.toTitleCase('ΑΣ\uFEFFΒ')).toBe('Ας\uFEFFΒ');
+		});
+
+		it('only segments the regions that may hold multi-code-unit graphemes', function () {
+			expect(helpers.reverse('ab👍🏽cd e\u0301f\r\ng')).toBe('g\r\nfe\u0301 dc👍🏽ba');
+			expect(helpers.truncate('日本語'.repeat(1000), 4)).toBe('日本語日...');
+			expect(helpers.truncate('e\u0301'.repeat(5), 2)).toBe('e\u0301e\u0301...');
+			expect(helpers.truncate('ab' + 'e\u0301'.repeat(3), 4)).toBe('abe\u0301e\u0301...');
+			expect(helpers.capitalize('e\u0301cole')).toBe('E\u0301cole');
+			expect(helpers.capitalize('\r\nx')).toBe('\r\nx');
+			expect(helpers.uncapitalize('É')).toBe('é');
+			expect(helpers.mask('ab👍🏽cd👍🏽', { visibleEnd: 1 })).toBe('*****👍🏽');
+		});
+
+		it('returns ASCII text unchanged from removeDiacritics and slugs it directly', function () {
+			expect(helpers.removeDiacritics('plain ASCII text')).toBe('plain ASCII text');
+			expect(helpers.toSlug('Hello, World 2024!')).toBe('hello-world-2024');
+		});
+	});
 });

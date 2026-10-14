@@ -79,24 +79,17 @@ function decodeComponent(value: string): string {
  * @throws {TypeError} when `value` is not a string, number, boolean, bigint or `Date`
  */
 function serializeValue(key: string, value: unknown): string {
+	if (typeof value === 'string') return value;
+
+	if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+
 	if (value instanceof Date) {
 		if (Number.isNaN(value.getTime())) throw new RangeError(`buildQueryString: \`params.${key}\` must be a valid Date, got Invalid Date`);
 
 		return value.toISOString();
 	}
 
-	if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
-
 	throw new TypeError(`buildQueryString: \`params.${key}\` must be a string, number, boolean, bigint or Date, got ${describe(value)}`);
-}
-
-/**
- * Type guard telling whether a parameter value is a list of values.
- * @param {unknown} value - The parameter value
- * @returns {boolean} Whether `value` is an array
- */
-function isValueList(value: unknown): value is ReadonlyArray<unknown> {
-	return Array.isArray(value);
 }
 
 /**
@@ -128,36 +121,48 @@ export function buildQueryString(params: QueryParams, options: BuildQueryStringO
 
 	if (sort) keys.sort();
 
-	const pairs: string[] = [];
+	// Built by concatenation (no intermediate arrays): this runs once per key and value. A pair or an item can be empty, so the
+	// separators are tracked rather than inferred from the text built so far.
+	let query = '';
+	let separator = '';
 
-	for (const key of keys) {
+	for (let index = 0; index < keys.length; index++) {
+		const key = keys[index];
 		const value = params[key];
 
 		if (value === undefined) continue;
 
-		const encodedKey = encodeComponent(key) + (arrayFormat === 'brackets' && isValueList(value) ? '[]' : '');
-
 		if (value === null) {
-			if (!skipNull) pairs.push(encodedKey);
+			if (!skipNull) {
+				query += separator + encodeComponent(key);
+				separator = '&';
+			}
 			continue;
 		}
 
-		if (!isValueList(value)) {
-			pairs.push(`${encodedKey}=${encodeComponent(serializeValue(key, value))}`);
+		if (!Array.isArray(value)) {
+			query += separator + encodeComponent(key) + '=' + encodeComponent(serializeValue(key, value));
+			separator = '&';
 			continue;
 		}
 
-		const items: string[] = [];
+		const list = value as ReadonlyArray<unknown>;
+		const prefix = encodeComponent(key) + (arrayFormat === 'brackets' ? '[]=' : '=');
+		const itemSeparator = arrayFormat === 'comma' ? ',' : '&' + prefix;
+		let written = false;
 
-		for (const item of value) if (item != null) items.push(encodeComponent(serializeValue(key, item)));
+		for (const item of list) {
+			if (item == null) continue;
 
-		if (items.length === 0) continue;
+			// The first item opens the key's pair; the next ones are appended with `,` or as pairs of their own.
+			query += (written ? itemSeparator : separator + prefix) + encodeComponent(serializeValue(key, item));
+			written = true;
+		}
 
-		if (arrayFormat === 'comma') pairs.push(`${encodedKey}=${items.join(',')}`);
-		else for (const item of items) pairs.push(`${encodedKey}=${item}`);
+		if (written) separator = '&';
 	}
 
-	return pairs.join('&');
+	return query;
 }
 
 /**
@@ -269,11 +274,15 @@ export function withQuery(url: string, params: QueryParams, options: BuildQueryS
  */
 export function joinUrl(...parts: string[]): string {
 	// The non-empty parts, in a fresh array whose items are then replaced by their path text.
-	const paths = parts.filter(function (part: unknown): boolean {
+	const paths: string[] = [];
+
+	for (let index = 0; index < parts.length; index++) {
+		const part: unknown = parts[index];
+
 		if (typeof part !== 'string') throw new TypeError(`joinUrl: \`parts\` must only contain strings, got ${describe(part)}`);
 
-		return part !== '';
-	});
+		if (part !== '') paths.push(part);
+	}
 
 	if (paths.length === 0) return '';
 
@@ -298,10 +307,11 @@ export function joinUrl(...parts: string[]): string {
 	paths[0] = paths[0].slice(prefix.length);
 
 	const trailingSlash = paths[lastIndex].endsWith('/');
-	const segments = paths.flatMap(function (path: string): string[] {
-		return path.split('/').filter(Boolean);
-	});
-	const body = segments.join('/');
+	// Joining with `/`, collapsing every run of slashes and trimming the ends leaves the non-empty segments separated by exactly one `/`.
+	const body = paths
+		.join('/')
+		.replace(/\/+/g, '/')
+		.replace(/^\/|\/$/g, '');
 
 	return prefix + body + (trailingSlash && body !== '' ? '/' : '') + suffix;
 }
@@ -318,10 +328,12 @@ export function joinUrl(...parts: string[]): string {
  * getQueryParam('/path', 'q'); // => undefined
  */
 export function getQueryParam(url: string, key: string): string | undefined {
-	const { query } = splitUrl(url);
-	const value = parseQueryString(query)[key];
+	// Stops at the first match instead of building the whole parsed record (whose keys have `[]` removed, see parseQueryString).
+	for (const [rawKey, value] of new URLSearchParams(splitUrl(url).query)) {
+		if ((rawKey.endsWith('[]') ? rawKey.slice(0, -2) : rawKey) === key) return value;
+	}
 
-	return Array.isArray(value) ? value[0] : value;
+	return undefined;
 }
 
 /**

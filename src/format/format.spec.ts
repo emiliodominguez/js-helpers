@@ -59,6 +59,10 @@ describe('Format helpers', function () {
 			expect(helpers.formatNumber(1.5, { minimumIntegerDigits: 17 })).toBe('00,000,000,000,000,001.5');
 			expect(helpers.formatNumber(2.5, { minimumIntegerDigits: 17 })).toBe('00,000,000,000,000,002.5');
 			expect(spy).toHaveBeenCalledTimes(1);
+			// Another formatter in between: the first one now comes from the shared cache, not from the call site's memo.
+			expect(helpers.formatNumber(2.5, { minimumIntegerDigits: 16 })).toBe('0,000,000,000,000,002.5');
+			expect(helpers.formatNumber(3.5, { minimumIntegerDigits: 17 })).toBe('00,000,000,000,000,003.5');
+			expect(spy).toHaveBeenCalledTimes(2);
 		});
 
 		it('should evict the least recently used formatter beyond 50 entries', function () {
@@ -156,6 +160,53 @@ describe('Format helpers', function () {
 			helpers.formatNumber(1, { minimumIntegerDigits: 21 });
 			helpers.formatNumber(1, { minimumIntegerDigits: 21, maximumFractionDigits: undefined });
 			expect(spy).toHaveBeenCalledTimes(1);
+		});
+
+		it('should give the right output when a call site alternates between options and locales (memo)', function () {
+			for (let round = 0; round < 2; round++) {
+				expect(helpers.formatNumber(1.25, { maximumFractionDigits: 0 })).toBe('1');
+				expect(helpers.formatNumber(1.25, { maximumFractionDigits: 1 })).toBe('1.3');
+				expect(helpers.formatNumber(1.25, {})).toBe('1.25');
+				expect(helpers.formatNumber(1.25, { maximumFractionDigits: 1, minimumFractionDigits: 1 })).toBe('1.3');
+				expect(helpers.formatNumber(1.25, { maximumFractionDigits: undefined })).toBe('1.25');
+				expect(helpers.formatNumber(1.25, { locale: 'de-DE' })).toBe('1,25');
+				expect(helpers.formatNumber(1.25)).toBe('1.25');
+				expect(helpers.formatCurrency(1, 'EUR')).toBe('€1.00');
+				expect(helpers.formatCurrency(1, 'USD')).toBe('$1.00');
+			}
+		});
+
+		it('should not treat an undefined option as matching a set one (memo regression)', function () {
+			expect(helpers.formatDateTime(0, { hour: '2-digit', hourCycle: 'h23' })).toBe('00');
+			// Same number of keys as the previous call, but none of them set: `hour` and `hourCycle` are absent.
+			expect(helpers.formatDateTime(0, { dateStyle: undefined, weekday: undefined })).toBe('1/1/1970');
+			expect(helpers.formatNumber(1.5, { maximumFractionDigits: 0 })).toBe('2');
+			expect(helpers.formatNumber(1.5, { minimumIntegerDigits: undefined })).toBe('1.5');
+		});
+
+		it('should skip the cache key for repeated identical calls', function () {
+			const entries = jest.spyOn(Object, 'entries');
+			helpers.formatPercent(0.5, { decimals: 3 });
+			const afterFirst = entries.mock.calls.length;
+			helpers.formatPercent(0.25, { decimals: 3 });
+			expect(entries.mock.calls.length).toBe(afterFirst);
+			entries.mockRestore();
+		});
+
+		it('should never serve a stale formatter for a mutated locale list or option object', function () {
+			const locales = ['de-DE'];
+			expect(helpers.formatNumber(1234.5, { locale: locales })).toBe('1.234,5');
+			locales[0] = 'en-US';
+			expect(helpers.formatNumber(1234.5, { locale: locales })).toBe('1,234.5');
+			let count = 0;
+			const digits: any = {
+				valueOf(): number {
+					return count;
+				}
+			};
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digits })).toBe('1');
+			count = 2;
+			expect(helpers.formatNumber(1.25, { maximumFractionDigits: digits })).toBe('1.25');
 		});
 
 		it('should not cache formatters whose construction failed', function () {

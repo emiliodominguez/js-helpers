@@ -242,6 +242,32 @@ describe('isUrl', function () {
 			expect(helpers.isUrl(42)).toBe(false);
 		});
 
+		it('validates with URL.canParse when available, unless the host must be inspected', function () {
+			const parsed: string[] = [];
+			(globalThis as any).URL = class {
+				constructor() {
+					throw new TypeError('Invalid URL');
+				}
+
+				static canParse(input: string): boolean {
+					parsed.push(input);
+					return true;
+				}
+			};
+			expect(helpers.isUrl('https://x')).toBe(true);
+			expect(parsed).toEqual(['https://x']);
+			// requireTld needs the parsed host, so the URL is constructed (and fails here).
+			expect(helpers.isUrl('https://x.com', { requireTld: true })).toBe(false);
+		});
+
+		it('constructs the URL when URL.canParse is unavailable', function () {
+			(globalThis as any).URL = function (input: string) {
+				return new original(input);
+			};
+			expect(helpers.isUrl('https://example.com/path')).toBe(true);
+			expect(helpers.isUrl('https://[::1')).toBe(false);
+		});
+
 		it('rejects http(s) URLs whose parsed host is empty', function () {
 			(globalThis as any).URL = function (this: any) {
 				this.hostname = '';
@@ -325,6 +351,68 @@ describe('isUuid', function () {
 		expect(function () {
 			helpers.isUuid(42, 0 as any);
 		}).toThrow(RangeError);
+		for (const version of [1.5, NaN, -1, Infinity, null]) {
+			expect(function () {
+				helpers.isUuid(v4, version as any);
+			}).toThrow(RangeError);
+		}
+	});
+});
+
+describe('semver helpers and non-string input', function () {
+	it('never reads a semantic version out of an object that stringifies to one', function () {
+		const version: any = {
+			toString(): string {
+				return '1.2.3';
+			}
+		};
+		expect(helpers.isSemver(version)).toBe(false);
+		expect(helpers.parseSemver(version)).toBeUndefined();
+		expect(function () {
+			helpers.compareSemver(version, '1.2.3');
+		}).toThrow(TypeError);
+	});
+});
+
+describe('isUrl default protocols', function () {
+	it('accepts http and https only, case-insensitively, when protocols is omitted', function () {
+		expect(helpers.isUrl('HTTP://example.com')).toBe(true);
+		expect(helpers.isUrl('https://example.com')).toBe(true);
+		expect(helpers.isUrl('ws://example.com')).toBe(false);
+		expect(helpers.isUrl('https://example.com', {})).toBe(true);
+		expect(function () {
+			helpers.isUrl('https://example.com', { protocols: null as any });
+		}).toThrow(new TypeError('isUrl: `protocols` must be an array of strings, got object'));
+	});
+});
+
+describe('isIPv6 (scanner edge cases)', function () {
+	it.each(['::', '1::', '1:2:3:4:5:6:7::', '::1:2:3:4:5:6:7', '1:2:3:4:5:6:1.2.3.4', '::1.2.3.4', '1::1.2.3.4'])('accepts %s', function (address) {
+		expect(helpers.isIPv6(address)).toBe(true);
+	});
+
+	it.each([
+		':::',
+		'1:::2',
+		':1::2',
+		'1:2:3:4:5:6:7:8:9',
+		'1::2:3:4:5:6:7:8',
+		'1:2:3:4::5:6:7:8',
+		'1:2:3:4:5:1.2.3.4',
+		'1.2.3.4::',
+		'1.2.3.4',
+		'::1.2.3.4:1',
+		'::ffff:1.2.3.04',
+		'12345::',
+		'fffff::1',
+		'1:2:3:4:5:6:7:',
+		'1:2:3:4:5:6:7:8:',
+		'::1:',
+		'fe80::1%eth0',
+		'1-2::3',
+		'g::1'
+	])('rejects %s', function (address) {
+		expect(helpers.isIPv6(address)).toBe(false);
 	});
 });
 

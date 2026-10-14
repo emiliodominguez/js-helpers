@@ -57,24 +57,58 @@ function isSimpleText(string: string): boolean {
 }
 
 /**
- * Lazily iterates the user-perceived characters of a string: grapheme clusters when `Intl.Segmenter` is available, code points otherwise.
- * @param {string} string - The string to iterate
- * @returns {Generator<string, void, undefined>} An iterator over the graphemes (or code points) of `string`
+ * Tells whether a code unit is a grapheme cluster on its own (see {@link COMPLEX_TEXT}).
+ * @param {number} code - The code unit (`NaN` past the end of a string, which counts as simple)
+ * @returns {boolean} `true` when the code unit is below U+0300 and not `\r`
  */
-function* iterateGraphemes(string: string): Generator<string, void, undefined> {
-	const segmenter = getGraphemeSegmenter();
-
-	if (segmenter === null) yield* string;
-	else for (const data of segmenter.segment(string)) yield data.segment;
+function isSimpleCode(code: number): boolean {
+	return !(code >= 0x300 || code === 13);
 }
 
 /**
- * Splits a string into grapheme clusters (or code points when `Intl.Segmenter` is unavailable).
- * @param {string} string - The string to split
- * @returns {string[]} The graphemes of `string`
+ * A region of text that may hold multi-code-unit grapheme clusters: runs of the code units {@link COMPLEX_TEXT} matches, the single other
+ * code units between them, and the other code unit on each side (which a combining mark, `\n` after `\r`, a prepend character or an
+ * emoji ZWJ sequence may join). Two consecutive code units below U+0300 other than `\r` are always separated by a grapheme boundary
+ * (no grapheme-break rule joins them or looks back across them), so the text outside these regions is one grapheme per code unit
+ * and every region can be segmented on its own.
  */
-function splitGraphemes(string: string): string[] {
-	return isSimpleText(string) ? string.split('') : Array.from(iterateGraphemes(string));
+const COMPLEX_REGION = /[^\u0300-\uffff\r]?(?:[\u0300-\uffff\r]+[^\u0300-\uffff\r]?)+/g;
+
+/**
+ * Splits a string into grapheme clusters (or code points when `Intl.Segmenter` is unavailable). Only the regions that may hold
+ * multi-code-unit clusters go through the (slow) segmenter; every other code unit is a grapheme on its own.
+ * @param {string} string - The string to split
+ * @param {number} [limit=Infinity] - Stop once more than `limit` graphemes have been collected (the ones returned are exact)
+ * @returns {string[]} The graphemes of `string` (only the first ones, at least `limit + 1`, when it has more than `limit`)
+ */
+function splitGraphemes(string: string, limit: number = Infinity): string[] {
+	if (isSimpleText(string)) return string.split('');
+
+	const segmenter = getGraphemeSegmenter();
+	const graphemes: string[] = [];
+	let index = 0;
+
+	COMPLEX_REGION.lastIndex = 0;
+
+	for (;;) {
+		const match = COMPLEX_REGION.exec(string);
+		const end = match === null ? string.length : match.index;
+
+		while (index < end && graphemes.length <= limit) graphemes.push(string[index++]);
+
+		if (match === null || graphemes.length > limit) return graphemes;
+
+		if (segmenter === null) {
+			for (const codePoint of match[0]) graphemes.push(codePoint);
+		} else {
+			for (const data of segmenter.segment(match[0])) {
+				if (graphemes.length > limit) break;
+				graphemes.push(data.segment);
+			}
+		}
+
+		index = COMPLEX_REGION.lastIndex;
+	}
 }
 
 /**
@@ -83,9 +117,7 @@ function splitGraphemes(string: string): string[] {
  * @returns {string} The first grapheme, or `''` for an empty string
  */
 function firstGrapheme(string: string): string {
-	if (isSimpleText(string.slice(0, 2))) return string.slice(0, 1);
-
-	return iterateGraphemes(string).next().value as string;
+	return isSimpleCode(string.charCodeAt(1)) && isSimpleCode(string.charCodeAt(0)) ? string.charAt(0) : splitGraphemes(string, 0)[0];
 }
 
 /**
@@ -107,6 +139,8 @@ const TITLE_CASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
  * @returns {string} The title-cased letter
  */
 function titleCaseLetter(letter: string): string {
+	if (letter.charCodeAt(0) < 0x80) return letter.toUpperCase();
+
 	const exception = TITLE_CASE_EXCEPTIONS.get(letter);
 
 	if (exception !== undefined) return exception;
@@ -124,22 +158,56 @@ function titleCaseLetter(letter: string): string {
  */
 function upperFirstLowerRest(word: string): string {
 	const lower = word.toLowerCase();
+
+	// An ASCII first letter title-cases to its upper case (no exception, no expansion): skip the code point handling.
+	if (lower.charCodeAt(0) < 0x80) return lower.charAt(0).toUpperCase() + lower.slice(1);
+
 	const first = String.fromCodePoint(lower.codePointAt(0) as number);
 
 	return titleCaseLetter(first) + lower.slice(first.length);
 }
 
-/** A run of Unicode letters, combining marks and numbers. */
-const WORD_CHUNK = /[\p{L}\p{M}\p{N}]+/gu;
+/**
+ * A run of Unicode letters, combining marks and numbers. (The redundant ASCII alternative is a speed-up: V8 tests it before the large
+ * Unicode property class, which makes the common characters about 1.5 times faster to match. The same trick is used below.)
+ */
+const WORD_CHUNK = /(?:[a-zA-Z0-9]|[\p{L}\p{M}\p{N}])+/gu;
 
 /** Any lower-case letter. */
 const HAS_LOWER_CASE = /\p{Ll}/u;
 
+/** An upper-case or title-case letter after the first character: without one, a chunk has no word boundary. */
+const INNER_UPPER = /.[\p{Lu}\p{Lt}]/u;
+
+/** A run of capital units for {@link UNICODE_WORD}: each one after the first is not followed by a lower-case unit. */
+const CAPITALS = String.raw`[\p{Lu}\p{Lt}]\p{M}*(?!\p{M})(?:[\p{Lu}\p{Lt}]\p{M}*(?![\p{M}\p{Ll}]))*`;
+
 /**
- * The (zero-width) word boundaries inside a chunk that has lower-case letters: between a lower-case letter or digit (and its marks) and an
- * upper/title-case letter, and before the last upper-case letter of a run that is followed by a lower-case letter.
+ * The words of a chunk that has lower-case letters, as a single match. Characters are grouped into units (a base character and its
+ * combining marks; the `(?!\p{M})` guards keep the engine from splitting a unit when it backtracks). A word ends before an upper/title-case
+ * unit that follows a lower-case or number unit (`hello|World`, `version2|Beta`), or that follows another capital and precedes a lower-case
+ * unit (`XML|Http`). So a word is: a run of capitals (each one after the first not followed by a lower-case unit), a lower-case/number unit,
+ * or other letters/orphan marks optionally followed by such a run; then any number of lower-case/number units, or other letters
+ * (`Lm`/`Lo`, after which a capital never starts a word) each optionally followed by a run of capitals.
  */
-const WORD_BOUNDARY = /(?<=[\p{Ll}\p{N}]\p{M}*)(?=[\p{Lu}\p{Lt}])|(?<=[\p{Lu}\p{Lt}]\p{M}*)(?=[\p{Lu}\p{Lt}]\p{M}*\p{Ll})/u;
+const UNICODE_WORD = new RegExp(
+	String.raw`(?:${CAPITALS}|[\p{Ll}\p{N}]\p{M}*|(?:[\p{Lm}\p{Lo}]\p{M}*|\p{M}+)(?:${CAPITALS})?)(?:[\p{Ll}\p{N}]\p{M}*|[\p{Lm}\p{Lo}]\p{M}*(?:${CAPITALS})?)*`,
+	'gu'
+);
+
+/** The apostrophes removed by the word splitter. */
+const APOSTROPHES = /['’]/g;
+
+/** Any non-ASCII code unit. */
+const NON_ASCII = /[^\0-\x7f]/;
+
+/**
+ * The words of ASCII text (without apostrophes), with the same rules as the Unicode path of {@link splitWords}, as a single match:
+ * a run of capitals and digits that is a whole run of letters and digits (`HTTP2`, `A0B1`), the capitals before the last one of a run
+ * followed by a lower-case letter (`XML` in `XMLHttp`), capitals followed by lower-case letters and digits (`Http`, `version2`), or
+ * trailing capitals (`DOG` in `lazyDOG`).
+ */
+const ASCII_WORD = /(?<![A-Za-z0-9])[A-Z0-9]+(?![A-Za-z0-9])|[A-Z]+(?=[A-Z][a-z])|[A-Z]*[a-z0-9]+|[A-Z]+/g;
 
 /**
  * Splits an identifier or free text into words for the case-conversion helpers.
@@ -151,16 +219,26 @@ const WORD_BOUNDARY = /(?<=[\p{Ll}\p{N}]\p{M}*)(?=[\p{Lu}\p{Lt}])|(?<=[\p{Lu}\p{
  * - Inside a run of upper-case letters, the last one starts a new word when followed by a lower-case letter (`XMLHttpRequest` → `XML`, `Http`, `Request`).
  * - Letter/digit transitions do NOT split (`version2` and `utf8` stay single words).
  * - A run without any lower-case letter is a single word (`HTTP2`, `A0B1`, the parts of `CONSTANT_CASE`), so constant case round-trips.
+ *
+ * ASCII text is split by a single plain regex match; other text is cut into chunks, and only the chunks with an inner capital and a
+ * lower-case letter are split further.
  * @param {string} string - The text to tokenize
  * @returns {string[]} The words, in their original casing
  */
 function splitWords(string: string): string[] {
+	const text = string.replace(APOSTROPHES, '');
+
+	if (!NON_ASCII.test(text)) return text.match(ASCII_WORD) ?? [];
+
 	const words: string[] = [];
 
-	for (const chunk of string.replace(/['’]/g, '').match(WORD_CHUNK) ?? []) {
-		// A chunk without lower-case letters is CONSTANT_CASE or an acronym (`HTTP2`, `A0B1`): keep it whole.
-		if (HAS_LOWER_CASE.test(chunk)) words.push(...chunk.split(WORD_BOUNDARY));
-		else words.push(chunk);
+	for (const chunk of text.match(WORD_CHUNK) ?? []) {
+		// Most chunks of natural text (`Crème`, `brûlée`) have no inner capital; a chunk without lower-case letters is kept whole too.
+		if (INNER_UPPER.test(chunk) && HAS_LOWER_CASE.test(chunk)) {
+			for (const word of chunk.match(UNICODE_WORD) as RegExpMatchArray) words.push(word);
+		} else {
+			words.push(chunk);
+		}
 	}
 
 	return words;
@@ -279,17 +357,9 @@ export function truncate(string: string, length: number, suffix: string = '...')
 	// When the first `length + 1` code units are graphemes on their own, the cut falls right after the first `length` of them.
 	if (isSimpleText(string.slice(0, length + 1))) return string.slice(0, length) + suffix;
 
-	let count = 0;
-	let end = 0;
+	const graphemes = splitGraphemes(string, length);
 
-	for (const grapheme of iterateGraphemes(string)) {
-		if (count === length) return string.slice(0, end) + suffix;
-
-		count++;
-		end += grapheme.length;
-	}
-
-	return string;
+	return graphemes.length > length ? graphemes.slice(0, length).join('') + suffix : string;
 }
 
 /**
@@ -320,6 +390,18 @@ export function trim(string: string): string {
 	return string.trim();
 }
 
+/** The first letter of every whitespace-separated word that does not start with a digit (after any leading punctuation), with that punctuation. */
+const TITLE_CASE_TARGET = /(?<!\S)([^\s\p{L}\p{N}]*)(\p{L})/gu;
+
+/**
+ * Lower-cases a string (a callback for `replace`).
+ * @param {string} text - The text
+ * @returns {string} The lower-cased text
+ */
+function toLowerCase(text: string): string {
+	return text.toLowerCase();
+}
+
 /**
  * Converts a string to title case: in every whitespace-separated word the first letter is upper-cased and everything else is lower-cased.
  * Whitespace and punctuation are preserved exactly. Leading punctuation is skipped (`'(hello)'` → `'(Hello)'`),
@@ -331,10 +413,12 @@ export function trim(string: string): string {
  * toTitleCase('élan vital, "quoted"'); // => 'Élan Vital, "Quoted"'
  */
 export function toTitleCase(string: string): string {
-	return string.replace(/\S+/g, function (word: string): string {
-		return word.toLowerCase().replace(/^([^\p{L}\p{N}]*)(\p{L})/u, function (_match: string, prefix: string, letter: string): string {
-			return prefix + titleCaseLetter(letter);
-		});
+	// Lower-casing the whole string equals lower-casing each word (only final sigma is context-sensitive, and white space is neither cased
+	// nor case-ignorable), except across U+FEFF: white space for `\s` but case-ignorable, so per-word lower-casing is kept for it.
+	const lower = string.includes('\ufeff') ? string.replace(/\S+/g, toLowerCase) : string.toLowerCase();
+
+	return lower.replace(TITLE_CASE_TARGET, function (_match: string, prefix: string, letter: string): string {
+		return prefix + titleCaseLetter(letter);
 	});
 }
 
@@ -349,11 +433,9 @@ export function toTitleCase(string: string): string {
  * toSnakeCase('XMLHttpRequest'); // => 'xml_http_request'
  */
 export function toSnakeCase(string: string): string {
-	return splitWords(string)
-		.map(function (word: string): string {
-			return word.toLowerCase();
-		})
-		.join('_');
+	// Lower-casing the joined words equals lower-casing each word: `_` is neither cased nor case-ignorable, so it cannot change the
+	// only context-sensitive mapping (final sigma).
+	return splitWords(string).join('_').toLowerCase();
 }
 
 /**
@@ -365,11 +447,7 @@ export function toSnakeCase(string: string): string {
  * toKebabCase('getHTTPResponse2Code'); // => 'get-http-response2-code'
  */
 export function toKebabCase(string: string): string {
-	return splitWords(string)
-		.map(function (word: string): string {
-			return word.toLowerCase();
-		})
-		.join('-');
+	return splitWords(string).join('-').toLowerCase();
 }
 
 /**
@@ -380,11 +458,7 @@ export function toKebabCase(string: string): string {
  * toConstantCase('maxRetryCount'); // => 'MAX_RETRY_COUNT'
  */
 export function toConstantCase(string: string): string {
-	return splitWords(string)
-		.map(function (word: string): string {
-			return word.toUpperCase();
-		})
-		.join('_');
+	return splitWords(string).join('_').toUpperCase();
 }
 
 /**
@@ -398,11 +472,12 @@ export function toConstantCase(string: string): string {
  * toCamelCase('XMLHttpRequest'); // => 'xmlHttpRequest'
  */
 export function toCamelCase(string: string): string {
-	return splitWords(string)
-		.map(function (word: string, index: number): string {
-			return index === 0 ? word.toLowerCase() : upperFirstLowerRest(word);
-		})
-		.join('');
+	const words = splitWords(string);
+	let result = words.length === 0 ? '' : words[0].toLowerCase();
+
+	for (let index = 1; index < words.length; index++) result += upperFirstLowerRest(words[index]);
+
+	return result;
 }
 
 /**
@@ -414,7 +489,12 @@ export function toCamelCase(string: string): string {
  * toPascalCase('xml-http-request'); // => 'XmlHttpRequest'
  */
 export function toPascalCase(string: string): string {
-	return splitWords(string).map(upperFirstLowerRest).join('');
+	const words = splitWords(string);
+	let result = '';
+
+	for (let index = 0; index < words.length; index++) result += upperFirstLowerRest(words[index]);
+
+	return result;
 }
 
 /** The combining diacritical mark blocks (U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+20D0–20FF, U+FE20–FE2F). */
@@ -429,7 +509,8 @@ const DIACRITICS = /[\u0300-\u036f]|[\u1ab0-\u1aff]|[\u1dc0-\u1dff]|[\u20d0-\u20
  * removeDiacritics('Crème Brûlée à Málaga'); // => 'Creme Brulee a Malaga'
  */
 export function removeDiacritics(string: string): string {
-	return string.normalize('NFD').replace(DIACRITICS, '').normalize('NFC');
+	// ASCII text has no decomposition and nothing to recompose.
+	return NON_ASCII.test(string) ? string.normalize('NFD').replace(DIACRITICS, '').normalize('NFC') : string;
 }
 
 /**
@@ -450,15 +531,18 @@ const SLUG_TRANSLITERATIONS: Readonly<Record<string, string>> = { ß: 'ss', æ: 
 export function toSlug(string: string): string {
 	// NFKD output is already fully decomposed, and recomposing (NFC) after stripping the diacritics never changes the slug: no character
 	// with an ASCII letter or digit (or a transliterated letter) as its base composes with a mark outside the stripped blocks.
-	return string
-		.normalize('NFKD')
-		.replace(DIACRITICS, '')
-		.toLowerCase()
-		.replace(/[ßæœøđðłþı]/g, function (letter: string): string {
-			return SLUG_TRANSLITERATIONS[letter];
-		})
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-|-$/g, '');
+	// ASCII text has no decomposition and no letter to transliterate (lower-casing it never leaves ASCII).
+	const folded = NON_ASCII.test(string)
+		? string
+				.normalize('NFKD')
+				.replace(DIACRITICS, '')
+				.toLowerCase()
+				.replace(/[ßæœøđðłþı]/g, function (letter: string): string {
+					return SLUG_TRANSLITERATIONS[letter];
+				})
+		: string.toLowerCase();
+
+	return folded.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 /**
@@ -573,7 +657,7 @@ export function isEmpty(string: string): boolean {
  * getWords("Don't stop, café 2024!"); // => ["Don't", 'stop', 'café', '2024']
  */
 export function getWords(string: string): string[] {
-	return string.match(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*/gu) ?? [];
+	return string.match(/(?:[a-zA-Z0-9]|[\p{L}\p{M}\p{N}])+(?:['’](?:[a-zA-Z0-9]|[\p{L}\p{M}\p{N}])+)*/gu) ?? [];
 }
 
 /**
@@ -666,15 +750,24 @@ export function normalizeWhitespace(string: string): string {
  */
 function resolvePath(source: unknown, path: string): unknown {
 	let current: unknown = source;
+	let start = 0;
 
-	for (const key of path.split('.')) {
-		if (current === null || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, key)) return undefined;
+	for (;;) {
+		const dot = path.indexOf('.', start);
+		const key = dot === -1 ? path.slice(start) : path.slice(start, dot);
+
+		if (current === null || typeof current !== 'object' || !Object.hasOwn(current, key)) return undefined;
 
 		current = (current as Readonly<Record<string, unknown>>)[key];
-	}
 
-	return current;
+		if (dot === -1) return current;
+
+		start = dot + 1;
+	}
 }
+
+/** A `{...}` placeholder of {@link interpolate}, capturing its path. */
+const PLACEHOLDER = /\{([^{}]+)\}/g;
 
 /**
  * Replaces `{key}` and `{nested.key}` placeholders (whitespace inside the braces is ignored) with values from an object.
@@ -688,7 +781,7 @@ function resolvePath(source: unknown, path: string): unknown {
  * interpolate('Hi {missing}', {}); // => 'Hi {missing}'
  */
 export function interpolate(template: string, values: InterpolationValues): string {
-	return template.replace(/\{([^{}]+)\}/g, function (placeholder: string, path: string): string {
+	return template.replace(PLACEHOLDER, function (placeholder: string, path: string): string {
 		const value = resolvePath(values, path.trim());
 
 		return value === undefined ? placeholder : String(value);
@@ -1133,11 +1226,10 @@ export function randomString(length: number, alphabet: string = ALPHANUMERIC, ra
  * toSentenceCase('SOME_CONSTANT_NAME'); // => 'Some constant name'
  */
 export function toSentenceCase(string: string): string {
-	return splitWords(string)
-		.map(function (word: string, index: number): string {
-			return index === 0 ? upperFirstLowerRest(word) : word.toLowerCase();
-		})
-		.join(' ');
+	const sentence = splitWords(string).join(' ');
+
+	// A space is neither cased nor case-ignorable, so lower-casing the joined words equals lower-casing each of them.
+	return sentence === '' ? '' : upperFirstLowerRest(sentence);
 }
 
 /**

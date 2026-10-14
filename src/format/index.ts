@@ -13,7 +13,9 @@
  * - **Cached formatters.** Constructing an `Intl` formatter is far more expensive than calling `format` on it, so formatters are cached
  *   per `(kind, locales, options)` in a small least-recently-used cache (50 entries) shared by the whole module. Formatters are
  *   immutable, so a cached one always produces exactly what a freshly constructed one would. (Options whose value is an object, and
- *   `Intl.Locale` objects in a locale list, bypass the cache.)
+ *   `Intl.Locale` objects in a locale list, bypass the cache.) On top of it, every function remembers the formatter of its previous
+ *   call: a call with the same locale string and option values (the usual case when formatting many values) reuses it without even
+ *   building the cache key, which brings the cost close to that of calling a prebuilt formatter.
  * - **Validation.** Where a number is required, a non-number throws `TypeError`, and `NaN` / `±Infinity` throw `RangeError` instead of
  *   being rendered as `'NaN'` / `'∞'`, which is never what a UI wants to show. Errors raised by `Intl` itself (an invalid currency code,
  *   unit, time zone or option combination) propagate unchanged: they are already `RangeError`/`TypeError` with a clear message.
@@ -218,31 +220,123 @@ function cacheKey(kind: string, locales: readonly unknown[], options: object): s
 }
 
 /**
+ * The last formatter a call site obtained from {@link getFormatter}, with the inputs it was built from: the locale (a string or
+ * `undefined`: a locale list could be mutated by the caller, so it is never memoized) and the options object (always one the module
+ * built itself, so it is never mutated afterwards).
+ */
+interface FormatterMemo {
+	formatter: unknown;
+	locale: string | undefined;
+	options: object;
+	/** The number of keys of `options` whose value is not `undefined`. */
+	size: number;
+}
+
+/**
+ * Creates an empty {@link FormatterMemo}.
+ * @returns {FormatterMemo} A memo that matches nothing
+ */
+function createMemo(): FormatterMemo {
+	return { formatter: undefined, locale: undefined, options: {}, size: 0 };
+}
+
+/**
+ * Counts the options whose value is not `undefined` (`Intl` treats an `undefined` option as absent).
+ * @param {object} options - The options
+ * @returns {number} The count
+ */
+function countDefined(options: object): number {
+	let count = 0;
+
+	for (const name in options) if ((options as Record<string, unknown>)[name] !== undefined) count++;
+
+	return count;
+}
+
+/**
+ * Tells whether two options objects set the same options to the same values (`===`), `undefined` meaning absent. Only options without
+ * object or function values are memoized (see {@link cacheKey}), so an object or function value never matches.
+ * @param {object} a - The requested options
+ * @param {object} b - The memoized options
+ * @param {number} size - {@link countDefined} of `b`
+ * @returns {boolean} Whether they are equal
+ */
+function sameOptions(a: object, b: object, size: number): boolean {
+	let count = 0;
+
+	for (const name in a) {
+		const value: unknown = (a as Record<string, unknown>)[name];
+
+		if (value === undefined) continue;
+		if (value !== (b as Record<string, unknown>)[name]) return false;
+
+		count++;
+	}
+
+	// Every defined option of `a` is set the same way in `b`, so equal counts mean equal sets.
+	return count === size;
+}
+
+/**
  * Returns a cached `Intl` formatter for `(kind, locale, options)`, constructing and caching it on a miss.
+ *
+ * Building the cache key costs about as much as formatting, so each call site first compares its inputs with those of its previous call
+ * (`memo`): repeated calls with equal arguments, the common case when formatting many values, skip the key entirely.
  * @template T - The formatter type
  * @template O - The options type
  * @param {string} kind - A key prefix identifying the formatter class
  * @param {Function} Formatter - The `Intl` constructor
  * @param {LocaleInput | undefined} locale - The requested locale(s)
- * @param {O} options - The options passed to the constructor
+ * @param {O} options - The options passed to the constructor (an object this module built)
+ * @param {FormatterMemo} memo - The call site's memo
  * @returns {T} The formatter
  * @throws {RangeError} when `Intl` rejects the locale or the options
  */
-function getFormatter<T, O>(kind: string, Formatter: new (locales: string[], options: O) => T, locale: LocaleInput | undefined, options: O): T {
+function getFormatter<T, O>(kind: string, Formatter: new (locales: string[], options: O) => T, locale: LocaleInput | undefined, options: O, memo: FormatterMemo): T {
+	if (memo.formatter !== undefined && locale === memo.locale && sameOptions(options as object, memo.options, memo.size)) return memo.formatter as T;
+
 	const locales = resolveLocales(locale);
 	const key = cacheKey(kind, locales, options as object);
 
 	if (key === undefined) return new Formatter(locales, options);
 
-	const cached = formatterCache.get(key) as T | undefined;
+	let formatter = formatterCache.get(key) as T | undefined;
 
-	if (cached !== undefined) return cached;
+	if (formatter === undefined) {
+		formatter = new Formatter(locales, options);
+		formatterCache.set(key, formatter);
+	}
 
-	const formatter = new Formatter(locales, options);
-	formatterCache.set(key, formatter);
+	if (typeof locale !== 'object') {
+		memo.formatter = formatter;
+		memo.locale = locale;
+		memo.options = options as object;
+		memo.size = countDefined(options as object);
+	}
 
 	return formatter;
 }
+
+/** Per-call-site memos for {@link getFormatter}. */
+const NUMBER_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const CURRENCY_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const PERCENT_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const COMPACT_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const UNIT_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const LIST_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const DATE_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const RELATIVE_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const ORDINAL_MEMO = createMemo();
+/** @see NUMBER_MEMO */
+const PLURAL_MEMO = createMemo();
 
 /**
  * Returns the language subtag of the locale a plural-rules formatter resolved to. `resolvedOptions()` allocates and is several times
@@ -319,7 +413,7 @@ export function formatNumber(value: number | bigint, options: FormatNumberOption
 	assertNumeric('formatNumber', value);
 	const { locale, ...rest } = options;
 
-	return getFormatter('number', Intl.NumberFormat, locale, rest).format(value);
+	return getFormatter('number', Intl.NumberFormat, locale, rest, NUMBER_MEMO).format(value);
 }
 
 /**
@@ -348,7 +442,7 @@ export function formatCurrency(value: number | bigint, currency: string, options
 	assertString('formatCurrency', 'currency', currency);
 	const { locale, display = 'symbol', ...rest } = options;
 
-	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'currency', currency, currencyDisplay: display }).format(value);
+	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'currency', currency, currencyDisplay: display }, CURRENCY_MEMO).format(value);
 }
 
 /**
@@ -379,7 +473,7 @@ export function formatPercent(value: number, options: FormatPercentOptions = {})
 		rest.maximumFractionDigits = decimals;
 	}
 
-	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'percent' }).format(value);
+	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'percent' }, PERCENT_MEMO).format(value);
 }
 
 /**
@@ -401,7 +495,7 @@ export function formatCompact(value: number | bigint, options: FormatCompactOpti
 	assertNumeric('formatCompact', value);
 	const { locale, display = 'short', ...rest } = options;
 
-	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, notation: 'compact', compactDisplay: display }).format(value);
+	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, notation: 'compact', compactDisplay: display }, COMPACT_MEMO).format(value);
 }
 
 /**
@@ -426,7 +520,7 @@ export function formatUnit(value: number | bigint, unit: string, options: Format
 	assertString('formatUnit', 'unit', unit);
 	const { locale, display = 'short', ...rest } = options;
 
-	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'unit', unit, unitDisplay: display }).format(value);
+	return getFormatter('number', Intl.NumberFormat, locale, { ...rest, style: 'unit', unit, unitDisplay: display }, UNIT_MEMO).format(value);
 }
 
 /**
@@ -456,7 +550,7 @@ export function formatList(items: Iterable<string>, options: FormatListOptions =
 
 	const { locale, type = 'conjunction', style = 'long' } = options;
 
-	return getFormatter('list', Intl.ListFormat, locale, { type, style }).format(list);
+	return getFormatter('list', Intl.ListFormat, locale, { type, style }, LIST_MEMO).format(list);
 }
 
 /**
@@ -488,7 +582,7 @@ export function formatDateTime(date: DateInput, options: FormatDateTimeOptions =
 
 	const { locale, timeZone = 'UTC', ...rest } = options;
 
-	return getFormatter('date', Intl.DateTimeFormat, locale, { ...rest, timeZone }).format(time);
+	return getFormatter('date', Intl.DateTimeFormat, locale, { ...rest, timeZone }, DATE_MEMO).format(time);
 }
 
 /**
@@ -513,7 +607,7 @@ export function formatRelativeTime(value: number, unit: Intl.RelativeTimeFormatU
 	assertFiniteNumber('formatRelativeTime', value);
 	const { locale, ...rest } = options;
 
-	return getFormatter('relative', Intl.RelativeTimeFormat, locale, rest).format(value, unit);
+	return getFormatter('relative', Intl.RelativeTimeFormat, locale, rest, RELATIVE_MEMO).format(value, unit);
 }
 
 /**
@@ -544,7 +638,7 @@ export function formatOrdinal(n: number, options: FormatOrdinalOptions = {}): st
 
 	const { locale, suffixes } = options;
 	const value = n === 0 ? 0 : n;
-	const rules = getFormatter('plural', Intl.PluralRules, locale, { type: 'ordinal' });
+	const rules = getFormatter('plural', Intl.PluralRules, locale, { type: 'ordinal' }, ORDINAL_MEMO);
 	const table = suffixes ?? (resolvedLanguage(rules) === 'en' ? ENGLISH_ORDINAL_SUFFIXES : GENERIC_ORDINAL_SUFFIXES);
 
 	return `${formatNumber(value, { locale })}${table[rules.select(value)] ?? table.other}`;
@@ -570,5 +664,5 @@ export function pluralRule(count: number, options: PluralRuleOptions = {}): Intl
 	assertFiniteNumber('pluralRule', count, 'count');
 	const { locale, ...rest } = options;
 
-	return getFormatter('plural', Intl.PluralRules, locale, rest).select(count);
+	return getFormatter('plural', Intl.PluralRules, locale, rest, PLURAL_MEMO).select(count);
 }

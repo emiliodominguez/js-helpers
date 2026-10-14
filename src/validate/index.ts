@@ -1,4 +1,4 @@
-import { parseISODate } from '../date/index.js';
+import { daysInMonth } from '../date/index.js';
 
 /**
  * Options accepted by {@link isUrl}.
@@ -60,7 +60,7 @@ interface UrlRecord {
 }
 
 /** The `URL` constructor, typed structurally so that no DOM types are needed. */
-type UrlConstructor = new (input: string) => UrlRecord;
+type UrlConstructor = (new (input: string) => UrlRecord) & { readonly canParse?: (input: string) => boolean };
 
 /** WHATWG HTML "valid email address" grammar (the one behind `<input type=email>`). Each label is limited to 63 characters. */
 const EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
@@ -68,20 +68,14 @@ const EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-
 /** Any control character or white space, which the URL parser silently strips or percent-encodes. */
 const URL_FORBIDDEN_CHARACTER = /[\p{Cc}\s]/u;
 
-/** The schemes {@link isUrl} accepts by default. */
-const DEFAULT_URL_PROTOCOLS: ReadonlyArray<string> = ['http', 'https'];
-
 /** Schemes the URL parser treats as "special": it accepts them without `//` (`http:example.com`) and with extra slashes. */
 const SPECIAL_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'ws', 'wss', 'ftp', 'file']);
 
 /** A top-level domain: ASCII letters, or an IDNA (punycode) label. Case-insensitive: the URL parser only lower-cases the hosts of special schemes. */
 const TLD_PATTERN = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/i;
 
-/** Any RFC 9562 UUID layout; captures the version digit and the variant digit. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-([0-9a-f])[0-9a-f]{3}-([0-9a-f])[0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** The versions {@link isUuid} accepts as its second argument. */
-const UUID_VERSIONS: ReadonlyArray<unknown> = [1, 2, 3, 4, 5, 6, 7, 8, 'nil', 'max'];
+/** An RFC 9562 UUID of versions 1–8 with the RFC variant (`10xx`); the version digit is at index 14. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** The nil UUID (RFC 9562 §5.9). */
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
@@ -91,12 +85,6 @@ const MAX_UUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
 /** A dotted-decimal IPv4 address: four decimal octets in `[0, 255]`, without leading zeros. */
 const IPV4_PATTERN = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/;
-
-/** One IPv6 group: 1 to 4 hex digits. */
-const IPV6_GROUP_PATTERN = /^[0-9a-f]{1,4}$/i;
-
-/** Longest textual IPv6 address without a zone id: `ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255`. */
-const IPV6_MAX_LENGTH = 45;
 
 /** CSS hex colour with an optional alpha channel. */
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
@@ -112,20 +100,20 @@ const SEMVER_PATTERN = new RegExp(
 /** A string of ASCII digits. */
 const DIGITS_PATTERN = /^[0-9]+$/;
 
-/** RFC 3339 `date-time` (seconds required) with hours `00`–`23` and minutes/seconds `00`–`59` (offset included); captures the date. */
-const DATE_TIME_PATTERN = /^(\d{4}-\d{2}-\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+/** RFC 3339 `full-date`; captures the year, month and day. */
+const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** RFC 3339 `date-time` (seconds required) with hours `00`–`23` and minutes/seconds `00`–`59` (offset included); captures the year, month and day. */
+const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
 /** Card digits, optionally separated by single spaces or dashes. */
 const CARD_PATTERN = /^[0-9](?:[ -]?[0-9])*$/;
 
 /** Base64 (RFC 4648 §4) body and padding. */
-const BASE64_PATTERN = /^[A-Za-z0-9+/]*(={0,2})$/;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Base64url (RFC 4648 §5) body and padding. */
-const BASE64_URL_PATTERN = /^[A-Za-z0-9_-]*(={0,2})$/;
-
-/** The padding modes {@link isBase64} accepts. */
-const BASE64_PADDINGS: ReadonlyArray<unknown> = ['optional', 'required', 'forbidden'];
+const BASE64_URL_PATTERN = /^[A-Za-z0-9_-]*={0,2}$/;
 
 /** A lowercase ASCII slug, as produced by `toSlug` from the strings module. */
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -197,8 +185,8 @@ function hasTld(hostname: string): boolean {
  * isUrl(' https://example.com'); // => false
  */
 export function isUrl(value: unknown, options: IsUrlOptions = {}): value is string {
-	const { protocols = DEFAULT_URL_PROTOCOLS, requireTld = false } = options;
-	if (!Array.isArray(protocols)) throw new TypeError(`isUrl: \`protocols\` must be an array of strings, got ${typeof protocols}`);
+	const { protocols, requireTld = false } = options;
+	if (protocols !== undefined && !Array.isArray(protocols)) throw new TypeError(`isUrl: \`protocols\` must be an array of strings, got ${typeof protocols}`);
 	if (typeof value !== 'string' || URL_FORBIDDEN_CHARACTER.test(value)) return false;
 
 	const UrlParser = getUrlConstructor();
@@ -206,15 +194,22 @@ export function isUrl(value: unknown, options: IsUrlOptions = {}): value is stri
 	// expensive) parse. Without any `:` the parse fails, whatever these checks conclude.
 	const schemeEnd = value.indexOf(':');
 	const scheme = value.slice(0, schemeEnd).toLowerCase();
-	const allowed = protocols.some(function (protocol: unknown): boolean {
-		return typeof protocol === 'string' && protocol.toLowerCase().replace(/:$/, '') === scheme;
-	});
+	const allowed =
+		protocols === undefined
+			? scheme === 'http' || scheme === 'https'
+			: protocols.some(function (protocol: unknown): boolean {
+					return typeof protocol === 'string' && protocol.toLowerCase().replace(/:$/, '') === scheme;
+				});
 	if (!allowed) return false;
 
 	if (SPECIAL_SCHEMES.has(scheme)) {
 		const rest = value.slice(schemeEnd + 1);
 		if (!rest.startsWith('//') || (scheme !== 'file' && (rest[2] === '/' || rest[2] === '\\'))) return false;
 	}
+
+	// Runtimes with `URL.canParse` implement the WHATWG parser, which never yields an empty http(s) host: unless the host must be
+	// inspected, validate without building a URL object (about twice as fast).
+	if (!requireTld && typeof UrlParser.canParse === 'function') return UrlParser.canParse(value);
 
 	let url: UrlRecord;
 	try {
@@ -246,21 +241,17 @@ export function isUrl(value: unknown, options: IsUrlOptions = {}): value is stri
  * isUuid('f47ac10b58cc4372a5670e02b2c3d479'); // => false
  */
 export function isUuid(value: unknown, version?: UuidVersion): value is string {
-	if (version !== undefined && !UUID_VERSIONS.includes(version)) {
+	if (version !== undefined && version !== 'nil' && version !== 'max' && !(Number.isInteger(version) && version >= 1 && version <= 8)) {
 		throw new RangeError(`isUuid: \`version\` must be 1-8, 'nil' or 'max', got ${String(version)}`);
 	}
 	if (typeof value !== 'string') return false;
-
-	const match = UUID_PATTERN.exec(value);
-	if (match === null) return false;
+	if (version === 'nil' || version === 'max') return value.toLowerCase() === (version === 'nil' ? NIL_UUID : MAX_UUID);
+	// A single regex test covers the common case; the nil and max UUIDs have no RFC variant, so they are only checked when it fails.
+	if (UUID_PATTERN.test(value)) return version === undefined || value.charCodeAt(14) === 48 + version;
+	if (version !== undefined) return false;
 
 	const lower = value.toLowerCase();
-	if (version === 'nil' || version === 'max') return lower === (version === 'nil' ? NIL_UUID : MAX_UUID);
-
-	const hasRfcVariant = '89ab'.includes(match[2].toLowerCase());
-	if (version !== undefined) return hasRfcVariant && match[1] === String(version);
-
-	return lower === NIL_UUID || lower === MAX_UUID || (hasRfcVariant && match[1] >= '1' && match[1] <= '8');
+	return lower === NIL_UUID || lower === MAX_UUID;
 }
 
 /**
@@ -297,30 +288,56 @@ export function isIPv4(value: unknown): value is string {
  * isIPv6('fe80::1%eth0'); // => false
  */
 export function isIPv6(value: unknown): value is string {
-	if (typeof value !== 'string' || value.length > IPV6_MAX_LENGTH) return false;
+	if (typeof value !== 'string') return false;
 
-	const halves = value.split('::');
-	if (halves.length > 2) return false;
+	// A single left-to-right scan over the char codes (no splitting): `index` is at the start of a group on every iteration.
+	const length = value.length;
+	let compressed = value.startsWith('::');
+	let index = compressed ? 2 : 0;
+	let groups = 0;
 
-	const compressed = halves.length === 2;
-	const head = compressed && halves[0] === '' ? [] : halves[0].split(':');
-	const tail = !compressed || halves[1] === '' ? [] : halves[1].split(':');
-	const groups = head.concat(tail);
-	// An embedded IPv4 address may only end the address, so not when the address ends with `::`.
-	const ipv4Allowed = !compressed || tail.length > 0;
-	let count = groups.length;
+	while (index < length) {
+		const start = index;
 
-	for (let i = 0; i < groups.length; i++) {
-		const group = groups[i];
-		if (ipv4Allowed && i === groups.length - 1 && group.includes('.')) {
-			if (!isIPv4(group)) return false;
-			count++;
-		} else if (!IPV6_GROUP_PATTERN.test(group)) {
+		while (isHexDigit(value.charCodeAt(index))) index++;
+
+		// An embedded IPv4 address (two groups' worth) must end the address, so it can only follow a `::`, never precede one.
+		if (value.charCodeAt(index) === 46) return isIPv4(value.slice(start)) && (compressed ? groups + 2 < 8 : groups + 2 === 8);
+
+		if (index === start || index - start > 4) return false;
+
+		groups++;
+
+		if (index === length) break;
+
+		if (value.charCodeAt(index) !== 58) return false;
+
+		index++;
+
+		if (value.charCodeAt(index) === 58) {
+			// A second `::`; a `::` may end the address.
+			if (compressed) return false;
+
+			compressed = true;
+			index++;
+		} else if (index === length) {
+			// A trailing single `:`.
 			return false;
 		}
 	}
 
-	return compressed ? count < 8 : count === 8;
+	return compressed ? groups < 8 : groups === 8;
+}
+
+/**
+ * Tells whether a UTF-16 code unit is an ASCII hex digit.
+ * @param {number} code - The code unit (`NaN` past the end of a string)
+ * @returns {boolean} `true` for `0`–`9`, `a`–`f` and `A`–`F`
+ */
+function isHexDigit(code: number): boolean {
+	const lower = code | 32;
+
+	return (code >= 48 && code <= 57) || (lower >= 97 && lower <= 102);
 }
 
 /**
@@ -351,9 +368,9 @@ export function isIP(value: unknown): value is string {
  * isHexColor('#ff80'); // => true
  * isHexColor('#ff800'); // => false
  */
-export function isHexColor(value: unknown, options: IsHexColorOptions = {}): value is string {
-	const pattern = options.alpha === false ? OPAQUE_HEX_COLOR_PATTERN : HEX_COLOR_PATTERN;
-	return typeof value === 'string' && pattern.test(value);
+export function isHexColor(value: unknown, options?: IsHexColorOptions): value is string {
+	// No `= {}` default: allocating an options object would cost about as much as the test itself.
+	return typeof value === 'string' && (options?.alpha === false ? OPAQUE_HEX_COLOR_PATTERN : HEX_COLOR_PATTERN).test(value);
 }
 
 /**
@@ -378,7 +395,7 @@ function matchSemver(value: unknown): RegExpExecArray | null {
  * isSemver('01.2.3'); // => false
  */
 export function isSemver(value: unknown): value is string {
-	return matchSemver(value) !== null;
+	return typeof value === 'string' && SEMVER_PATTERN.test(value);
 }
 
 /**
@@ -504,6 +521,21 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
 }
 
 /**
+ * Tells whether the year, month and day captured by {@link DATE_PATTERN} or {@link DATE_TIME_PATTERN} name an existing date (the same check
+ * as `parseISODate` from the date module, without building a `Date`).
+ * @param {RegExpExecArray | null} match - The match, or `null` when the pattern did not match
+ * @returns {boolean} `true` when there is a match whose month is 1–12 and whose day exists in that month (leap years included)
+ */
+function isCalendarDate(match: RegExpExecArray | null): boolean {
+	if (match === null) return false;
+
+	const month = Number(match[2]);
+	const day = Number(match[3]);
+
+	return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(Number(match[1]), month - 1);
+}
+
+/**
  * Checks whether a value is an ISO 8601 / RFC 3339 calendar date in the `YYYY-MM-DD` form that is an actual date
  * (`2023-02-29` and `2024-04-31` are rejected; leap years are handled).
  * @param {unknown} value - The value to check
@@ -515,7 +547,7 @@ export function compareSemver(a: string, b: string): -1 | 0 | 1 {
  * isIsoDateString('2024-01-05T00:00:00Z'); // => false
  */
 export function isIsoDateString(value: unknown): value is string {
-	return typeof value === 'string' && parseISODate(value) !== undefined;
+	return isCalendarDate(typeof value === 'string' ? DATE_PATTERN.exec(value) : null);
 }
 
 /**
@@ -537,8 +569,7 @@ export function isIsoDateString(value: unknown): value is string {
  * isIsoDateTimeString('2024-01-01T12:00:00'); // => false
  */
 export function isIsoDateTimeString(value: unknown): value is string {
-	const match = typeof value === 'string' ? DATE_TIME_PATTERN.exec(value) : null;
-	return match !== null && isIsoDateString(match[1]);
+	return isCalendarDate(typeof value === 'string' ? DATE_TIME_PATTERN.exec(value) : null);
 }
 
 /**
@@ -625,14 +656,13 @@ export function isJsonString(value: unknown): value is string {
  */
 export function isBase64(value: unknown, options: IsBase64Options = {}): value is string {
 	const { urlSafe = false, padding = 'optional' } = options;
-	if (!BASE64_PADDINGS.includes(padding)) throw new RangeError(`isBase64: \`padding\` must be 'optional', 'required' or 'forbidden', got ${String(padding)}`);
-	if (typeof value !== 'string') return false;
+	if (padding !== 'optional' && padding !== 'required' && padding !== 'forbidden') {
+		throw new RangeError(`isBase64: \`padding\` must be 'optional', 'required' or 'forbidden', got ${String(padding)}`);
+	}
+	if (typeof value !== 'string' || !(urlSafe ? BASE64_URL_PATTERN : BASE64_PATTERN).test(value)) return false;
 
-	const match = (urlSafe ? BASE64_URL_PATTERN : BASE64_PATTERN).exec(value);
-	if (match === null) return false;
-
-	const padded = match[1] !== '';
-	if (padded) return padding !== 'forbidden' && value.length % 4 === 0;
+	// The pattern only allows `=` at the end.
+	if (value.endsWith('=')) return padding !== 'forbidden' && value.length % 4 === 0;
 
 	const remainder = value.length % 4;
 	return remainder === 0 || (remainder !== 1 && padding !== 'required');

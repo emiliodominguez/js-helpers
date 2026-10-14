@@ -1,5 +1,21 @@
-import { compareSemver, isCreditCardNumber, isEmail, isIPv4, isIPv6, isIsoDateTimeString, isUrl, isUuid } from '@emiliodominguez/js-helpers/validate';
+import {
+	compareSemver,
+	isBase64,
+	isCreditCardNumber,
+	isEmail,
+	isHexColor,
+	isIPv4,
+	isIPv6,
+	isIsoDateTimeString,
+	isNumericString,
+	isSemver,
+	isSlug,
+	isUrl,
+	isUuid
+} from '@emiliodominguez/js-helpers/validate';
 
+// No validation library is installed: the competitors are the snippets people usually paste (a typical regex, `URL.canParse`, ...).
+// Most of them are looser than our validators (they accept inputs we reject on purpose), so a ratio below 1 can be the price of correctness.
 const emails = ['jane.doe+news@example.co.uk', 'user@localhost', 'not an email', 'a@b@c.com', 'very.long.local.part.with.dots@sub.domain.example.org'];
 const urls = ['https://example.com/path?q=1#top', 'http://localhost:3000', 'ftp://files.example.com', 'example.com', 'https://sub.example.co.uk/a/b/c'];
 const uuids = [
@@ -14,6 +30,24 @@ const ipv4 = ['192.168.0.1', '255.255.255.255', '256.0.0.1', '10.0.0.1'];
 const versions = ['1.0.0', '1.0.0-beta', '0.9.0', '1.0.0-alpha.10', '1.0.0-alpha.2', '2.1.3+build', '1.10.0', '1.2.3'];
 const dateTimes = ['2024-02-29T13:45:00Z', '2024-02-29T13:45:00.123+05:30', '2023-02-29T13:45:00Z', '2024-01-01T12:00:00'];
 const cards = ['4111 1111 1111 1111', '4111-1111-1111-1111', '4111111111111112'];
+const colors = ['#ff8000', '#FFF', '#ff800080', 'ff8000', '#ff800', 'red'];
+const slugs = ['hello-world-2', 'Hello-World', 'hello--world', '-hello', 'a-very-long-slug-made-of-many-words-for-the-benchmark'];
+const numerics = ['-12.5e3', '.5', '42', ' 1', '0x1f', 'Infinity', '1e400', '', '3.14159'];
+const base64 = ['aGVsbG8=', 'aGVsbG8', 'aGVsbG8===', 'SGVsbG8sIFdvcmxkIQ==', 'not base64!'];
+const longBase64 = 'SGVsbG8sIFdvcmxkIQ=='.repeat(50).replace(/=/g, 'A') + 'AA==';
+
+const TYPICAL_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const WHATWG_EMAIL = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+const TYPICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TYPICAL_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TYPICAL_IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+const TYPICAL_IPV6 =
+	/^(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){1,6}|:(?:(?::[0-9a-f]{1,4}){1,7}|:)|::(?:ffff(?::0{1,4})?:)?(?:(?:25[0-5]|(?:2[0-4]|1?\d)?\d)\.){3}(?:25[0-5]|(?:2[0-4]|1?\d)?\d)|(?:[0-9a-f]{1,4}:){1,4}:(?:(?:25[0-5]|(?:2[0-4]|1?\d)?\d)\.){3}(?:25[0-5]|(?:2[0-4]|1?\d)?\d))$/i;
+const SEMVER =
+	/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 /**
  * Applies a predicate to every input.
@@ -23,59 +57,89 @@ const cards = ['4111 1111 1111 1111', '4111-1111-1111-1111', '4111111111111112']
  */
 function countValid(predicate, inputs) {
 	let count = 0;
-	for (const input of inputs) if (predicate(input)) count++;
+	for (let i = 0; i < inputs.length; i++) if (predicate(inputs[i])) count++;
 	return count;
 }
 
+/**
+ * Wraps a regex as a string predicate.
+ * @param {RegExp} pattern - The regex
+ * @returns {(value: string) => boolean} The predicate
+ */
+function matches(pattern) {
+	return function (value) {
+		return typeof value === 'string' && pattern.test(value);
+	};
+}
+
+/**
+ * Builds a case for a predicate over a list of inputs, with competitors over the same list.
+ * @param {string} name - The case name
+ * @param {(value: string) => boolean} ours - Our validator
+ * @param {string[]} inputs - The inputs
+ * @param {Record<string, (value: string) => boolean>} others - The competitors
+ * @returns {object} The case
+ */
+function predicateCase(name, ours, inputs, others) {
+	const competitors = {};
+	for (const [label, predicate] of Object.entries(others)) {
+		competitors[label] = function () {
+			return countValid(predicate, inputs);
+		};
+	}
+	return {
+		name: `${name} (${inputs.length} inputs)`,
+		fn: function () {
+			return countValid(ours, inputs);
+		},
+		competitors
+	};
+}
+
 export default [
-	{
-		name: 'isEmail (5 inputs)',
-		fn: function () {
-			return countValid(isEmail, emails);
+	predicateCase('isEmail', isEmail, emails, { 'typical regex': matches(TYPICAL_EMAIL), 'WHATWG regex': matches(WHATWG_EMAIL) }),
+	predicateCase('isUrl', isUrl, urls, {
+		'URL.canParse': function (value) {
+			return URL.canParse(value);
+		},
+		'try new URL': function (value) {
+			try {
+				return ['http:', 'https:'].includes(new URL(value).protocol);
+			} catch {
+				return false;
+			}
 		}
-	},
-	{
-		name: 'isUrl (5 inputs)',
-		fn: function () {
-			return countValid(isUrl, urls);
+	}),
+	predicateCase('isUuid', isUuid, uuids, { 'typical regex': matches(TYPICAL_UUID) }),
+	predicateCase(
+		'isUuid v4',
+		function (value) {
+			return isUuid(value, 4);
+		},
+		uuids,
+		{ 'typical regex': matches(TYPICAL_UUID_V4) }
+	),
+	predicateCase('isIPv6', isIPv6, ipv6, { 'typical regex': matches(TYPICAL_IPV6) }),
+	predicateCase('isIPv4', isIPv4, ipv4, { 'typical regex': matches(TYPICAL_IPV4) }),
+	predicateCase('isSemver', isSemver, versions, { 'semver.org regex': matches(SEMVER) }),
+	predicateCase('isHexColor', isHexColor, colors, { 'typical regex': matches(HEX_COLOR) }),
+	predicateCase('isSlug', isSlug, slugs, { 'typical regex': matches(SLUG) }),
+	predicateCase('isNumericString', isNumericString, numerics, {
+		'!isNaN(parseFloat)': function (value) {
+			return !Number.isNaN(Number.parseFloat(value)) && Number.isFinite(Number(value));
 		}
-	},
-	{
-		name: 'isUuid (5 inputs)',
-		fn: function () {
-			return countValid(isUuid, uuids);
+	}),
+	predicateCase('isBase64', isBase64, base64, { 'typical regex': matches(BASE64) }),
+	predicateCase('isBase64 (1 KB)', isBase64, [longBase64], { 'typical regex': matches(BASE64) }),
+	predicateCase('isIsoDateTimeString', isIsoDateTimeString, dateTimes, {
+		'!isNaN(Date.parse)': function (value) {
+			return !Number.isNaN(Date.parse(value));
 		}
-	},
-	{
-		name: 'isUuid v4 (5 inputs)',
-		fn: function () {
-			return countValid(function (value) {
-				return isUuid(value, 4);
-			}, uuids);
-		}
-	},
-	{
-		name: 'isIPv6 (6 inputs)',
-		fn: function () {
-			return countValid(isIPv6, ipv6);
-		}
-	},
-	{
-		name: 'isIPv4 (4 inputs)',
-		fn: function () {
-			return countValid(isIPv4, ipv4);
-		}
-	},
+	}),
 	{
 		name: 'compareSemver sort (8 versions)',
 		fn: function () {
 			return versions.slice().sort(compareSemver);
-		}
-	},
-	{
-		name: 'isIsoDateTimeString (4 inputs)',
-		fn: function () {
-			return countValid(isIsoDateTimeString, dateTimes);
 		}
 	},
 	{

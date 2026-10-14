@@ -28,6 +28,14 @@ describe('URL helpers', function () {
 			expect(helpers.buildQueryString(params, { arrayFormat: 'comma' })).toBe('tags=a,b%20c,d%2Ce&one=1');
 		});
 
+		it('should keep empty keys and empty values as pairs of their own', function () {
+			expect(helpers.buildQueryString({ '': null, b: 1 }, { skipNull: false })).toBe('&b=1');
+			expect(helpers.buildQueryString({ undefined: 1 })).toBe('undefined=1');
+			expect(helpers.buildQueryString({ a: '', b: [''] })).toBe('a=&b=');
+			expect(helpers.buildQueryString({ a: ['', 'x', ''] }, { arrayFormat: 'comma' })).toBe('a=,x,');
+			expect(helpers.buildQueryString({ a: [null as any, ''], b: 1 }, { arrayFormat: 'brackets' })).toBe('a[]=&b=1');
+		});
+
 		it('should skip empty arrays and nullish array items', function () {
 			const items = [null, 1, undefined, 2] as any;
 			expect(helpers.buildQueryString({ a: [], b: items })).toBe('b=1&b=2');
@@ -220,6 +228,20 @@ describe('URL helpers', function () {
 	});
 
 	describe('getQueryParam', function () {
+		it('should match bracket keys, the first occurrence winning', function () {
+			expect(helpers.getQueryParam('/p?a[]=1&a=2', 'a')).toBe('1');
+			expect(helpers.getQueryParam('/p?a=2&a[]=1', 'a')).toBe('2');
+			expect(helpers.getQueryParam('/p?a%5B%5D=3', 'a')).toBe('3');
+			// `a[]` is the stored key of the raw key `a[][]` only (parseQueryString removes one pair of brackets).
+			expect(helpers.getQueryParam('/p?a[]=1', 'a[]')).toBeUndefined();
+			expect(helpers.getQueryParam('/p?a[][]=1', 'a[]')).toBe('1');
+		});
+
+		it('should never match a key holding a lone surrogate (parsed keys hold U+FFFD instead)', function () {
+			expect(helpers.getQueryParam('/p?%ED%A0%80=1', '\ud800')).toBeUndefined();
+			expect(helpers.getQueryParam('/p?\ud800=1', '\ufffd')).toBe('1');
+		});
+
 		it('should return the first value of a parameter', function () {
 			expect(helpers.getQueryParam('https://x.com/?q=hello+world&q=2#top', 'q')).toBe('hello world');
 			expect(helpers.getQueryParam('/p?ids[]=7&ids[]=8', 'ids')).toBe('7');
