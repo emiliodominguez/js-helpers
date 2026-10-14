@@ -68,13 +68,9 @@ export function assertNumber(caller: string, name: string, value: unknown, valid
  * @internal
  */
 export function assertInteger(caller: string, name: string, value: number, min = 0, allowInfinity = false): void {
-	assertNumber(
-		caller,
-		name,
-		value,
-		(Number.isInteger(value) && value >= min) || (allowInfinity && value === Infinity),
-		`an integer >= ${min}${allowInfinity ? ' or Infinity' : ''}`
-	);
+	// Checked first so that the message is only formatted on failure.
+	if ((Number.isInteger(value) && value >= min) || (allowInfinity && value === Infinity)) return;
+	assertNumber(caller, name, value, false, `an integer >= ${min}${allowInfinity ? ' or Infinity' : ''}`);
 }
 
 /**
@@ -89,13 +85,9 @@ export function assertInteger(caller: string, name: string, value: number, min =
  * @internal
  */
 export function assertDelay(caller: string, name: string, value: number, allowInfinity = false): void {
-	assertNumber(
-		caller,
-		name,
-		value,
-		(value >= 0 && value <= MAX_TIMEOUT) || (allowInfinity && value === Infinity),
-		`${allowInfinity ? 'Infinity or ' : ''}a number between 0 and ${MAX_TIMEOUT}`
-	);
+	// Checked first so that the message is only formatted on failure (`typeof` guards against strings such as '5' passing the comparisons).
+	if (typeof value === 'number' && ((value >= 0 && value <= MAX_TIMEOUT) || (allowInfinity && value === Infinity))) return;
+	assertNumber(caller, name, value, false, `${allowInfinity ? 'Infinity or ' : ''}a number between 0 and ${MAX_TIMEOUT}`);
 }
 
 /**

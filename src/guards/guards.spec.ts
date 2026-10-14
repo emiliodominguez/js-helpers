@@ -228,6 +228,16 @@ describe('guards', function () {
 			expect(guards.isError('Error')).toBe(false);
 			expect(guards.isError(undefined)).toBe(false);
 		});
+
+		it('only falls back to the toString tag for cross-realm and null-prototype objects', function () {
+			// Same-realm objects are decided by `instanceof`, like the built-in guards: fake tags and re-parented errors are rejected...
+			expect(guards.isError({ [Symbol.toStringTag]: 'Error' })).toBe(false);
+			expect(guards.isError(Object.setPrototypeOf(new Error('x'), Object.prototype))).toBe(false);
+			// ...while null-prototype and cross-realm objects get the tag check.
+			expect(guards.isError(Object.setPrototypeOf(new Error('x'), null))).toBe(true);
+			expect(guards.isError(Object.setPrototypeOf({}, null))).toBe(false);
+			expect(guards.isError(vm.runInNewContext('({ [Symbol.toStringTag]: "Error" })'))).toBe(true);
+		});
 	});
 
 	describe('isDate', function () {

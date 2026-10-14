@@ -112,7 +112,8 @@ function assertTTL(caller: string, ttl: number): void {
  * - Recency: `get` and `set` make an entry most-recently used; `peek`, `has` and iteration do not.
  * - Expiry: an entry expires once `now() >= setTime + ttl`. Expired entries behave as absent everywhere, but are removed lazily: by any
  *   operation that looks the key up (`get`, `peek`, `has`, `set`, `delete`), by `prune()`, by `clear()`, or when they are the
- *   least-recently-used entry at a capacity eviction. Until then they count towards `size` and `max`.
+ *   least-recently-used entry at a capacity eviction. Until then they count towards `size` and `max`. The clock is only read for entries
+ *   that can expire, so a cache without TTLs never calls `now`.
  * - `onEvict(key, value, reason)` fires once per removed entry (see {@link LRUEvictionReason}), never for misses. Overwriting a live entry
  *   reports the old value as `'replaced'` unless it is the very same value (`Object.is`), so a resource is never disposed while still stored.
  *   It is called after the cache has been updated; an exception it throws propagates to the caller, but the cache stays consistent, and
@@ -165,6 +166,17 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	// Both ends of the recency list.
 	let newest: Entry<K, V> | undefined;
 	let oldest: Entry<K, V> | undefined;
+	// Whether any entry may ever expire. Until then every `expiresAt` is `Infinity`, so the clock (`Date.now` costs more than a `Map`
+	// lookup) is not read at all.
+	let timed = defaultTTL !== Infinity;
+
+	/**
+	 * Reads the clock, or returns `0` while no entry can expire (any finite time is then equivalent).
+	 * @returns {number} The current time
+	 */
+	function clock(): number {
+		return timed ? now() : 0;
+	}
 
 	/**
 	 * Reports a removal to `onEvict`, if any.
@@ -235,21 +247,25 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	}
 
 	/**
-	 * Looks `key` up, removing it (and reporting `'expired'`) when it has expired at `time`.
+	 * Removes an expired entry and reports it.
+	 * @param {K} key - The key it was looked up with (reported as is)
+	 * @param {Entry<K, V>} entry - The entry
+	 * @returns {undefined} Always `undefined`, so lookups can return the result
+	 */
+	function expire(key: K, entry: Entry<K, V>): undefined {
+		remove(entry);
+		notify(key, entry.value, 'expired');
+	}
+
+	/**
+	 * Looks `key` up, removing it (and reporting `'expired'`) when it has expired. The clock is only read for entries that can expire.
 	 * @param {K} key - The key to look up
-	 * @param {number} [time=now()] - The current time
 	 * @returns {Entry<K, V> | undefined} The live entry, or `undefined`
 	 */
-	function lookup(key: K, time: number = now()): Entry<K, V> | undefined {
+	function lookup(key: K): Entry<K, V> | undefined {
 		const entry = store.get(key);
 
-		if (entry !== undefined && time >= entry.expiresAt) {
-			remove(entry);
-			notify(key, entry.value, 'expired');
-			return undefined;
-		}
-
-		return entry;
+		return entry !== undefined && entry.expiresAt !== Infinity && now() >= entry.expiresAt ? expire(key, entry) : entry;
 	}
 
 	/**
@@ -259,7 +275,7 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 	 * @returns {IterableIterator<T>} An iterator over the snapshot
 	 */
 	function live<T>(pick: (entry: Entry<K, V>) => T): IterableIterator<T> {
-		const time = now();
+		const time = clock();
 		const result: T[] = [];
 
 		for (let entry = newest; entry !== undefined; entry = entry.older) {
@@ -278,18 +294,23 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		return [entry.key, entry.value];
 	}
 
-	const cache: LRUCache<K, V> = {
-		get size(): number {
-			return store.size;
-		},
+	// `size` is defined below: a getter in an object literal would put the object in (slower) dictionary mode.
+	const cache = {
 		get(key: K): V | undefined {
-			const time = now();
-			const entry = lookup(key, time);
+			const entry = store.get(key);
 			if (entry === undefined) return undefined;
 
-			unlink(entry);
-			pushNewest(entry);
-			if (updateAgeOnGet) entry.expiresAt = time + entry.ttl;
+			// Same as `lookup`, keeping the time for `updateAgeOnGet` (an entry that cannot expire has no TTL to restart).
+			if (entry.expiresAt !== Infinity) {
+				const time = now();
+				if (time >= entry.expiresAt) return expire(key, entry);
+				if (updateAgeOnGet) entry.expiresAt = time + entry.ttl;
+			}
+
+			if (entry !== newest) {
+				unlink(entry);
+				pushNewest(entry);
+			}
 
 			return entry.value;
 		},
@@ -301,9 +322,14 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		},
 		set(key: K, value: V, setOptions?: LRUCacheSetOptions): LRUCache<K, V> {
 			const ttl = setOptions?.ttl ?? defaultTTL;
-			assertTTL('LRUCache.set', ttl);
 
-			const time = now();
+			// The default was validated by `createLRUCache`.
+			if (ttl !== defaultTTL) {
+				assertTTL('LRUCache.set', ttl);
+				if (ttl !== Infinity) timed = true;
+			}
+
+			const time = clock();
 			const entry = store.get(key);
 
 			if (entry !== undefined) {
@@ -348,7 +374,7 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 			return true;
 		},
 		clear(): void {
-			const time = now();
+			const time = clock();
 			const removed: Array<[Entry<K, V>, LRUEvictionReason]> = [];
 
 			for (let entry = oldest; entry !== undefined; entry = entry.newer) removed.push([entry, time >= entry.expiresAt ? 'expired' : 'cleared']);
@@ -359,7 +385,7 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 			notifyAll(removed);
 		},
 		prune(): number {
-			const time = now();
+			const time = clock();
 			const expired: Array<[Entry<K, V>, LRUEvictionReason]> = [];
 
 			for (let entry = oldest; entry !== undefined; entry = entry.newer) {
@@ -386,7 +412,15 @@ export function createLRUCache<K = unknown, V = unknown>(options: LRUCacheOption
 		[Symbol.iterator](): IterableIterator<[K, V]> {
 			return live(pair);
 		}
-	};
+	} as LRUCache<K, V>;
+
+	Object.defineProperty(cache, 'size', {
+		get: function (): number {
+			return store.size;
+		},
+		enumerable: true,
+		configurable: true
+	});
 
 	return cache;
 }

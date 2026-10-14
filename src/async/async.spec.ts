@@ -260,6 +260,9 @@ describe('Async helpers', function () {
 					return 1;
 				})
 			).rejects.toThrow(new RangeError('retry: `random()` must return a number in [0, 1), got 1'));
+			// Validated upfront, before any attempt (and only when jitter is on).
+			expect(failing).toHaveBeenCalledTimes(1);
+			await expect(retry(failing, { jitter: false }, 'unused' as never)).rejects.toThrow('busy');
 		});
 
 		it('should resolve on the first success without retrying', async function () {
@@ -506,6 +509,35 @@ describe('Async helpers', function () {
 			await expect(promise).rejects.toThrow('bad');
 			await new Promise(setImmediate);
 			expect(started).toEqual([0, 1, 2]);
+		});
+
+		it('should start every item at once when the concurrency allows it, and stop at a synchronous throw', async function () {
+			const started: number[] = [];
+			const unhandled = jest.fn();
+			process.on('unhandledRejection', unhandled);
+			try {
+				const promise = mapWithConcurrency([0, 1, 2, 3], function (n) {
+					started.push(n);
+					if (n === 0) return Promise.reject(new Error('async'));
+					if (n === 2) throw new Error('sync');
+					return n;
+				});
+				expect(started).toEqual([0, 1, 2]);
+				await expect(promise).rejects.toThrow('sync');
+				await new Promise(setImmediate);
+				expect(unhandled).not.toHaveBeenCalled();
+			} finally {
+				process.off('unhandledRejection', unhandled);
+			}
+			await expect(
+				mapWithConcurrency(
+					[1, 2, 3],
+					function (n) {
+						return Promise.resolve(n * 2);
+					},
+					3
+				)
+			).resolves.toEqual([2, 4, 6]);
 		});
 
 		it('should reject when the mapper throws synchronously', async function () {
@@ -906,7 +938,13 @@ describe('Async helpers (round 2)', function () {
 			const result = await promiseAllObject(input);
 			expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
 			expect(Object.keys(result)).toEqual(['__proto__', 'x']);
+			expect(Object.getOwnPropertyDescriptor(result, '__proto__')).toEqual({ value: 1, writable: true, enumerable: true, configurable: true });
 			await expect(promiseAllObject(inherited)).resolves.toEqual({ shown: 3 });
+			const hiddenSymbol = Symbol('hidden');
+			const shownSymbol = Symbol('shown');
+			const withSymbols = Object.defineProperties({}, { [hiddenSymbol]: { value: 1, enumerable: false }, [shownSymbol]: { value: 2, enumerable: true } });
+			const symbolResult = await promiseAllObject(withSymbols);
+			expect(Reflect.ownKeys(symbolResult)).toEqual([shownSymbol]);
 		});
 
 		it('should settle every value', async function () {

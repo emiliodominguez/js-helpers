@@ -477,4 +477,43 @@ describe('createLRUCache', function () {
 			expect(fn).toHaveBeenCalledTimes(2);
 		});
 	});
+
+	describe('clock reads', function () {
+		it('never reads the clock while no entry can expire', function () {
+			const now = jest.fn(function (): number {
+				return 0;
+			});
+			const cache = createLRUCache<string, number>({ max: 2, now });
+			cache.set('a', 1).set('b', 2).set('a', 3).set('c', 4);
+			cache.get('a');
+			cache.peek('c');
+			cache.has('b');
+			cache.delete('c');
+			expect([...cache.entries()]).toEqual([['a', 3]]);
+			cache.prune();
+			cache.clear();
+			expect(now).not.toHaveBeenCalled();
+		});
+
+		it('starts expiring entries once a per-entry ttl is used in a cache without default ttl', function () {
+			const clock = fakeClock(100);
+			const { events, onEvict } = recorder<string, number>();
+			const cache = createLRUCache<string, number>({ max: 10, now: clock.now, onEvict });
+			cache.set('forever', 1);
+			cache.set('short', 2, { ttl: 10 });
+			clock.advance(9);
+			expect(cache.get('short')).toBe(2);
+			clock.advance(1);
+			expect(cache.get('short')).toBeUndefined();
+			expect(cache.get('forever')).toBe(1);
+			expect(events).toEqual([['short', 2, 'expired']]);
+		});
+
+		it('keeps `size` as an enumerable accessor reflecting the current entry count', function () {
+			const cache = createLRUCache<string, number>({ max: 3 });
+			expect(Object.getOwnPropertyDescriptor(cache, 'size')).toMatchObject({ enumerable: true, configurable: true });
+			cache.set('a', 1);
+			expect(cache.size).toBe(1);
+		});
+	});
 });

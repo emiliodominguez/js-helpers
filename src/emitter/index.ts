@@ -91,6 +91,15 @@ interface Registration {
 }
 
 /**
+ * The registrations of one event, in registration order.
+ */
+interface Listeners {
+	list: Registration[];
+	/** Number of `emit` calls currently iterating `list`: while it is non-zero, `list` is copied on write instead of mutated. */
+	emitting: number;
+}
+
+/**
  * Creates a strictly typed, synchronous event emitter.
  *
  * Semantics:
@@ -124,10 +133,11 @@ interface Registration {
  * await events.waitFor('message', { timeout: 1000 }); // => { text: 'later' }
  */
 export function createEmitter<Events extends EventMap>(): Emitter<Events> {
-	const registry = new Map<PropertyKey, Registration[]>();
+	const registry = new Map<PropertyKey, Listeners>();
 
 	/**
-	 * Adds a registration (copy-on-write, so in-progress emits keep iterating their snapshot).
+	 * Adds a registration. The list is mutated in place, unless an `emit` is iterating it: then it is copied, so that the emit keeps its
+	 * snapshot.
 	 * @param {PropertyKey} event - The event name (`'*'` for wildcard listeners)
 	 * @param {AnyFunction} handler - The listener
 	 * @param {boolean} once - Whether to remove the registration before its first call
@@ -135,8 +145,11 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	 */
 	function add(event: PropertyKey, handler: AnyFunction, once: boolean): Unsubscribe {
 		const registration: Registration = { handler: handler as (...args: unknown[]) => unknown, once, active: true };
+		const listeners = registry.get(event);
 
-		registry.set(event, [...(registry.get(event) ?? []), registration]);
+		if (listeners === undefined) registry.set(event, { list: [registration], emitting: 0 });
+		else if (listeners.emitting > 0) listeners.list = [...listeners.list, registration];
+		else listeners.list.push(registration);
 
 		return function (): void {
 			remove(event, function (candidate) {
@@ -146,27 +159,33 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 	}
 
 	/**
-	 * Deactivates and removes the registrations of `event` matching `predicate`.
+	 * Deactivates and removes the registrations of `event` matching `predicate` (in place, or into a copy while an `emit` iterates the list).
 	 * @param {PropertyKey} event - The event name
 	 * @param {(registration: Registration) => boolean} predicate - Selects the registrations to remove
 	 * @returns {boolean} Whether anything was removed
 	 */
 	function remove(event: PropertyKey, predicate: (registration: Registration) => boolean): boolean {
-		const list = registry.get(event);
+		const listeners = registry.get(event);
 
-		if (!list) return false;
+		if (listeners === undefined) return false;
 
-		const kept = list.filter(function (registration) {
-			if (!predicate(registration)) return true;
+		const list = listeners.list;
+		const length = list.length;
+		const kept = listeners.emitting > 0 ? [] : list;
+		let count = 0;
 
-			registration.active = false;
-			return false;
-		});
+		for (let i = 0; i < length; i++) {
+			const registration = list[i];
 
-		if (kept.length === 0) registry.delete(event);
-		else registry.set(event, kept);
+			if (predicate(registration)) registration.active = false;
+			else kept[count++] = registration;
+		}
 
-		return kept.length !== list.length;
+		if (count === 0) registry.delete(event);
+		kept.length = count;
+		listeners.list = kept;
+
+		return count !== length;
 	}
 
 	/**
@@ -244,14 +263,21 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		emit(event: PropertyKey, ...args: unknown[]): void {
 			assertNotWildcard('emit', event);
 
-			// Both snapshots are taken before any listener runs.
+			// Both snapshots are taken (and protected from in-place mutation) before any listener runs.
 			const listeners = registry.get(event);
 			const wildcards = registry.get(WILDCARD);
 			const withPayload = args.length > 0;
+			const payload = args[0];
+			const list = listeners?.list;
+			const wildcardList = wildcards?.list;
 			let errors: unknown[] | undefined;
 
-			if (listeners !== undefined) errors = run(event, listeners, false, withPayload, args[0], errors);
-			if (wildcards !== undefined) errors = run(event, wildcards, true, withPayload, args[0], errors);
+			if (listeners !== undefined) listeners.emitting++;
+			if (wildcards !== undefined) wildcards.emitting++;
+			if (list !== undefined) errors = run(event, list, false, withPayload, payload, errors);
+			if (wildcardList !== undefined) errors = run(event, wildcardList, true, withPayload, payload, errors);
+			if (listeners !== undefined) listeners.emitting--;
+			if (wildcards !== undefined) wildcards.emitting--;
 
 			if (errors === undefined) return;
 			if (errors.length === 1) throw errors[0];
@@ -269,11 +295,11 @@ export function createEmitter<Events extends EventMap>(): Emitter<Events> {
 		},
 
 		listenerCount(event?: PropertyKey): number {
-			if (event !== undefined) return registry.get(event)?.length ?? 0;
+			if (event !== undefined) return registry.get(event)?.list.length ?? 0;
 
 			let total = 0;
 
-			for (const list of registry.values()) total += list.length;
+			for (const listeners of registry.values()) total += listeners.list.length;
 
 			return total;
 		},

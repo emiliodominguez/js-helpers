@@ -180,6 +180,12 @@ describe('createEmitter', function () {
 			events.emit('ready', undefined);
 
 			expect(handler.mock.calls).toEqual([[], [1], [undefined]]);
+			// `toEqual` does not tell `[]` from `[undefined]`: check the argument counts too.
+			expect(
+				handler.mock.calls.map(function (call) {
+					return call.length;
+				})
+			).toEqual([0, 1, 1]);
 		});
 
 		it('emitting an event without listeners is a no-op', function () {
@@ -241,6 +247,47 @@ describe('createEmitter', function () {
 
 			events.emit('count', 2);
 			expect(late).toHaveBeenCalledWith(2);
+		});
+
+		it('snapshots existing listener lists too (no in-place mutation during an emit)', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: string[] = [];
+
+			events.on('*', function () {
+				calls.push('wildcard');
+			});
+			events.on('count', function () {
+				calls.push('count');
+				events.on('count', function () {
+					calls.push('late count');
+				});
+				events.on('*', function () {
+					calls.push('late wildcard');
+				});
+			});
+			events.emit('count', 1);
+			expect(calls).toEqual(['count', 'wildcard']);
+			expect(events.listenerCount('count')).toBe(2);
+			expect(events.listenerCount('*')).toBe(2);
+		});
+
+		it('keeps an emit snapshot intact when every listener is removed and new ones are added meanwhile', function () {
+			const events = createEmitter<TestEvents>();
+			const calls: string[] = [];
+
+			events.on('count', function () {
+				calls.push('first');
+				events.clear();
+				events.on('count', function () {
+					calls.push('new');
+				});
+			});
+			events.on('count', function () {
+				calls.push('second');
+			});
+			events.emit('count', 1);
+			events.emit('count', 2);
+			expect(calls).toEqual(['first', 'new']);
 		});
 
 		it('skips handlers removed during an emit that have not run yet', function () {

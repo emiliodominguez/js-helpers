@@ -1,4 +1,4 @@
-import { createEmitter, type Unsubscribe } from '../emitter/index.js';
+import type { Unsubscribe } from '../emitter/index.js';
 import { assertFunction } from '../utils/assert.js';
 
 export type { Unsubscribe } from '../emitter/index.js';
@@ -58,20 +58,69 @@ interface Notifier {
 }
 
 /**
+ * One subscription of a listener.
+ */
+interface Subscription {
+	readonly listener: () => void;
+	active: boolean;
+}
+
+/**
  * Creates a {@link Notifier}. A `notify` call made while listeners are being notified does not nest: it schedules another round that runs
- * once the current one has finished. Every listener is called in each round even if some throw; errors are rethrown afterwards (the error
- * itself, or an `AggregateError` when there are several).
+ * once the current one has finished. Each round calls the listeners subscribed when it started, skipping those unsubscribed meanwhile.
+ * Every listener is called in each round even if some throw; errors are rethrown afterwards (the error itself, or an `AggregateError`
+ * when there are several).
  * @returns {Notifier} A new notifier
  * @throws {RangeError} from `notify` when listeners keep changing the state for more than 100 consecutive rounds
  */
 function createNotifier(): Notifier {
-	const emitter = createEmitter<{ change: void }>();
+	// Mutated in place, except during a round, which iterates the array it started with: then it is copied on write.
+	let subscriptions: Subscription[] = [];
 	let notifying = false;
 	let pending = false;
 
+	/**
+	 * Calls every active listener of the current list once.
+	 * @returns {unknown[] | undefined} The errors thrown by listeners, if any
+	 */
+	function round(): unknown[] | undefined {
+		const snapshot = subscriptions;
+		let errors: unknown[] | undefined;
+
+		for (const subscription of snapshot) {
+			if (!subscription.active) continue;
+
+			try {
+				const listener = subscription.listener;
+				listener();
+			} catch (error) {
+				errors = errors ?? [];
+				errors.push(error);
+			}
+		}
+
+		return errors;
+	}
+
 	return {
 		subscribe(listener: () => void): Unsubscribe {
-			return emitter.on('change', listener);
+			const subscription: Subscription = { listener, active: true };
+
+			if (notifying) subscriptions = [...subscriptions, subscription];
+			else subscriptions.push(subscription);
+
+			return function (): void {
+				if (!subscription.active) return;
+
+				subscription.active = false;
+				if (notifying) {
+					subscriptions = subscriptions.filter(function (candidate) {
+						return candidate !== subscription;
+					});
+				} else {
+					subscriptions.splice(subscriptions.indexOf(subscription), 1);
+				}
+			};
 		},
 
 		notify(): void {
@@ -91,11 +140,11 @@ function createNotifier(): Notifier {
 					throw new RangeError(`store: listeners changed the state during more than ${MAX_ROUNDS} consecutive notification rounds`);
 				}
 
-				try {
-					emitter.emit('change');
-				} catch (error) {
+				const roundErrors = round();
+
+				if (roundErrors !== undefined) {
 					errors = errors ?? [];
-					errors.push(error);
+					errors.push(roundErrors.length === 1 ? roundErrors[0] : new AggregateError(roundErrors, `store: ${roundErrors.length} listeners threw`));
 				}
 			}
 
@@ -107,7 +156,7 @@ function createNotifier(): Notifier {
 		},
 
 		size(): number {
-			return emitter.listenerCount('change');
+			return subscriptions.length;
 		}
 	};
 }

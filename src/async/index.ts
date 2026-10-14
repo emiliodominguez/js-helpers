@@ -1,4 +1,4 @@
-import { debounce, type Result } from '../functions/index.js';
+import { debounce, noop, type Result } from '../functions/index.js';
 import { assertDelay, assertFunction, assertInteger, assertNumber, describe, draw, MAX_TIMEOUT } from '../utils/assert.js';
 import type { AbortSignalLike, RandomGenerator } from '../utils/index.js';
 
@@ -268,6 +268,24 @@ export async function mapWithConcurrency<T, R>(items: Iterable<T>, mapper: (item
 	assertFunction('mapWithConcurrency', 'mapper', mapper);
 
 	const list = Array.from(items);
+
+	// Every item can start at once: map them directly instead of running one worker per item (same behaviour, much cheaper).
+	if (concurrency >= list.length) {
+		const started: Array<Promise<R> | R> = [];
+
+		for (let index = 0; index < list.length; index++) {
+			try {
+				started.push(mapper(list[index], index));
+			} catch (error) {
+				// The items already started keep running, as with workers; their outcome is ignored (and rejections are handled).
+				Promise.all(started).catch(noop);
+				throw error;
+			}
+		}
+
+		return Promise.all(started);
+	}
+
 	const results: R[] = [];
 	let next = 0;
 	let failed = false;
@@ -602,9 +620,13 @@ function objectKeys(caller: string, obj: unknown): PropertyKey[] {
 		throw new TypeError(`${caller}: expected a non-array object, got ${Array.isArray(obj) ? 'an array' : obj === null ? 'null' : typeof obj}`);
 	}
 
-	return Reflect.ownKeys(obj).filter(function (key) {
-		return Object.prototype.propertyIsEnumerable.call(obj, key);
-	});
+	const keys: PropertyKey[] = Object.keys(obj);
+
+	for (const symbol of Object.getOwnPropertySymbols(obj)) {
+		if (Object.prototype.propertyIsEnumerable.call(obj, symbol)) keys.push(symbol);
+	}
+
+	return keys;
 }
 
 /**
@@ -616,9 +638,13 @@ function objectKeys(caller: string, obj: unknown): PropertyKey[] {
 function zipObject(keys: PropertyKey[], values: unknown[]): Record<PropertyKey, unknown> {
 	const result: Record<PropertyKey, unknown> = {};
 
-	keys.forEach(function (key, i) {
-		Object.defineProperty(result, key, { value: values[i], enumerable: true, writable: true, configurable: true });
-	});
+	for (let i = 0; i < keys.length; i++) {
+		const key = keys[i];
+
+		// A plain assignment creates the same property, unless `Object.prototype` has a setter for the key (`__proto__`, or a polluted one).
+		if (key in Object.prototype) Object.defineProperty(result, key, { value: values[i], enumerable: true, writable: true, configurable: true });
+		else result[key] = values[i];
+	}
 
 	return result;
 }
@@ -771,7 +797,8 @@ export function debounceAsync<F extends (...args: never[]) => unknown>(fn: F, wa
 export async function sequence<T>(tasks: Iterable<() => PromiseLike<T> | T>): Promise<T[]> {
 	const results: T[] = [];
 	for (const task of tasks) {
-		assertFunction('sequence', `tasks[${results.length}]`, task);
+		// `typeof` first, so that the parameter name is only formatted on failure.
+		if (typeof task !== 'function') assertFunction('sequence', `tasks[${results.length}]`, task);
 		results.push(await task());
 	}
 

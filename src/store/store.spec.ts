@@ -1,5 +1,5 @@
 import { isEqual } from '../objects/index.js';
-import { createStore, type ReadonlyStore, type Store } from '.';
+import { createStore, type ReadonlyStore, type Store, type Unsubscribe } from '.';
 
 interface State {
 	count: number;
@@ -210,6 +210,23 @@ describe('createStore', function () {
 			expect(late).not.toHaveBeenCalled();
 		});
 
+		it('keeps every existing listener when one is added during a notification', function () {
+			const store = createStore(0);
+			const first = jest.fn();
+			const late = jest.fn();
+			let added = false;
+
+			store.subscribe(first);
+			store.subscribe(function () {
+				if (!added) store.subscribe(late);
+				added = true;
+			});
+			store.setState(1);
+			store.setState(2);
+			expect(first).toHaveBeenCalledTimes(2);
+			expect(late).toHaveBeenCalledTimes(1);
+		});
+
 		it('runs every listener when one throws, then rethrows; the change is kept', function () {
 			const store = createStore(0);
 			const after = jest.fn();
@@ -237,9 +254,55 @@ describe('createStore', function () {
 				throw new Error('2');
 			});
 
-			expect(function () {
+			let caught: unknown;
+			try {
 				store.setState(1);
-			}).toThrow(AggregateError);
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(AggregateError);
+			expect((caught as AggregateError).message).toBe('store: 2 listeners threw');
+			expect((caught as AggregateError).errors).toEqual([new Error('1'), new Error('2')]);
+		});
+
+		it('rethrows whatever a listener threw, even undefined', function () {
+			const store = createStore(0);
+			const after = jest.fn();
+
+			store.subscribe(function () {
+				throw undefined;
+			});
+			store.subscribe(after);
+
+			let caught: unknown = 'nothing';
+			try {
+				store.setState(1);
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeUndefined();
+			expect(after).toHaveBeenCalledTimes(1);
+		});
+
+		it('skips listeners unsubscribed during a round and keeps the others in order', function () {
+			const store = createStore(0);
+			const calls: string[] = [];
+			const handles: { stopB?: Unsubscribe; stopA?: Unsubscribe } = {};
+
+			handles.stopA = store.subscribe(function () {
+				calls.push('a');
+				handles.stopA?.();
+				handles.stopB?.();
+			});
+			handles.stopB = store.subscribe(function () {
+				calls.push('b');
+			});
+			store.subscribe(function () {
+				calls.push('c');
+			});
+			store.setState(1);
+			store.setState(2);
+			expect(calls).toEqual(['a', 'c', 'c']);
 		});
 
 		it('wraps errors of several notification rounds in an AggregateError', function () {
@@ -445,6 +508,23 @@ describe('createStore', function () {
 			store.setState(1);
 
 			expect(seen).toEqual([2]);
+		});
+
+		it('detaches from the source when its last listener unsubscribes during a notification', function () {
+			const store = createStore(0);
+			const selector = jest.fn(function (n: number) {
+				return n;
+			});
+			const selected = store.select(selector);
+			const handles: { stop?: Unsubscribe } = {};
+
+			handles.stop = selected.subscribe(function () {
+				handles.stop?.();
+			});
+			store.setState(1);
+			selector.mockClear();
+			store.setState(2);
+			expect(selector).not.toHaveBeenCalled();
 		});
 
 		it('only subscribes to the source while it has listeners', function () {
