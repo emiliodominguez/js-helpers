@@ -310,16 +310,16 @@ Sizes below are for the minified ESM build.
 
 ## Performance
 
-Every helper that has an equivalent in a popular library is benchmarked against it (`yarn build && yarn bench`). The latest idle-machine run compared 466 cases at 10, 1k and 100k items (Node 22, ratios above 1 mean js-helpers is faster):
+Every helper that has an equivalent in a popular library is benchmarked against it (`yarn build && yarn bench`). The latest idle-machine run compared 458 cases at 10, 1k and 100k items (Node 22, ratios above 1 mean js-helpers is faster):
 
 | Compared with | Cases | Median speed ratio | At par or faster |
 | ------------- | ----: | -----------------: | ---------------: |
-| lodash        |   204 |              1.60× |              86% |
-| es-toolkit    |   208 |              0.98× |              65% |
-| date-fns      |    21 |              2.45× |              90% |
-| fuse.js       |     7 |               ~30× |             100% |
-| mitt          |     7 |              0.93× |              57% |
-| nanoid        |     3 |              0.61× |               0% |
+| lodash        |   206 |              1.66× |              90% |
+| es-toolkit    |   210 |              1.01× |              71% |
+| date-fns      |    21 |              2.32× |              90% |
+| fuse.js       |     7 |               ~29× |             100% |
+| mitt          |     7 |              1.65× |              71% |
+| nanoid        |     3 |              0.84× |               0% |
 
 <details>
 <summary>Where it is slower, and why</summary>
