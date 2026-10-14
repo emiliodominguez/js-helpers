@@ -195,7 +195,7 @@ describe('objects (properties)', function () {
 						for (const key of Object.keys(object)) expected.set(key, object[key]);
 					}
 
-					expect(Object.keys(result).sort()).toEqual(Array.from(expected.keys()).sort());
+					expect(Object.keys(result).sort()).toStrictEqual(Array.from(expected.keys()).sort());
 					expected.forEach(function (value, key) {
 						expect(Object.is(result[key], value)).toBe(true);
 					});
@@ -435,7 +435,7 @@ describe('objects (properties)', function () {
 					const expected = Object.keys(object).filter(function (key) {
 						return object[key] !== undefined;
 					});
-					expect(Object.keys(compacted)).toEqual(expected);
+					expect(Object.keys(compacted)).toStrictEqual(expected);
 					for (const key of expected) expect((compacted as Record<string, unknown>)[key]).toBe(object[key]);
 				})
 			);
@@ -445,7 +445,7 @@ describe('objects (properties)', function () {
 			fc.assert(
 				fc.property(record, function (object) {
 					expect(helpers.isEqual(helpers.typedFromEntries(helpers.typedEntries(object)), object)).toBe(true);
-					expect(helpers.typedKeys(object)).toEqual(Object.keys(object));
+					expect(helpers.typedKeys(object)).toStrictEqual(Object.keys(object));
 				})
 			);
 		});
@@ -457,7 +457,7 @@ describe('objects (properties)', function () {
 					const expected = Object.keys(object).filter(function (key) {
 						return !keys.includes(Number(key));
 					});
-					expect(Object.keys(omitted)).toEqual(expected);
+					expect(Object.keys(omitted)).toStrictEqual(expected);
 				})
 			);
 		});
@@ -483,8 +483,8 @@ describe('objects (properties)', function () {
 			fc.assert(
 				fc.property(overlappingTree, function (tree) {
 					const empty = { added: [], removed: [], changed: [] };
-					expect(helpers.diff(tree, tree)).toEqual(empty);
-					expect(helpers.diff(tree, helpers.deepClone(tree))).toEqual(empty);
+					expect(helpers.diff(tree, tree)).toStrictEqual(empty);
+					expect(helpers.diff(tree, helpers.deepClone(tree))).toStrictEqual(empty);
 				})
 			);
 		});
@@ -494,9 +494,9 @@ describe('objects (properties)', function () {
 				fc.property(overlappingTree, overlappingTree, function (a, b) {
 					const forward = helpers.diff(a, b);
 					const backward = helpers.diff(b, a);
-					expect(forward.added).toEqual(backward.removed);
-					expect(forward.removed).toEqual(backward.added);
-					expect([...forward.changed].sort()).toEqual([...backward.changed].sort());
+					expect(forward.added).toStrictEqual(backward.removed);
+					expect(forward.removed).toStrictEqual(backward.added);
+					expect([...forward.changed].sort()).toStrictEqual([...backward.changed].sort());
 				})
 			);
 		});
@@ -505,8 +505,8 @@ describe('objects (properties)', function () {
 			fc.assert(
 				fc.property(overlappingTree, overlappingTree, function (a, b) {
 					const { added, removed, changed } = helpers.diff(a, b);
-					for (const path of added) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toEqual([false, true]);
-					for (const path of removed) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toEqual([true, false]);
+					for (const path of added) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toStrictEqual([false, true]);
+					for (const path of removed) expect([helpers.hasInObjectByKeys(a, path), helpers.hasInObjectByKeys(b, path)]).toStrictEqual([true, false]);
 					for (const path of changed) {
 						expect(helpers.isEqual(helpers.getFromObjectByKeys(a, path as any), helpers.getFromObjectByKeys(b, path as any))).toBe(false);
 					}

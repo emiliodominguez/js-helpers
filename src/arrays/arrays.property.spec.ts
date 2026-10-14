@@ -105,8 +105,8 @@ describe('arrays (property-based)', function () {
 		fc.assert(
 			fc.property(smallInts, function (array) {
 				const unique = helpers.removeDuplicates(array);
-				expect(helpers.removeDuplicates(unique)).toEqual(unique);
-				expect(unique).toEqual(naiveUnique(array));
+				expect(helpers.removeDuplicates(unique)).toStrictEqual(unique);
+				expect(unique).toStrictEqual(naiveUnique(array));
 				expect(new Set(unique).size).toBe(unique.length);
 				for (const value of array) expect(unique).toContain(value);
 			})
@@ -116,13 +116,13 @@ describe('arrays (property-based)', function () {
 	it('union, intersection and difference match naive references', function () {
 		fc.assert(
 			fc.property(smallInts, smallInts, function (a, b) {
-				expect(helpers.union(a, b)).toEqual(naiveUnique([...a, ...b]));
-				expect(helpers.intersection(a, b)).toEqual(
+				expect(helpers.union(a, b)).toStrictEqual(naiveUnique([...a, ...b]));
+				expect(helpers.intersection(a, b)).toStrictEqual(
 					naiveUnique(a).filter(function (value) {
 						return b.includes(value);
 					})
 				);
-				expect(helpers.difference(a, b)).toEqual(
+				expect(helpers.difference(a, b)).toStrictEqual(
 					naiveUnique(a).filter(function (value) {
 						return !b.includes(value);
 					})
@@ -140,21 +140,21 @@ describe('arrays (property-based)', function () {
 				const symDiff = helpers.symmetricDifference(a, b);
 
 				// Commutativity (as sets).
-				expect(sortedNumbers(union)).toEqual(sortedNumbers(helpers.union(b, a)));
-				expect(sortedNumbers(inter)).toEqual(sortedNumbers(helpers.intersection(b, a)));
-				expect(sortedNumbers(symDiff)).toEqual(sortedNumbers(helpers.symmetricDifference(b, a)));
+				expect(sortedNumbers(union)).toStrictEqual(sortedNumbers(helpers.union(b, a)));
+				expect(sortedNumbers(inter)).toStrictEqual(sortedNumbers(helpers.intersection(b, a)));
+				expect(sortedNumbers(symDiff)).toStrictEqual(sortedNumbers(helpers.symmetricDifference(b, a)));
 
 				// Bounds and disjointness.
 				expect(helpers.isSubset(inter, a) && helpers.isSubset(inter, b)).toBe(true);
 				expect(helpers.isSubset(a, union) && helpers.isSubset(b, union)).toBe(true);
-				expect(helpers.intersection(diff, b)).toEqual([]);
+				expect(helpers.intersection(diff, b)).toStrictEqual([]);
 
 				// Partition of the union: |A ∪ B| = |A − B| + |A ∩ B| + |B − A|.
 				expect(union.length).toBe(diff.length + inter.length + helpers.difference(b, a).length);
 
 				// Symmetric difference = (A ∪ B) − (A ∩ B), in order (A − B) ++ (B − A).
-				expect(sortedNumbers(symDiff)).toEqual(sortedNumbers(helpers.difference(union, inter)));
-				expect(symDiff).toEqual([...diff, ...helpers.difference(b, a)]);
+				expect(sortedNumbers(symDiff)).toStrictEqual(sortedNumbers(helpers.difference(union, inter)));
+				expect(symDiff).toStrictEqual([...diff, ...helpers.difference(b, a)]);
 
 				// Every result is duplicate-free.
 				for (const result of [union, inter, diff, symDiff]) expect(new Set(result).size).toBe(result.length);
@@ -175,7 +175,7 @@ describe('arrays (property-based)', function () {
 		fc.assert(
 			fc.property(fc.array(fc.integer(), { maxLength: 50 }), fc.integer({ min: 1, max: 12 }), function (array, size) {
 				const chunks = helpers.chunk(array, size);
-				expect(chunks.flat()).toEqual(array);
+				expect(chunks.flat()).toStrictEqual(array);
 				expect(chunks.length).toBe(Math.ceil(array.length / size));
 				chunks.forEach(function (part, index) {
 					expect(part.length).toBeGreaterThan(0);
@@ -189,8 +189,8 @@ describe('arrays (property-based)', function () {
 	it('flatten and flattenDeep agree with Array.prototype.flat', function () {
 		fc.assert(
 			fc.property(nestedArray, function (array) {
-				expect(helpers.flatten(array)).toEqual(array.flat());
-				expect(helpers.flattenDeep(array)).toEqual(array.flat(Infinity));
+				expect(helpers.flatten(array)).toStrictEqual(array.flat());
+				expect(helpers.flattenDeep(array)).toStrictEqual(array.flat(Infinity));
 			})
 		);
 	});
@@ -199,7 +199,7 @@ describe('arrays (property-based)', function () {
 		fc.assert(
 			fc.property(nestedArray, function (array) {
 				const flat = helpers.flattenDeep(array);
-				expect(helpers.flattenDeep(flat)).toEqual(flat);
+				expect(helpers.flattenDeep(flat)).toStrictEqual(flat);
 				expect(flat.some(Array.isArray)).toBe(false);
 			})
 		);
@@ -211,8 +211,8 @@ describe('arrays (property-based)', function () {
 			fc.property(fc.array(fc.oneof(falsy, fc.anything())), function (array) {
 				const result = helpers.compact(array);
 				expect(result.every(Boolean)).toBe(true);
-				expect(result).toEqual(array.filter(Boolean));
-				expect(helpers.compact(result)).toEqual(result);
+				expect(result).toStrictEqual(array.filter(Boolean));
+				expect(helpers.compact(result)).toStrictEqual(result);
 			})
 		);
 	});
@@ -236,7 +236,7 @@ describe('arrays (property-based)', function () {
 	it('range with one argument equals range(0, end)', function () {
 		fc.assert(
 			fc.property(fc.integer({ min: -50, max: 200 }), function (end) {
-				expect(helpers.range(end)).toEqual(helpers.range(0, end, 1));
+				expect(helpers.range(end)).toStrictEqual(helpers.range(0, end, 1));
 			})
 		);
 	});
@@ -247,7 +247,7 @@ describe('arrays (property-based)', function () {
 				const zipped = helpers.zip(a, b, c);
 				expect(zipped.length).toBe(Math.min(a.length, b.length, c.length));
 				zipped.forEach(function (tuple, index) {
-					expect(tuple).toEqual([a[index], b[index], c[index]]);
+					expect(tuple).toStrictEqual([a[index], b[index], c[index]]);
 				});
 			})
 		);
@@ -260,13 +260,13 @@ describe('arrays (property-based)', function () {
 					return value < pivot;
 				}
 				const [pass, fail] = helpers.partition(array, predicate);
-				expect(pass).toEqual(array.filter(predicate));
-				expect(fail).toEqual(
+				expect(pass).toStrictEqual(array.filter(predicate));
+				expect(fail).toStrictEqual(
 					array.filter(function (value) {
 						return !predicate(value);
 					})
 				);
-				expect(sortedNumbers([...pass, ...fail])).toEqual(sortedNumbers(array));
+				expect(sortedNumbers([...pass, ...fail])).toStrictEqual(sortedNumbers(array));
 			})
 		);
 	});
@@ -283,13 +283,13 @@ describe('arrays (property-based)', function () {
 				const index = helpers.keyBy(items, keyOf);
 				const present = naiveUnique(items.map(keyOf));
 
-				expect(Object.keys(groups).sort()).toEqual([...present].sort());
+				expect(Object.keys(groups).sort()).toStrictEqual([...present].sort());
 				let total = 0;
 				for (const key of present) {
 					const expected = items.filter(function (item) {
 						return item.key === key;
 					});
-					expect(groups[key]).toEqual(expected);
+					expect(groups[key]).toStrictEqual(expected);
 					expect(counts[key]).toBe(expected.length);
 					expect(index[key]).toBe(expected[expected.length - 1]);
 					total += expected.length;
@@ -309,7 +309,7 @@ describe('arrays (property-based)', function () {
 					return item.key;
 				}
 				const unique = helpers.uniqueBy(items, keyOf);
-				expect(unique.map(keyOf)).toEqual(naiveUnique(items.map(keyOf)));
+				expect(unique.map(keyOf)).toStrictEqual(naiveUnique(items.map(keyOf)));
 				for (const item of unique) {
 					expect(
 						items.find(function (candidate) {
@@ -317,7 +317,7 @@ describe('arrays (property-based)', function () {
 						})
 					).toBe(item);
 				}
-				expect(helpers.uniqueBy(items.map(keyOf), Number)).toEqual(helpers.removeDuplicates(items.map(keyOf)));
+				expect(helpers.uniqueBy(items.map(keyOf), Number)).toStrictEqual(helpers.removeDuplicates(items.map(keyOf)));
 			})
 		);
 	});
@@ -336,7 +336,7 @@ describe('arrays (property-based)', function () {
 					},
 					order
 				);
-				expect(items).toEqual(snapshot);
+				expect(items).toStrictEqual(snapshot);
 				expect(
 					sorted
 						.map(function (item) {
@@ -345,7 +345,7 @@ describe('arrays (property-based)', function () {
 						.sort(function (a, b) {
 							return a - b;
 						})
-				).toEqual(
+				).toStrictEqual(
 					items.map(function (item) {
 						return item.id;
 					})
@@ -366,7 +366,7 @@ describe('arrays (property-based)', function () {
 				const expected = [...strings].sort(function (a, b) {
 					return a < b ? -1 : a > b ? 1 : 0;
 				});
-				expect(helpers.sortBy(strings, String)).toEqual(expected);
+				expect(helpers.sortBy(strings, String)).toStrictEqual(expected);
 			})
 		);
 	});
@@ -376,8 +376,8 @@ describe('arrays (property-based)', function () {
 			fc.property(fc.array(fc.integer(), { maxLength: 40 }), randomStream, function (array, stream) {
 				const snapshot = array.slice();
 				const shuffled = helpers.shuffle(array, fromStream(stream));
-				expect(array).toEqual(snapshot);
-				expect(sortedNumbers(shuffled)).toEqual(sortedNumbers(array));
+				expect(array).toStrictEqual(snapshot);
+				expect(sortedNumbers(shuffled)).toStrictEqual(sortedNumbers(array));
 			})
 		);
 	});
@@ -385,7 +385,7 @@ describe('arrays (property-based)', function () {
 	it('shuffle and sample are deterministic for a given generator', function () {
 		fc.assert(
 			fc.property(fc.array(fc.integer(), { maxLength: 40 }), fc.integer(), function (array, seed) {
-				expect(helpers.shuffle(array, seeded(seed))).toEqual(helpers.shuffle(array, seeded(seed)));
+				expect(helpers.shuffle(array, seeded(seed))).toStrictEqual(helpers.shuffle(array, seeded(seed)));
 				const picked = helpers.sample(array, seeded(seed));
 				expect(picked).toBe(helpers.sample(array, seeded(seed)));
 				if (array.length > 0) expect(array).toContain(picked);
@@ -399,7 +399,7 @@ describe('arrays (property-based)', function () {
 			fc.property(smallInts, fc.nat({ max: 40 }), function (array, n) {
 				const head = helpers.take(array, n);
 				const tail = helpers.drop(array, n);
-				expect([...head, ...tail]).toEqual(array);
+				expect([...head, ...tail]).toStrictEqual(array);
 				expect(head.length).toBe(Math.min(n, array.length));
 			})
 		);
@@ -434,7 +434,7 @@ describe('arrays (property-based)', function () {
 			});
 			fc.assert(
 				fc.property(columns, function ([numbers, strings, booleans]) {
-					expect(helpers.unzip(helpers.zip(numbers, strings, booleans))).toEqual([numbers, strings, booleans]);
+					expect(helpers.unzip(helpers.zip(numbers, strings, booleans))).toStrictEqual([numbers, strings, booleans]);
 				})
 			);
 		});
@@ -443,7 +443,7 @@ describe('arrays (property-based)', function () {
 			fc.assert(
 				fc.property(fc.array(fc.tuple(smallInt, fc.string()), { minLength: 1, maxLength: 12 }), function (tuples) {
 					const [numbers = [], strings = []] = helpers.unzip(tuples);
-					expect(helpers.zip(numbers, strings)).toEqual(tuples);
+					expect(helpers.zip(numbers, strings)).toStrictEqual(tuples);
 				})
 			);
 		});
@@ -454,7 +454,7 @@ describe('arrays (property-based)', function () {
 					const windows = helpers.windowed(array, size, step);
 					expect(windows).toHaveLength(Math.max(0, Math.floor((array.length - size) / step) + 1));
 					windows.forEach(function (window, index) {
-						expect(window).toEqual(array.slice(index * step, index * step + size));
+						expect(window).toStrictEqual(array.slice(index * step, index * step + size));
 					});
 				})
 			);
@@ -463,7 +463,7 @@ describe('arrays (property-based)', function () {
 		it('pairwise equals windowed(array, 2) as tuples', function () {
 			fc.assert(
 				fc.property(smallInts, function (array) {
-					expect(helpers.pairwise(array)).toEqual(helpers.windowed(array, 2));
+					expect(helpers.pairwise(array)).toStrictEqual(helpers.windowed(array, 2));
 				})
 			);
 		});
@@ -512,9 +512,9 @@ describe('arrays (property-based)', function () {
 					const reference = [...array];
 					reference.splice(to < 0 ? to + array.length : to, 0, ...reference.splice(from, 1));
 					const moved = helpers.move(array, from, to);
-					expect(moved).toEqual(reference);
-					expect(sortedNumbers(moved)).toEqual(sortedNumbers(array));
-					expect(helpers.move(moved, to, from)).toEqual(array);
+					expect(moved).toStrictEqual(reference);
+					expect(sortedNumbers(moved)).toStrictEqual(sortedNumbers(array));
+					expect(helpers.move(moved, to, from)).toStrictEqual(array);
 				})
 			);
 		});
@@ -528,7 +528,7 @@ describe('arrays (property-based)', function () {
 					const reference = [...array];
 					reference.splice(index, 0, ...items);
 					const result = helpers.insertAt(array, index, ...items);
-					expect(result).toEqual(reference);
+					expect(result).toStrictEqual(reference);
 					expect(result).toHaveLength(array.length + items.length);
 				})
 			);
@@ -539,9 +539,9 @@ describe('arrays (property-based)', function () {
 				fc.property(withIndex, fc.nat({ max: 25 }), function ([array, index], count) {
 					const reference = [...array];
 					reference.splice(index, count);
-					expect(helpers.removeAt(array, index, count)).toEqual(reference);
+					expect(helpers.removeAt(array, index, count)).toStrictEqual(reference);
 					const position = index < 0 ? index + array.length : index;
-					expect(helpers.removeAt(helpers.insertAt(array, position, 99, 98), position, 2)).toEqual(array);
+					expect(helpers.removeAt(helpers.insertAt(array, position, 99, 98), position, 2)).toStrictEqual(array);
 				})
 			);
 		});
@@ -557,7 +557,7 @@ describe('arrays (property-based)', function () {
 					}).length;
 					expect(index).toBe(naive);
 					const inserted = helpers.insertAt(array, index, value);
-					expect(inserted).toEqual(sortedNumbers(inserted));
+					expect(inserted).toStrictEqual(sortedNumbers(inserted));
 				})
 			);
 		});
@@ -605,12 +605,12 @@ describe('arrays (property-based)', function () {
 						result.filter(function (_value, index) {
 							return index % 2 === 0;
 						})
-					).toEqual(array);
+					).toStrictEqual(array);
 					expect(
 						result.filter(function (_value, index) {
 							return index % 2 === 1;
 						})
-					).toEqual(new Array(Math.max(0, array.length - 1)).fill('sep'));
+					).toStrictEqual(new Array(Math.max(0, array.length - 1)).fill('sep'));
 				})
 			);
 		});
@@ -621,11 +621,11 @@ describe('arrays (property-based)', function () {
 			}
 			fc.assert(
 				fc.property(smallInts, smallInts, function (a, b) {
-					expect(helpers.differenceBy(a, b, Number)).toEqual(helpers.difference(a, b));
-					expect(helpers.intersectionBy(a, b, Number)).toEqual(helpers.intersection(a, b));
+					expect(helpers.differenceBy(a, b, Number)).toStrictEqual(helpers.difference(a, b));
+					expect(helpers.intersectionBy(a, b, Number)).toStrictEqual(helpers.intersection(a, b));
 					const kept = helpers.intersectionBy(a, b, modulo).map(modulo);
 					const dropped = helpers.differenceBy(a, b, modulo).map(modulo);
-					expect(sortedNumbers([...kept, ...dropped])).toEqual(sortedNumbers(helpers.removeDuplicates(a.map(modulo))));
+					expect(sortedNumbers([...kept, ...dropped])).toStrictEqual(sortedNumbers(helpers.removeDuplicates(a.map(modulo))));
 				})
 			);
 		});
@@ -648,8 +648,8 @@ describe('arrays (property-based)', function () {
 						}
 						if (operation.type === 'equal') expect(operation.value).toBe(b[operation.indexB]);
 					}
-					expect(fromA).toEqual(a);
-					expect(fromB).toEqual(b);
+					expect(fromA).toStrictEqual(a);
+					expect(fromB).toStrictEqual(b);
 				})
 			);
 		});
@@ -694,7 +694,7 @@ describe('arrays (property-based)', function () {
 		it('a sequence diffed against itself, or against an edited copy of itself, should behave predictably', function () {
 			fc.assert(
 				fc.property(diffInput, fc.integer({ min: 0, max: 40 }), fc.array(fc.integer({ min: 5, max: 9 }), { maxLength: 5 }), function (a, at, inserted) {
-					expect(helpers.longestCommonSubsequence(a, a)).toEqual(a);
+					expect(helpers.longestCommonSubsequence(a, a)).toStrictEqual(a);
 					const index = Math.min(at, a.length);
 					const b = [...a.slice(0, index), ...inserted, ...a.slice(index)];
 					expect(

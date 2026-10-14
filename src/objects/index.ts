@@ -159,8 +159,23 @@ function ownEnumerableKeys(object: object): PropertyKey[] {
  * @param {unknown} value - The value to store
  * @returns {void}
  */
-function defineValue(object: object, key: PropertyKey, value: unknown): void {
+function defineOwn(object: object, key: PropertyKey, value: unknown): void {
 	Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
+/**
+ * Same effect as {@link defineOwn}, for objects CREATED BY THIS MODULE, whose own properties are all writable, enumerable and
+ * configurable data properties (a user object could have other ones, or be a proxy observing the difference). Plain assignment then
+ * has exactly that effect, several times faster, unless the key is only inherited: an inherited setter or read-only property would
+ * intercept it.
+ * @param {object} object - The object to write to
+ * @param {PropertyKey} key - The property key
+ * @param {unknown} value - The value to store
+ * @returns {void}
+ */
+function defineValue(object: object, key: PropertyKey, value: unknown): void {
+	if (key in object && !hasOwn(object, key)) defineOwn(object, key, value);
+	else (object as Record<PropertyKey, unknown>)[key] = value;
 }
 
 /**
@@ -190,9 +205,7 @@ function getTag(value: unknown): string {
  * @returns {T} `copy`
  */
 function adoptPrototype<T extends object>(copy: T, original: object): T {
-	const prototype = Object.getPrototypeOf(original);
-	if (Object.getPrototypeOf(copy) !== prototype) Object.setPrototypeOf(copy, prototype);
-	return copy;
+	return Object.setPrototypeOf(copy, Object.getPrototypeOf(original)) as T;
 }
 
 /**
@@ -204,11 +217,9 @@ function copyBinary(value: ArrayBuffer | ArrayBufferView): ArrayBuffer | ArrayBu
 	if (!ArrayBuffer.isView(value)) return adoptPrototype(value.slice(0), value);
 
 	const bytes = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
-	const name = getTag(value).slice(8, -1);
-	if (name === 'DataView') return adoptPrototype(new DataView(bytes), value);
-
-	const TypedArray = (globalThis as unknown as Record<string, new (buffer: ArrayBufferLike) => ArrayBufferView>)[name];
-	return adoptPrototype(new TypedArray(bytes), value);
+	// The tag names the constructor: a typed array's, or `DataView`.
+	const View = (globalThis as unknown as Record<string, new (buffer: ArrayBufferLike) => ArrayBufferView>)[getTag(value).slice(8, -1)];
+	return adoptPrototype(new View(bytes), value);
 }
 
 /**
@@ -420,11 +431,10 @@ export function getPropertyNames<T>(object: T): Array<keyof T> {
  * isEmpty('a'); // => false
  */
 export function isEmpty<T>(value: T): boolean {
-	if (value == null) return true;
-	if (typeof value === 'string' || Array.isArray(value)) return value.length === 0;
+	if (Array.isArray(value)) return value.length === 0;
 	if (isMap(value) || isSet(value)) return value.size === 0;
-	if (isObject(value) || isFunction(value)) return ownEnumerableKeys(value).length === 0;
-	return true;
+	// `Object(...)` turns `null`/`undefined` into `{}` and other primitives into wrappers: only a non-empty string has (index) keys.
+	return ownEnumerableKeys(Object(value)).length === 0;
 }
 
 /**
@@ -608,7 +618,7 @@ function assignPath(target: object, segments: ReadonlyArray<string>, value: unkn
 		}
 		if (next == null) {
 			const container: object = isArrayIndex(segments[index + 1]) ? [] : {};
-			defineValue(current, segment, container);
+			defineOwn(current, segment, container);
 			owned?.add(container);
 			next = container;
 		} else if (!isObject(next) && !isFunction(next)) {
@@ -843,10 +853,7 @@ function sameValueZero(a: unknown, b: unknown): boolean {
 /**
  * Pairs of objects currently being compared by {@link isEqual} (used to detect cycles).
  */
-interface ComparisonStack {
-	left: object[];
-	right: object[];
-}
+type ComparisonStack = Array<[object, object]>;
 
 /**
  * Compares two `Map`s: same size and every entry of `a` matches a distinct entry of `b` (keys and values deeply equal).
@@ -861,7 +868,7 @@ function mapsEqual(a: Map<unknown, unknown>, b: Map<unknown, unknown>, stack: Co
 	const objectEntriesB = Array.from(b).filter(function ([key]) {
 		return isObject(key);
 	});
-	const matched = new Array<boolean>(objectEntriesB.length).fill(false);
+	const matched: boolean[] = [];
 
 	for (const [keyA, valueA] of a) {
 		if (!isObject(keyA)) {
@@ -888,7 +895,7 @@ function mapsEqual(a: Map<unknown, unknown>, b: Map<unknown, unknown>, stack: Co
 function setsEqual(a: Set<unknown>, b: Set<unknown>, stack: ComparisonStack): boolean {
 	if (a.size !== b.size) return false;
 	const objectMembersB = Array.from(b).filter(isObject);
-	const matched = new Array<boolean>(objectMembersB.length).fill(false);
+	const matched: boolean[] = [];
 
 	for (const memberA of a) {
 		if (!isObject(memberA)) {
@@ -911,25 +918,22 @@ function setsEqual(a: Set<unknown>, b: Set<unknown>, stack: ComparisonStack): bo
  * @returns {boolean} Whether the contents are equal
  */
 function binaryEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean {
-	let left: ArrayLike<unknown>;
-	let right: ArrayLike<unknown>;
-
-	if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b)) {
-		left = new Uint8Array(a as ArrayBuffer);
+	let left = a as unknown as ArrayLike<unknown>;
+	let right = b as unknown as ArrayLike<unknown>;
+	if (!ArrayBuffer.isView(a)) {
+		left = new Uint8Array(a);
 		right = new Uint8Array(b as ArrayBuffer);
 	} else if (getTag(a) === '[object DataView]') {
+		const view = b as ArrayBufferView;
 		left = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
-		right = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
-	} else {
-		left = a as unknown as ArrayLike<unknown>;
-		right = b as unknown as ArrayLike<unknown>;
+		right = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 	}
-
-	if (left.length !== right.length) return false;
-	for (let index = 0; index < left.length; index++) {
-		if (!sameValueZero(left[index], right[index])) return false;
-	}
-	return true;
+	return (
+		left.length === right.length &&
+		Array.prototype.every.call(left, function (value: unknown, index: number): boolean {
+			return sameValueZero(value, right[index]);
+		})
+	);
 }
 
 /**
@@ -989,15 +993,13 @@ function equalWith(a: unknown, b: unknown, stack: ComparisonStack): boolean {
 
 	if (getTag(a) !== getTag(b)) return false;
 
-	for (let index = stack.left.length - 1; index >= 0; index--) {
-		if (stack.left[index] === a && stack.right[index] === b) return true;
+	for (const [left, right] of stack) {
+		if (left === a && right === b) return true;
 	}
 
-	stack.left.push(a);
-	stack.right.push(b);
+	stack.push([a, b]);
 	const result = objectsEqual(a, b, stack);
-	stack.left.pop();
-	stack.right.pop();
+	stack.pop();
 	return result;
 }
 
@@ -1021,7 +1023,7 @@ function equalWith(a: unknown, b: unknown, stack: ComparisonStack): boolean {
  * isEqual([1], { 0: 1 }); // => false
  */
 export function isEqual(a: unknown, b: unknown): boolean {
-	return equalWith(a, b, { left: [], right: [] });
+	return equalWith(a, b, []);
 }
 
 /**
@@ -1057,8 +1059,8 @@ export function deepFreeze<T>(object: T): DeepReadonly<T> {
 		}
 
 		for (const key of Reflect.ownKeys(value)) {
-			const descriptor = Object.getOwnPropertyDescriptor(value, key) as PropertyDescriptor;
-			if ('value' in descriptor) pending.push(descriptor.value);
+			// Accessor descriptors have no `value` (getters are not invoked): pushing `undefined` is harmless.
+			pending.push((Object.getOwnPropertyDescriptor(value, key) as PropertyDescriptor).value);
 		}
 
 		Object.freeze(value);
@@ -1305,7 +1307,7 @@ export function flattenObject(object: object, options: FlattenOptions = {}): Rec
 export function unflattenObject(record: Readonly<Record<string, unknown>>, options: FlattenOptions = {}): Record<string, unknown> {
 	const separator = readSeparator('unflattenObject', options);
 	const result: Record<string, unknown> = {};
-	const owned = new WeakSet<object>([result]);
+	const owned = new WeakSet<object>();
 	for (const key of Object.keys(record)) {
 		assignPath(result, parseWritablePath('unflattenObject', '`record` keys', key, separator), record[key], key, separator, 'unflattenObject', owned);
 	}
@@ -1391,15 +1393,14 @@ export interface ObjectDiff {
  * @param {string} prefix - The path of the containers followed by `'.'` (empty at the root)
  * @param {string[]} missing - Receives the paths of `a` that `b` lacks (mutated)
  * @param {string[] | undefined} changed - Receives the paths of differing leaves (mutated); `undefined` to skip leaf comparisons
- * @param {[Set<object>, Set<object>]} ancestors - Containers of `a`'s tree and of `b`'s tree on the current path (cycle detection)
+ * @param {Set<object>} ancestors - Containers of `a`'s tree on the current path (cycle detection: only `a`'s tree is checked, as the
+ * walk stops where `b` ends and {@link diff} walks each tree in turn)
  * @returns {void}
  * @throws {TypeError} when a tree contains a circular reference
  */
-function diffWalk(a: object, b: object, prefix: string, missing: string[], changed: string[] | undefined, ancestors: [Set<object>, Set<object>]): void {
-	const [ancestorsA, ancestorsB] = ancestors;
-	if (ancestorsA.has(a) || ancestorsB.has(b)) throw new TypeError('diff: cannot diff circular structures');
-	ancestorsA.add(a);
-	ancestorsB.add(b);
+function diffWalk(a: object, b: object, prefix: string, missing: string[], changed: string[] | undefined, ancestors: Set<object>): void {
+	if (ancestors.has(a)) throw new TypeError('diff: cannot diff circular structures');
+	ancestors.add(a);
 
 	for (const key of Object.keys(a)) {
 		const path = prefix + key;
@@ -1417,8 +1418,7 @@ function diffWalk(a: object, b: object, prefix: string, missing: string[], chang
 		}
 	}
 
-	ancestorsA.delete(a);
-	ancestorsB.delete(b);
+	ancestors.delete(a);
 }
 
 /**
@@ -1427,6 +1427,7 @@ function diffWalk(a: object, b: object, prefix: string, missing: string[], chang
  * - Recurses wherever BOTH sides are plain objects, or BOTH are arrays (array elements are compared by index; holes count as missing).
  * - Other values (incl. a plain object versus an array) are leaves compared with {@link isEqual}.
  * - Only own enumerable string keys are considered; prototypes of plain objects are not compared.
+ * - Identical references (including `a === b`) are equal by definition and are not walked.
  * - `removed` and `changed` are listed in the depth-first key order of `a`, `added` in that of `b`, so `diff(a, b).added`
  *   is exactly `diff(b, a).removed`. Keys containing `'.'` make paths ambiguous.
  * @param {object} a - The old tree (a plain object or an array)
@@ -1442,9 +1443,7 @@ export function diff(a: object, b: object): ObjectDiff {
 		throw new TypeError('diff: `a` and `b` must both be plain objects or both be arrays');
 	}
 	const result: ObjectDiff = { added: [], removed: [], changed: [] };
-	if (a !== b) {
-		diffWalk(a, b, '', result.removed, result.changed, [new Set(), new Set()]);
-		diffWalk(b, a, '', result.added, undefined, [new Set(), new Set()]);
-	}
+	diffWalk(a, b, '', result.removed, result.changed, new Set());
+	diffWalk(b, a, '', result.added, undefined, new Set());
 	return result;
 }

@@ -44,8 +44,8 @@ function expectValidMinimalScript<T>(a: readonly T[], b: readonly T[], script: A
 		if (operation.type !== 'insert') rebuiltA.push(a[operation.indexA]);
 		if (operation.type !== 'delete') rebuiltB.push(b[operation.indexB]);
 	}
-	expect(rebuiltA).toEqual(a);
-	expect(rebuiltB).toEqual(b);
+	expect(rebuiltA).toStrictEqual(a);
+	expect(rebuiltB).toStrictEqual(b);
 	const edits = script.filter(function (operation) {
 		return operation.type !== 'equal';
 	}).length;
@@ -104,18 +104,18 @@ describe('Arrays helpers', function () {
 				[1, 2],
 				[3, 4]
 			];
-			expect(helpers.flatten(array)).toEqual([1, 2, 3, 4]);
+			expect(helpers.flatten(array)).toStrictEqual([1, 2, 3, 4]);
 		});
 
 		it('should handle mixed items and flatten exactly one level', function () {
-			expect(helpers.flatten<number | number[]>([1, [2, [3]], 4])).toEqual([1, 2, [3], 4]);
+			expect(helpers.flatten<number | number[]>([1, [2, [3]], 4])).toStrictEqual([1, 2, [3], 4]);
 			const typed: number[] = helpers.flatten([1, [2, 3]]);
-			expect(typed).toEqual([1, 2, 3]);
+			expect(typed).toStrictEqual([1, 2, 3]);
 		});
 
 		it('should return an empty array for empty inputs', function () {
-			expect(helpers.flatten([])).toEqual([]);
-			expect(helpers.flatten([[], []])).toEqual([]);
+			expect(helpers.flatten([])).toStrictEqual([]);
+			expect(helpers.flatten([[], []])).toStrictEqual([]);
 		});
 
 		it('should skip holes like Array.prototype.flat', function () {
@@ -124,48 +124,48 @@ describe('Arrays helpers', function () {
 			const outer = new Array<number | number[]>(3);
 			outer[0] = 1;
 			outer[2] = inner;
-			expect(helpers.flatten(outer)).toEqual([1, 2]);
-			expect(helpers.flatten(outer)).toEqual(outer.flat());
+			expect(helpers.flatten(outer)).toStrictEqual([1, 2]);
+			expect(helpers.flatten(outer)).toStrictEqual(outer.flat());
 		});
 
 		it('should not mutate the input', function () {
 			const array = [[1], [2]];
 			helpers.flatten(array);
-			expect(array).toEqual([[1], [2]]);
+			expect(array).toStrictEqual([[1], [2]]);
 		});
 	});
 
 	describe('flattenDeep', function () {
 		it('should flatten arbitrarily nested arrays', function () {
 			const result: number[] = helpers.flattenDeep([1, [2, [3, [4, [5]]]], 6]);
-			expect(result).toEqual([1, 2, 3, 4, 5, 6]);
+			expect(result).toStrictEqual([1, 2, 3, 4, 5, 6]);
 		});
 
 		it('should handle empty arrays at any level', function () {
-			expect(helpers.flattenDeep([])).toEqual([]);
-			expect(helpers.flattenDeep([[], [[]], [[[]]]])).toEqual([]);
+			expect(helpers.flattenDeep([])).toStrictEqual([]);
+			expect(helpers.flattenDeep([[], [[]], [[[]]]])).toStrictEqual([]);
 		});
 
 		it('should keep non-array values, including strings and objects, intact', function () {
 			const obj = { a: [1] };
-			expect(helpers.flattenDeep(['ab', [obj, ['c']]])).toEqual(['ab', obj, 'c']);
+			expect(helpers.flattenDeep(['ab', [obj, ['c']]])).toStrictEqual(['ab', obj, 'c']);
 		});
 
 		it('should not overflow the stack on deep nesting', function () {
 			let nested: unknown[] = [42];
 			for (let i = 0; i < 100_000; i++) nested = [nested];
-			expect(helpers.flattenDeep(nested)).toEqual([42]);
+			expect(helpers.flattenDeep(nested)).toStrictEqual([42]);
 		});
 
 		it('should allow the same array to appear several times when not circular', function () {
 			const shared = [1, 2];
-			expect(helpers.flattenDeep([shared, [shared]])).toEqual([1, 2, 1, 2]);
+			expect(helpers.flattenDeep([shared, [shared]])).toStrictEqual([1, 2, 1, 2]);
 		});
 
 		it('should skip holes', function () {
 			const sparse = new Array<number>(2);
 			sparse[1] = 7;
-			expect(helpers.flattenDeep([sparse, [sparse]])).toEqual([7, 7]);
+			expect(helpers.flattenDeep([sparse, [sparse]])).toStrictEqual([7, 7]);
 		});
 
 		it('should throw a TypeError on circular arrays', function () {
@@ -174,6 +174,32 @@ describe('Arrays helpers', function () {
 			expect(function () {
 				helpers.flattenDeep(circular);
 			}).toThrow(TypeError);
+			const selfContaining: unknown[] = [];
+			selfContaining.push(selfContaining);
+			expect(function () {
+				helpers.flattenDeep(selfContaining);
+			}).toThrow(new TypeError('flattenDeep: cannot flatten a circular array'));
+		});
+
+		it('should detect cycles and accept shared arrays at any depth', function () {
+			for (const depth of [10, 63, 64, 65, 200]) {
+				const chain: unknown[][] = [[]];
+				for (let i = 0; i < depth; i++) {
+					const next: unknown[] = [i];
+					chain[i].push(next);
+					chain.push(next);
+				}
+				const [root] = chain;
+				const innermost = chain[depth];
+				// A back-reference to an ancestor halfway up is a cycle...
+				innermost.push(chain[depth >> 1]);
+				expect(function () {
+					helpers.flattenDeep(root);
+				}).toThrow(TypeError);
+				// ...but once that branch is left, the same array may appear again elsewhere.
+				innermost.pop();
+				expect(helpers.flattenDeep([root, root, [root]])).toHaveLength(3 * depth);
+			}
 		});
 	});
 
@@ -187,76 +213,90 @@ describe('Arrays helpers', function () {
 		});
 
 		it('should remove duplicates from an array', function () {
-			expect(helpers.removeDuplicates([1, 2, 2, 3, 4, 4])).toEqual([1, 2, 3, 4]);
+			expect(helpers.removeDuplicates([1, 2, 2, 3, 4, 4])).toStrictEqual([1, 2, 3, 4]);
+		});
+
+		it('should keep the sign of the FIRST zero only', function () {
+			expect(helpers.removeDuplicates([1, -0, 2, 0])).toStrictEqual([1, -0, 2]);
+			expect(helpers.removeDuplicates([1, 0, 2, -0])).toStrictEqual([1, 0, 2]);
+			// eslint-disable-next-line no-sparse-arrays
+			expect(helpers.removeDuplicates([undefined, , 0n, 0n])).toStrictEqual([undefined, 0n]);
+		});
+
+		it('should accept one-shot iterables', function () {
+			function* values(): Generator<number> {
+				yield* [3, -0, 3, 0, 1];
+			}
+			expect(helpers.removeDuplicates(values())).toStrictEqual([3, -0, 1]);
 		});
 
 		it('should keep first-occurrence order and handle NaN and strings', function () {
-			expect(helpers.removeDuplicates([3, NaN, 1, 3, NaN])).toEqual([3, NaN, 1]);
-			expect(helpers.removeDuplicates('hello')).toEqual(['h', 'e', 'l', 'o']);
-			expect(helpers.removeDuplicates([])).toEqual([]);
+			expect(helpers.removeDuplicates([3, NaN, 1, 3, NaN])).toStrictEqual([3, NaN, 1]);
+			expect(helpers.removeDuplicates('hello')).toStrictEqual(['h', 'e', 'l', 'o']);
+			expect(helpers.removeDuplicates([])).toStrictEqual([]);
 		});
 	});
 
 	describe('union', function () {
 		it('should return the union of two arrays', function () {
-			expect(helpers.union([1, 2, 3], [3, 4, 5])).toEqual([1, 2, 3, 4, 5]);
+			expect(helpers.union([1, 2, 3], [3, 4, 5])).toStrictEqual([1, 2, 3, 4, 5]);
 		});
 
 		it('should deduplicate within each input and preserve first-appearance order', function () {
-			expect(helpers.union([2, 1, 2], [3, 1, 3])).toEqual([2, 1, 3]);
-			expect(helpers.union([], [])).toEqual([]);
+			expect(helpers.union([2, 1, 2], [3, 1, 3])).toStrictEqual([2, 1, 3]);
+			expect(helpers.union([], [])).toStrictEqual([]);
 		});
 
 		it('should work with one-shot iterables', function () {
-			expect(helpers.union(once('a', 'b'), once('b', 'c'))).toEqual(['a', 'b', 'c']);
+			expect(helpers.union(once('a', 'b'), once('b', 'c'))).toStrictEqual(['a', 'b', 'c']);
 		});
 	});
 
 	describe('intersection', function () {
 		it('should return the intersection of two arrays', function () {
-			expect(helpers.intersection([1, 2, 3], [2, 3, 4])).toEqual([2, 3]);
+			expect(helpers.intersection([1, 2, 3], [2, 3, 4])).toStrictEqual([2, 3]);
 		});
 
 		it('should return unique values ordered as in the first input', function () {
-			expect(helpers.intersection([3, 2, 3, 2, 1], [1, 2, 3, 3])).toEqual([3, 2, 1]);
-			expect(helpers.intersection([NaN], [NaN])).toEqual([NaN]);
+			expect(helpers.intersection([3, 2, 3, 2, 1], [1, 2, 3, 3])).toStrictEqual([3, 2, 1]);
+			expect(helpers.intersection([NaN], [NaN])).toStrictEqual([NaN]);
 		});
 
 		it('should return an empty array when there is no overlap', function () {
-			expect(helpers.intersection([1], [2])).toEqual([]);
-			expect(helpers.intersection([], [1])).toEqual([]);
+			expect(helpers.intersection([1], [2])).toStrictEqual([]);
+			expect(helpers.intersection([], [1])).toStrictEqual([]);
 		});
 
 		it('should work with one-shot iterables', function () {
-			expect(helpers.intersection(once(1, 2, 3), once(3, 2))).toEqual([2, 3]);
+			expect(helpers.intersection(once(1, 2, 3), once(3, 2))).toStrictEqual([2, 3]);
 		});
 	});
 
 	describe('difference', function () {
 		it('should return the difference of two arrays', function () {
-			expect(helpers.difference([1, 2, 3], [2, 3, 4])).toEqual([1]);
+			expect(helpers.difference([1, 2, 3], [2, 3, 4])).toStrictEqual([1]);
 		});
 
 		it('should return unique values of the first input', function () {
-			expect(helpers.difference([1, 5, 1, 5, 2], [2])).toEqual([1, 5]);
-			expect(helpers.difference([1, 2], [])).toEqual([1, 2]);
-			expect(helpers.difference([], [1])).toEqual([]);
+			expect(helpers.difference([1, 5, 1, 5, 2], [2])).toStrictEqual([1, 5]);
+			expect(helpers.difference([1, 2], [])).toStrictEqual([1, 2]);
+			expect(helpers.difference([], [1])).toStrictEqual([]);
 		});
 
 		it('should work with one-shot iterables', function () {
-			expect(helpers.difference(once(1, 2, 3), once(2))).toEqual([1, 3]);
+			expect(helpers.difference(once(1, 2, 3), once(2))).toStrictEqual([1, 3]);
 		});
 	});
 
 	describe('symmetricDifference', function () {
 		it('should return values present in exactly one input', function () {
-			expect(helpers.symmetricDifference([1, 2, 3], [3, 4])).toEqual([1, 2, 4]);
+			expect(helpers.symmetricDifference([1, 2, 3], [3, 4])).toStrictEqual([1, 2, 4]);
 		});
 
 		it('should deduplicate and handle empty inputs', function () {
-			expect(helpers.symmetricDifference([1, 1, 2], [2, 3, 3])).toEqual([1, 3]);
-			expect(helpers.symmetricDifference([], [1])).toEqual([1]);
-			expect(helpers.symmetricDifference([1, 2], [2, 1])).toEqual([]);
+			expect(helpers.symmetricDifference([1, 1, 2], [2, 3, 3])).toStrictEqual([1, 3]);
+			expect(helpers.symmetricDifference([], [1])).toStrictEqual([1]);
+			expect(helpers.symmetricDifference([1, 2], [2, 1])).toStrictEqual([]);
 		});
 	});
 
@@ -279,17 +319,17 @@ describe('Arrays helpers', function () {
 
 	describe('chunk', function () {
 		it('should split an array into chunks of the given size', function () {
-			expect(helpers.chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
-			expect(helpers.chunk([1, 2, 3, 4], 2)).toEqual([
+			expect(helpers.chunk([1, 2, 3, 4, 5], 2)).toStrictEqual([[1, 2], [3, 4], [5]]);
+			expect(helpers.chunk([1, 2, 3, 4], 2)).toStrictEqual([
 				[1, 2],
 				[3, 4]
 			]);
 		});
 
 		it('should handle sizes larger than the array and empty arrays', function () {
-			expect(helpers.chunk([1, 2], 10)).toEqual([[1, 2]]);
-			expect(helpers.chunk([], 3)).toEqual([]);
-			expect(helpers.chunk([1, 2], 1)).toEqual([[1], [2]]);
+			expect(helpers.chunk([1, 2], 10)).toStrictEqual([[1, 2]]);
+			expect(helpers.chunk([], 3)).toStrictEqual([]);
+			expect(helpers.chunk([1, 2], 1)).toStrictEqual([[1], [2]]);
 		});
 
 		it.each([0, -1, 1.5, NaN, Infinity])('should throw a RangeError for size %p', function (size) {
@@ -302,45 +342,45 @@ describe('Arrays helpers', function () {
 	describe('compact', function () {
 		it('should remove every falsy value', function () {
 			const input = [0, -0, 1, false, true, '', 'a', null, undefined, NaN, 0n, 1n, [], {}];
-			expect(helpers.compact(input)).toEqual([1, true, 'a', 1n, [], {}]);
+			expect(helpers.compact(input)).toStrictEqual([1, true, 'a', 1n, [], {}]);
 		});
 
 		it('should narrow the element type', function () {
 			const input: Array<string | null | undefined | false> = ['a', null, 'b', undefined, false];
 			const result: string[] = helpers.compact(input);
-			expect(result).toEqual(['a', 'b']);
-			expect(helpers.compact([])).toEqual([]);
+			expect(result).toStrictEqual(['a', 'b']);
+			expect(helpers.compact([])).toStrictEqual([]);
 		});
 	});
 
 	describe('range', function () {
 		it('should count from 0 with a single argument', function () {
-			expect(helpers.range(5)).toEqual([0, 1, 2, 3, 4]);
-			expect(helpers.range(0)).toEqual([]);
-			expect(helpers.range(-3)).toEqual([]);
+			expect(helpers.range(5)).toStrictEqual([0, 1, 2, 3, 4]);
+			expect(helpers.range(0)).toStrictEqual([]);
+			expect(helpers.range(-3)).toStrictEqual([]);
 		});
 
 		it('should support start, end and step', function () {
-			expect(helpers.range(2, 5)).toEqual([2, 3, 4]);
-			expect(helpers.range(2, 8, 2)).toEqual([2, 4, 6]);
-			expect(helpers.range(2, 9, 2)).toEqual([2, 4, 6, 8]);
-			expect(helpers.range(-2, 2)).toEqual([-2, -1, 0, 1]);
+			expect(helpers.range(2, 5)).toStrictEqual([2, 3, 4]);
+			expect(helpers.range(2, 8, 2)).toStrictEqual([2, 4, 6]);
+			expect(helpers.range(2, 9, 2)).toStrictEqual([2, 4, 6, 8]);
+			expect(helpers.range(-2, 2)).toStrictEqual([-2, -1, 0, 1]);
 		});
 
 		it('should support negative steps', function () {
-			expect(helpers.range(5, 0, -1)).toEqual([5, 4, 3, 2, 1]);
-			expect(helpers.range(5, 0, -2)).toEqual([5, 3, 1]);
-			expect(helpers.range(0, -3, -1)).toEqual([0, -1, -2]);
+			expect(helpers.range(5, 0, -1)).toStrictEqual([5, 4, 3, 2, 1]);
+			expect(helpers.range(5, 0, -2)).toStrictEqual([5, 3, 1]);
+			expect(helpers.range(0, -3, -1)).toStrictEqual([0, -1, -2]);
 		});
 
 		it('should be empty when the step points away from the end', function () {
-			expect(helpers.range(0, 5, -1)).toEqual([]);
-			expect(helpers.range(5, 0)).toEqual([]);
-			expect(helpers.range(3, 3)).toEqual([]);
+			expect(helpers.range(0, 5, -1)).toStrictEqual([]);
+			expect(helpers.range(5, 0)).toStrictEqual([]);
+			expect(helpers.range(3, 3)).toStrictEqual([]);
 		});
 
 		it('should use the step when the end is undefined', function () {
-			expect(helpers.range(5, undefined, 2)).toEqual([0, 2, 4]);
+			expect(helpers.range(5, undefined, 2)).toStrictEqual([0, 2, 4]);
 		});
 
 		it('should compute fractional steps without accumulating errors', function () {
@@ -360,7 +400,7 @@ describe('Arrays helpers', function () {
 
 		it('regression: does not add a value just below the end when the step divides the span up to rounding', function () {
 			// 3 * 0.3 is 0.8999999999999999 < 0.9; the mathematically intended range has 3 items.
-			expect(helpers.range(0, 0.9, 0.3)).toEqual([0, 0.3, 0.6]);
+			expect(helpers.range(0, 0.9, 0.3)).toStrictEqual([0, 0.3, 0.6]);
 			expect(helpers.range(1e6 + 0.1, 1e6 + 0.4, 0.1)).toHaveLength(3);
 		});
 
@@ -392,33 +432,48 @@ describe('Arrays helpers', function () {
 			expect(function () {
 				helpers.range(0, 2 ** 40);
 			}).toThrow(RangeError);
+			expect(function () {
+				helpers.range(2 ** 32);
+			}).toThrow(new RangeError('range: the range would contain 4294967296 items, more than an array can hold'));
+		});
+
+		it.each([
+			[137.38, 254.77, 2.73, 43],
+			[0.188, 27.966, 0.731, 38],
+			[-282.568, -283.696, -0.024, 47],
+			[17.9, 18.1, 0.2, 1],
+			[-340.78, -468.18, -4.55, 28]
+		])('should have exactly (end - start) / step items when that ratio is an integer up to rounding errors: range(%p, %p, %p)', function (start, end, step, count) {
+			const values = helpers.range(start, end, step);
+			expect(values).toHaveLength(count);
+			for (const value of values) expect((value - end) * step).toBeLessThan(0);
 		});
 	});
 
 	describe('zip', function () {
 		it('should zip arrays into typed tuples', function () {
 			const result: Array<[number, string, boolean]> = helpers.zip([1, 2], ['a', 'b'], [true, false]);
-			expect(result).toEqual([
+			expect(result).toStrictEqual([
 				[1, 'a', true],
 				[2, 'b', false]
 			]);
 		});
 
 		it('should truncate to the shortest array', function () {
-			expect(helpers.zip([1, 2, 3], ['a'])).toEqual([[1, 'a']]);
-			expect(helpers.zip([1, 2, 3], [])).toEqual([]);
+			expect(helpers.zip([1, 2, 3], ['a'])).toStrictEqual([[1, 'a']]);
+			expect(helpers.zip([1, 2, 3], [])).toStrictEqual([]);
 		});
 
 		it('should handle zero and one arrays', function () {
-			expect(helpers.zip()).toEqual([]);
-			expect(helpers.zip([1, 2])).toEqual([[1], [2]]);
+			expect(helpers.zip()).toStrictEqual([]);
+			expect(helpers.zip([1, 2])).toStrictEqual([[1], [2]]);
 		});
 
 		it('should accept readonly arrays', function () {
 			const a: ReadonlyArray<number> = [1];
 			const b = ['x'] as const;
 			const result: Array<[number, 'x']> = helpers.zip(a, b);
-			expect(result).toEqual([[1, 'x']]);
+			expect(result).toStrictEqual([[1, 'x']]);
 		});
 	});
 
@@ -505,8 +560,8 @@ describe('Arrays helpers', function () {
 			const [even, odd] = helpers.partition([1, 2, 3, 4, 5], function (n) {
 				return n % 2 === 0;
 			});
-			expect(even).toEqual([2, 4]);
-			expect(odd).toEqual([1, 3, 5]);
+			expect(even).toStrictEqual([2, 4]);
+			expect(odd).toStrictEqual([1, 3, 5]);
 		});
 
 		it('should narrow with a type-guard predicate', function () {
@@ -515,8 +570,8 @@ describe('Arrays helpers', function () {
 			});
 			const n: number[] = numbers;
 			const s: string[] = strings;
-			expect(n).toEqual([1, 2]);
-			expect(s).toEqual(['a', 'b']);
+			expect(n).toStrictEqual([1, 2]);
+			expect(s).toStrictEqual(['a', 'b']);
 		});
 
 		it('should pass the index and handle empty arrays', function () {
@@ -524,8 +579,8 @@ describe('Arrays helpers', function () {
 				helpers.partition(['a', 'b', 'c'], function (_value, index) {
 					return index === 1;
 				})
-			).toEqual([['b'], ['a', 'c']]);
-			expect(helpers.partition([], Boolean)).toEqual([[], []]);
+			).toStrictEqual([['b'], ['a', 'c']]);
+			expect(helpers.partition([], Boolean)).toStrictEqual([[], []]);
 		});
 	});
 
@@ -540,20 +595,20 @@ describe('Arrays helpers', function () {
 				helpers.uniqueBy(items, function (o) {
 					return o.id;
 				})
-			).toEqual([
+			).toStrictEqual([
 				{ id: 1, v: 'a' },
 				{ id: 2, v: 'c' }
 			]);
 		});
 
 		it('should compare keys with SameValueZero and pass the index', function () {
-			expect(helpers.uniqueBy([NaN, 1, NaN], Number)).toEqual([NaN, 1]);
+			expect(helpers.uniqueBy([NaN, 1, NaN], Number)).toStrictEqual([NaN, 1]);
 			expect(
 				helpers.uniqueBy(['a', 'b', 'c'], function (_value, index) {
 					return index % 2;
 				})
-			).toEqual(['a', 'b']);
-			expect(helpers.uniqueBy([], String)).toEqual([]);
+			).toStrictEqual(['a', 'b']);
+			expect(helpers.uniqueBy([], String)).toStrictEqual([]);
 		});
 	});
 
@@ -563,13 +618,13 @@ describe('Arrays helpers', function () {
 			const result = helpers.sortBy(input, function (o) {
 				return o.n;
 			});
-			expect(result).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
-			expect(input).toEqual([{ n: 3 }, { n: 1 }, { n: 2 }]);
+			expect(result).toStrictEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+			expect(input).toStrictEqual([{ n: 3 }, { n: 1 }, { n: 2 }]);
 			expect(result).not.toBe(input);
 		});
 
 		it('should sort descending', function () {
-			expect(helpers.sortBy([1, 3, 2], Number, 'desc')).toEqual([3, 2, 1]);
+			expect(helpers.sortBy([1, 3, 2], Number, 'desc')).toStrictEqual([3, 2, 1]);
 		});
 
 		it('should be stable in both directions', function () {
@@ -587,12 +642,12 @@ describe('Arrays helpers', function () {
 					return o.id;
 				});
 			}
-			expect(ids(helpers.sortBy(input, key))).toEqual(['b', 'd', 'a', 'c']);
-			expect(ids(helpers.sortBy(input, key, 'desc'))).toEqual(['a', 'c', 'b', 'd']);
+			expect(ids(helpers.sortBy(input, key))).toStrictEqual(['b', 'd', 'a', 'c']);
+			expect(ids(helpers.sortBy(input, key, 'desc'))).toStrictEqual(['a', 'c', 'b', 'd']);
 		});
 
 		it('should compare strings by code units, not locale', function () {
-			expect(helpers.sortBy(['b', 'a', 'B', 'é', 'e'], String)).toEqual(['B', 'a', 'b', 'e', 'é']);
+			expect(helpers.sortBy(['b', 'a', 'B', 'é', 'e'], String)).toStrictEqual(['B', 'a', 'b', 'e', 'é']);
 		});
 
 		it('should sort by Date and bigint keys', function () {
@@ -601,12 +656,12 @@ describe('Arrays helpers', function () {
 				helpers.sortBy(dates, function (d) {
 					return d;
 				})
-			).toEqual([dates[1], dates[2], dates[0]]);
+			).toStrictEqual([dates[1], dates[2], dates[0]]);
 			expect(
 				helpers.sortBy([3n, 1n, 2n], function (n) {
 					return n;
 				})
-			).toEqual([1n, 2n, 3n]);
+			).toStrictEqual([1n, 2n, 3n]);
 		});
 
 		it('should compare mixed numbers and bigints numerically and put numbers before strings', function () {
@@ -614,7 +669,7 @@ describe('Arrays helpers', function () {
 			const result = helpers.sortBy(input, function (v) {
 				return v;
 			});
-			expect(result).toEqual([1, 1.5, 2n, 'B', 'a']);
+			expect(result).toStrictEqual([1, 1.5, 2n, 'B', 'a']);
 			expect(
 				helpers.sortBy(
 					input,
@@ -623,7 +678,7 @@ describe('Arrays helpers', function () {
 					},
 					'desc'
 				)
-			).toEqual(['a', 'B', 2n, 1.5, 1]);
+			).toStrictEqual(['a', 'B', 2n, 1.5, 1]);
 		});
 
 		it('should put NaN keys and invalid dates last in both directions, stably', function () {
@@ -632,15 +687,15 @@ describe('Arrays helpers', function () {
 			function selector(_value: number, index: number) {
 				return Number.isNaN(input[index]) ? NaN : keys[index];
 			}
-			expect(helpers.sortBy(input, selector)).toEqual([1, 2, NaN, NaN]);
-			expect(helpers.sortBy(input, selector, 'desc')).toEqual([2, 1, NaN, NaN]);
+			expect(helpers.sortBy(input, selector)).toStrictEqual([1, 2, NaN, NaN]);
+			expect(helpers.sortBy(input, selector, 'desc')).toStrictEqual([2, 1, NaN, NaN]);
 			const invalid = new Date(NaN);
 			const valid = new Date(0);
 			expect(
 				helpers.sortBy([invalid, valid], function (d) {
 					return d;
 				})
-			).toEqual([valid, invalid]);
+			).toStrictEqual([valid, invalid]);
 		});
 
 		it('should call the selector once per item', function () {
@@ -654,7 +709,7 @@ describe('Arrays helpers', function () {
 		it('should throw a RangeError for an invalid order', function () {
 			expect(function () {
 				helpers.sortBy([1], Number, 'DESC' as any);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError("sortBy: `order` must be 'asc' or 'desc', got DESC"));
 		});
 	});
 
@@ -662,22 +717,22 @@ describe('Arrays helpers', function () {
 		it('should return a permutation without mutating the input', function () {
 			const input = [1, 2, 3, 4, 5];
 			const result = helpers.shuffle(input);
-			expect(input).toEqual([1, 2, 3, 4, 5]);
+			expect(input).toStrictEqual([1, 2, 3, 4, 5]);
 			expect(result).not.toBe(input);
-			expect([...result].sort()).toEqual(input);
+			expect([...result].sort()).toStrictEqual(input);
 		});
 
 		it('should be deterministic with an injected generator', function () {
 			// random() = 0 always swaps position i with 0: [1,2,3,4] -> [4,2,3,1] -> [3,2,4,1] -> [2,3,4,1]
-			expect(helpers.shuffle([1, 2, 3, 4], sequence(0))).toEqual([2, 3, 4, 1]);
+			expect(helpers.shuffle([1, 2, 3, 4], sequence(0))).toStrictEqual([2, 3, 4, 1]);
 			// random() close to 1 always picks j = i, i.e. the identity permutation
-			expect(helpers.shuffle([1, 2, 3, 4], sequence(0.999999))).toEqual([1, 2, 3, 4]);
+			expect(helpers.shuffle([1, 2, 3, 4], sequence(0.999999))).toStrictEqual([1, 2, 3, 4]);
 		});
 
 		it('should handle empty and single-item arrays without calling random', function () {
 			const random = jest.fn(Math.random);
-			expect(helpers.shuffle([], random)).toEqual([]);
-			expect(helpers.shuffle(['x'], random)).toEqual(['x']);
+			expect(helpers.shuffle([], random)).toStrictEqual([]);
+			expect(helpers.shuffle(['x'], random)).toStrictEqual(['x']);
 			expect(random).not.toHaveBeenCalled();
 		});
 
@@ -714,10 +769,10 @@ describe('Arrays helpers', function () {
 
 	describe('take', function () {
 		it('should take the first n items', function () {
-			expect(helpers.take([1, 2, 3], 2)).toEqual([1, 2]);
-			expect(helpers.take([1, 2, 3], 0)).toEqual([]);
-			expect(helpers.take([1, 2, 3], 10)).toEqual([1, 2, 3]);
-			expect(helpers.take([], 1)).toEqual([]);
+			expect(helpers.take([1, 2, 3], 2)).toStrictEqual([1, 2]);
+			expect(helpers.take([1, 2, 3], 0)).toStrictEqual([]);
+			expect(helpers.take([1, 2, 3], 10)).toStrictEqual([1, 2, 3]);
+			expect(helpers.take([], 1)).toStrictEqual([]);
 		});
 
 		it.each([-1, 1.5, NaN, Infinity])('should throw a RangeError for n = %p', function (n) {
@@ -729,9 +784,9 @@ describe('Arrays helpers', function () {
 
 	describe('drop', function () {
 		it('should drop the first n items', function () {
-			expect(helpers.drop([1, 2, 3], 2)).toEqual([3]);
-			expect(helpers.drop([1, 2, 3], 0)).toEqual([1, 2, 3]);
-			expect(helpers.drop([1, 2, 3], 10)).toEqual([]);
+			expect(helpers.drop([1, 2, 3], 2)).toStrictEqual([3]);
+			expect(helpers.drop([1, 2, 3], 0)).toStrictEqual([1, 2, 3]);
+			expect(helpers.drop([1, 2, 3], 10)).toStrictEqual([]);
 		});
 
 		it.each([-1, 0.5, NaN, -Infinity])('should throw a RangeError for n = %p', function (n) {
@@ -749,11 +804,11 @@ describe('Arrays helpers', function () {
 			];
 			const result = helpers.unzip(pairs);
 			const typed: [number[], string[]] | [] = result;
-			expect(typed).toEqual([
+			expect(typed).toStrictEqual([
 				[1, 2],
 				['a', 'b']
 			]);
-			expect(helpers.unzip(helpers.zip([1, 2, 3], [true, false, true]))).toEqual([
+			expect(helpers.unzip(helpers.zip([1, 2, 3], [true, false, true]))).toStrictEqual([
 				[1, 2, 3],
 				[true, false, true]
 			]);
@@ -766,46 +821,46 @@ describe('Arrays helpers', function () {
 					[4, 5],
 					[6, 7, 8]
 				])
-			).toEqual([
+			).toStrictEqual([
 				[1, 4, 6],
 				[2, 5, 7]
 			]);
-			expect(helpers.unzip([[1], []])).toEqual([]);
+			expect(helpers.unzip([[1], []])).toStrictEqual([]);
 		});
 
 		it('returns [] for an empty input (arity unknown)', function () {
 			const [xs = [], ys = []] = helpers.unzip<[number, string]>([]);
-			expect(xs).toEqual([]);
-			expect(ys).toEqual([]);
-			expect(helpers.unzip([])).toEqual([]);
+			expect(xs).toStrictEqual([]);
+			expect(ys).toStrictEqual([]);
+			expect(helpers.unzip([])).toStrictEqual([]);
 		});
 	});
 
 	describe('windowed / pairwise', function () {
 		it('returns full sliding windows', function () {
-			expect(helpers.windowed([1, 2, 3, 4], 2)).toEqual([
+			expect(helpers.windowed([1, 2, 3, 4], 2)).toStrictEqual([
 				[1, 2],
 				[2, 3],
 				[3, 4]
 			]);
-			expect(helpers.windowed([1, 2, 3, 4, 5], 2, 2)).toEqual([
+			expect(helpers.windowed([1, 2, 3, 4, 5], 2, 2)).toStrictEqual([
 				[1, 2],
 				[3, 4]
 			]);
-			expect(helpers.windowed([1, 2, 3, 4, 5], 3, 2)).toEqual([
+			expect(helpers.windowed([1, 2, 3, 4, 5], 3, 2)).toStrictEqual([
 				[1, 2, 3],
 				[3, 4, 5]
 			]);
-			expect(helpers.windowed([1, 2, 3], 1, 5)).toEqual([[1]]);
-			expect(helpers.windowed([1, 2], 3)).toEqual([]);
-			expect(helpers.windowed([], 1)).toEqual([]);
+			expect(helpers.windowed([1, 2, 3], 1, 5)).toStrictEqual([[1]]);
+			expect(helpers.windowed([1, 2], 3)).toStrictEqual([]);
+			expect(helpers.windowed([], 1)).toStrictEqual([]);
 		});
 
 		it('returns fresh windows', function () {
 			const input = [1, 2, 3];
 			const [window] = helpers.windowed(input, 3);
 			window.push(4);
-			expect(input).toEqual([1, 2, 3]);
+			expect(input).toStrictEqual([1, 2, 3]);
 		});
 
 		it.each([
@@ -826,12 +881,12 @@ describe('Arrays helpers', function () {
 
 		it('pairwise returns adjacent pairs', function () {
 			const pairs: Array<[string, string]> = helpers.pairwise(['a', 'b', 'c']);
-			expect(pairs).toEqual([
+			expect(pairs).toStrictEqual([
 				['a', 'b'],
 				['b', 'c']
 			]);
-			expect(helpers.pairwise([1])).toEqual([]);
-			expect(helpers.pairwise([])).toEqual([]);
+			expect(helpers.pairwise([1])).toStrictEqual([]);
+			expect(helpers.pairwise([])).toStrictEqual([]);
 		});
 	});
 
@@ -851,6 +906,21 @@ describe('Arrays helpers', function () {
 		it('returns the first item with the extreme key', function () {
 			expect(helpers.minBy(items, byN)?.id).toBe('b');
 			expect(helpers.maxBy(items, byN)?.id).toBe('c');
+		});
+
+		it('keeps the first of several equal string keys', function () {
+			const words = [
+				{ id: 1, w: 'b' },
+				{ id: 2, w: 'a' },
+				{ id: 3, w: 'c' },
+				{ id: 4, w: 'a' },
+				{ id: 5, w: 'c' }
+			];
+			function byWord(item: { w: string }): string {
+				return item.w;
+			}
+			expect(helpers.minBy(words, byWord)?.id).toBe(2);
+			expect(helpers.maxBy(words, byWord)?.id).toBe(3);
 		});
 
 		it('returns undefined for empty arrays or when every key is NaN', function () {
@@ -905,7 +975,7 @@ describe('Arrays helpers', function () {
 				return value;
 			});
 			helpers.minBy([3, 1, 2], selector);
-			expect(selector.mock.calls).toEqual([
+			expect(selector.mock.calls).toStrictEqual([
 				[3, 0],
 				[1, 1],
 				[2, 2]
@@ -938,13 +1008,13 @@ describe('Arrays helpers', function () {
 	describe('move / insertAt / removeAt', function () {
 		it('move relocates an item without mutating the input', function () {
 			const input = ['a', 'b', 'c', 'd'];
-			expect(helpers.move(input, 0, 2)).toEqual(['b', 'c', 'a', 'd']);
-			expect(helpers.move(input, 3, 0)).toEqual(['d', 'a', 'b', 'c']);
-			expect(helpers.move(input, -1, 0)).toEqual(['d', 'a', 'b', 'c']);
-			expect(helpers.move(input, 0, -1)).toEqual(['b', 'c', 'd', 'a']);
-			expect(helpers.move(input, 1, 1)).toEqual(input);
+			expect(helpers.move(input, 0, 2)).toStrictEqual(['b', 'c', 'a', 'd']);
+			expect(helpers.move(input, 3, 0)).toStrictEqual(['d', 'a', 'b', 'c']);
+			expect(helpers.move(input, -1, 0)).toStrictEqual(['d', 'a', 'b', 'c']);
+			expect(helpers.move(input, 0, -1)).toStrictEqual(['b', 'c', 'd', 'a']);
+			expect(helpers.move(input, 1, 1)).toStrictEqual(input);
 			expect(helpers.move(input, 1, 1)).not.toBe(input);
-			expect(input).toEqual(['a', 'b', 'c', 'd']);
+			expect(input).toStrictEqual(['a', 'b', 'c', 'd']);
 		});
 
 		it.each([
@@ -968,15 +1038,15 @@ describe('Arrays helpers', function () {
 
 		it('insertAt inserts items before the index (negative indices count from the end)', function () {
 			const input = [1, 2, 3];
-			expect(helpers.insertAt(input, 0, 9)).toEqual([9, 1, 2, 3]);
-			expect(helpers.insertAt(input, 1, 9, 8)).toEqual([1, 9, 8, 2, 3]);
-			expect(helpers.insertAt(input, 3, 9)).toEqual([1, 2, 3, 9]);
-			expect(helpers.insertAt(input, -1, 9)).toEqual([1, 2, 9, 3]);
-			expect(helpers.insertAt(input, -3, 9)).toEqual([9, 1, 2, 3]);
-			expect(helpers.insertAt(input, 2)).toEqual([1, 2, 3]);
-			expect(helpers.insertAt([], 0, 'x')).toEqual(['x']);
-			expect(helpers.insertAt([[1]], 1, [2])).toEqual([[1], [2]]);
-			expect(input).toEqual([1, 2, 3]);
+			expect(helpers.insertAt(input, 0, 9)).toStrictEqual([9, 1, 2, 3]);
+			expect(helpers.insertAt(input, 1, 9, 8)).toStrictEqual([1, 9, 8, 2, 3]);
+			expect(helpers.insertAt(input, 3, 9)).toStrictEqual([1, 2, 3, 9]);
+			expect(helpers.insertAt(input, -1, 9)).toStrictEqual([1, 2, 9, 3]);
+			expect(helpers.insertAt(input, -3, 9)).toStrictEqual([9, 1, 2, 3]);
+			expect(helpers.insertAt(input, 2)).toStrictEqual([1, 2, 3]);
+			expect(helpers.insertAt([], 0, 'x')).toStrictEqual(['x']);
+			expect(helpers.insertAt([[1]], 1, [2])).toStrictEqual([[1], [2]]);
+			expect(input).toStrictEqual([1, 2, 3]);
 		});
 
 		it.each([4, -4, 1.5, NaN, Infinity])('insertAt throws a RangeError for index %p', function (index) {
@@ -987,13 +1057,13 @@ describe('Arrays helpers', function () {
 
 		it('removeAt removes count items from the index', function () {
 			const input = [1, 2, 3, 4];
-			expect(helpers.removeAt(input, 1)).toEqual([1, 3, 4]);
-			expect(helpers.removeAt(input, 1, 2)).toEqual([1, 4]);
-			expect(helpers.removeAt(input, -2, 2)).toEqual([1, 2]);
-			expect(helpers.removeAt(input, -1)).toEqual([1, 2, 3]);
-			expect(helpers.removeAt(input, 2, 0)).toEqual([1, 2, 3, 4]);
-			expect(helpers.removeAt(input, 1, 100)).toEqual([1]);
-			expect(input).toEqual([1, 2, 3, 4]);
+			expect(helpers.removeAt(input, 1)).toStrictEqual([1, 3, 4]);
+			expect(helpers.removeAt(input, 1, 2)).toStrictEqual([1, 4]);
+			expect(helpers.removeAt(input, -2, 2)).toStrictEqual([1, 2]);
+			expect(helpers.removeAt(input, -1)).toStrictEqual([1, 2, 3]);
+			expect(helpers.removeAt(input, 2, 0)).toStrictEqual([1, 2, 3, 4]);
+			expect(helpers.removeAt(input, 1, 100)).toStrictEqual([1]);
+			expect(input).toStrictEqual([1, 2, 3, 4]);
 		});
 
 		it.each([
@@ -1069,7 +1139,7 @@ describe('Arrays helpers', function () {
 		it('combines every item of each array, last array fastest', function () {
 			const result = helpers.cartesianProduct([1, 2], ['a', 'b'], [true]);
 			const typed: Array<[number, string, boolean]> = result;
-			expect(typed).toEqual([
+			expect(typed).toStrictEqual([
 				[1, 'a', true],
 				[1, 'b', true],
 				[2, 'a', true],
@@ -1078,25 +1148,25 @@ describe('Arrays helpers', function () {
 		});
 
 		it('handles empty arrays and no arguments', function () {
-			expect(helpers.cartesianProduct([1, 2], [])).toEqual([]);
-			expect(helpers.cartesianProduct()).toEqual([[]]);
-			expect(helpers.cartesianProduct([1, 2])).toEqual([[1], [2]]);
+			expect(helpers.cartesianProduct([1, 2], [])).toStrictEqual([]);
+			expect(helpers.cartesianProduct()).toStrictEqual([[]]);
+			expect(helpers.cartesianProduct([1, 2])).toStrictEqual([[1], [2]]);
 		});
 
 		it('throws a RangeError when the product is too large', function () {
 			const big = { length: 2 ** 20 } as unknown as number[];
 			expect(function () {
 				helpers.cartesianProduct(big, big);
-			}).toThrow(RangeError);
+			}).toThrow(new RangeError('cartesianProduct: the product would contain 1099511627776 tuples, more than an array can hold'));
 		});
 	});
 
 	describe('intersperse', function () {
 		it('inserts the separator between items', function () {
 			const result: Array<number | string> = helpers.intersperse([1, 2, 3], ',');
-			expect(result).toEqual([1, ',', 2, ',', 3]);
-			expect(helpers.intersperse(['a'], 0)).toEqual(['a']);
-			expect(helpers.intersperse([], 0)).toEqual([]);
+			expect(result).toStrictEqual([1, ',', 2, ',', 3]);
+			expect(helpers.intersperse(['a'], 0)).toStrictEqual(['a']);
+			expect(helpers.intersperse([], 0)).toStrictEqual([]);
 		});
 	});
 
@@ -1106,14 +1176,14 @@ describe('Arrays helpers', function () {
 		}
 
 		it('differenceBy keeps the first item of a per key absent from b', function () {
-			expect(helpers.differenceBy([{ id: 1 }, { id: 2 }, { id: 1, v: 'dup' }], [{ id: 2 }], id)).toEqual([{ id: 1 }]);
-			expect(helpers.differenceBy([1.2, 2.5, 3.1, 3.9], [2.1], Math.floor)).toEqual([1.2, 3.1]);
-			expect(helpers.differenceBy([], [1], Number)).toEqual([]);
+			expect(helpers.differenceBy([{ id: 1 }, { id: 2 }, { id: 1, v: 'dup' }], [{ id: 2 }], id)).toStrictEqual([{ id: 1 }]);
+			expect(helpers.differenceBy([1.2, 2.5, 3.1, 3.9], [2.1], Math.floor)).toStrictEqual([1.2, 3.1]);
+			expect(helpers.differenceBy([], [1], Number)).toStrictEqual([]);
 		});
 
 		it('intersectionBy keeps the first item of a per key present in b', function () {
-			expect(helpers.intersectionBy([{ id: 1 }, { id: 2, v: 'first' }, { id: 2 }], [{ id: 2 }, { id: 3 }], id)).toEqual([{ id: 2, v: 'first' }]);
-			expect(helpers.intersectionBy([1.2, 2.5], [], Math.floor)).toEqual([]);
+			expect(helpers.intersectionBy([{ id: 1 }, { id: 2, v: 'first' }, { id: 2 }], [{ id: 2 }, { id: 3 }], id)).toStrictEqual([{ id: 2, v: 'first' }]);
+			expect(helpers.intersectionBy([1.2, 2.5], [], Math.floor)).toStrictEqual([]);
 		});
 
 		it('accepts different item types and iterables, and uses SameValueZero', function () {
@@ -1121,9 +1191,9 @@ describe('Arrays helpers', function () {
 			function key(item: { id: number } | number): number {
 				return typeof item === 'number' ? item : item.id;
 			}
-			expect(helpers.differenceBy<{ id: number }, number>(users, once(2), key)).toEqual([{ id: 1 }]);
-			expect(helpers.intersectionBy<{ id: number }, number>(once(...users), [2], key)).toEqual([{ id: 2 }]);
-			expect(helpers.intersectionBy([NaN], [NaN], Number)).toEqual([NaN]);
+			expect(helpers.differenceBy<{ id: number }, number>(users, once(2), key)).toStrictEqual([{ id: 1 }]);
+			expect(helpers.intersectionBy<{ id: number }, number>(once(...users), [2], key)).toStrictEqual([{ id: 2 }]);
+			expect(helpers.intersectionBy([NaN], [NaN], Number)).toStrictEqual([NaN]);
 		});
 	});
 
@@ -1242,6 +1312,42 @@ describe('Arrays helpers', function () {
 			}).toThrow(new RangeError('insertAt: `index` must be an integer in [-1, 1], got 5'));
 		});
 
+		it('names the function and the argument in index and count errors', function () {
+			expect(function () {
+				helpers.take([1], -1);
+			}).toThrow(new RangeError('take: `n` must be an integer >= 0, got -1'));
+			expect(function () {
+				helpers.drop([1], 0.5);
+			}).toThrow(new RangeError('drop: `n` must be an integer >= 0, got 0.5'));
+			expect(function () {
+				helpers.windowed([1], 0);
+			}).toThrow(new RangeError('windowed: `size` must be an integer >= 1, got 0'));
+			expect(function () {
+				helpers.windowed([1], 1, 0);
+			}).toThrow(new RangeError('windowed: `step` must be an integer >= 1, got 0'));
+			expect(function () {
+				helpers.move([1, 2], 0, 2);
+			}).toThrow(new RangeError('move: `to` must be an integer in [-2, 1], got 2'));
+			expect(function () {
+				helpers.move([1], 1, 0);
+			}).toThrow(new RangeError('move: `from` must be an integer in [-1, 0], got 1'));
+			expect(function () {
+				helpers.move([], 0, 0);
+			}).toThrow(new RangeError('move: `from` must be a valid index, but the array is empty, got 0'));
+			expect(function () {
+				helpers.removeAt([1], 1);
+			}).toThrow(new RangeError('removeAt: `index` must be an integer in [-1, 0], got 1'));
+			expect(function () {
+				helpers.removeAt([1], 0, -1);
+			}).toThrow(new RangeError('removeAt: `count` must be an integer >= 0, got -1'));
+			expect(function () {
+				helpers.insertAt([1], 2, 0);
+			}).toThrow(new RangeError('insertAt: `index` must be an integer in [-1, 1], got 2'));
+			expect(function () {
+				helpers.binarySearch([1], NaN);
+			}).toThrow(new RangeError('binarySearch: `value` must not be NaN when no comparator is given, got NaN'));
+		});
+
 		it('validates every argument of range by name', function () {
 			expect(function () {
 				helpers.range(NaN);
@@ -1259,7 +1365,7 @@ describe('Arrays helpers', function () {
 	});
 	describe('diffSequences', function () {
 		it('should produce an ordered edit script', function () {
-			expect(helpers.diffSequences([1, 2, 3], [1, 3, 4])).toEqual([
+			expect(helpers.diffSequences([1, 2, 3], [1, 3, 4])).toStrictEqual([
 				{ type: 'equal', value: 1, indexA: 0, indexB: 0 },
 				{ type: 'delete', value: 2, indexA: 1 },
 				{ type: 'equal', value: 3, indexA: 2, indexB: 1 },
@@ -1268,19 +1374,19 @@ describe('Arrays helpers', function () {
 		});
 
 		it('should handle empty sequences', function () {
-			expect(helpers.diffSequences([], [])).toEqual([]);
-			expect(helpers.diffSequences([], ['a', 'b'])).toEqual([
+			expect(helpers.diffSequences([], [])).toStrictEqual([]);
+			expect(helpers.diffSequences([], ['a', 'b'])).toStrictEqual([
 				{ type: 'insert', value: 'a', indexB: 0 },
 				{ type: 'insert', value: 'b', indexB: 1 }
 			]);
-			expect(helpers.diffSequences(['a', 'b'], [])).toEqual([
+			expect(helpers.diffSequences(['a', 'b'], [])).toStrictEqual([
 				{ type: 'delete', value: 'a', indexA: 0 },
 				{ type: 'delete', value: 'b', indexA: 1 }
 			]);
 		});
 
 		it('should keep identical sequences entirely', function () {
-			expect(helpers.diffSequences('abc', 'abc')).toEqual([
+			expect(helpers.diffSequences('abc', 'abc')).toStrictEqual([
 				{ type: 'equal', value: 'a', indexA: 0, indexB: 0 },
 				{ type: 'equal', value: 'b', indexA: 1, indexB: 1 },
 				{ type: 'equal', value: 'c', indexA: 2, indexB: 2 }
@@ -1291,7 +1397,7 @@ describe('Arrays helpers', function () {
 			const types = helpers.diffSequences([0, 1, 2, 9, 3, 4], [0, 5, 6, 9, 7]).map(function (operation) {
 				return operation.type;
 			});
-			expect(types).toEqual(['equal', 'delete', 'delete', 'insert', 'insert', 'equal', 'delete', 'delete', 'insert']);
+			expect(types).toStrictEqual(['equal', 'delete', 'delete', 'insert', 'insert', 'equal', 'delete', 'delete', 'insert']);
 		});
 
 		it('should be minimal on classic examples', function () {
@@ -1324,12 +1430,12 @@ describe('Arrays helpers', function () {
 		});
 
 		it('should split strings and other iterables into elements', function () {
-			expect(helpers.diffSequences('😀a', '😀b')).toEqual([
+			expect(helpers.diffSequences('😀a', '😀b')).toStrictEqual([
 				{ type: 'equal', value: '😀', indexA: 0, indexB: 0 },
 				{ type: 'delete', value: 'a', indexA: 1 },
 				{ type: 'insert', value: 'b', indexB: 1 }
 			]);
-			expect(helpers.diffSequences(new Set([1, 2]), once(2, 3))).toEqual([
+			expect(helpers.diffSequences(new Set([1, 2]), once(2, 3))).toStrictEqual([
 				{ type: 'delete', value: 1, indexA: 0 },
 				{ type: 'equal', value: 2, indexA: 1, indexB: 0 },
 				{ type: 'insert', value: 3, indexB: 1 }
@@ -1338,16 +1444,19 @@ describe('Arrays helpers', function () {
 
 		it('should compare with SameValueZero by default and report the element of a', function () {
 			const script = helpers.diffSequences([NaN, -0], [NaN, 0]);
-			expect(script).toEqual([
+			expect(script).toStrictEqual([
 				{ type: 'equal', value: NaN, indexA: 0, indexB: 0 },
 				{ type: 'equal', value: -0, indexA: 1, indexB: 1 }
 			]);
 			expect(Object.is(script[1].value, -0)).toBe(true);
+			expect(helpers.longestCommonSubsequence([NaN, 1], [2, NaN])).toStrictEqual([NaN]);
+			expect(helpers.longestCommonSubsequence([NaN], [1])).toStrictEqual([]);
+			expect(helpers.longestCommonSubsequence([1], [NaN])).toStrictEqual([]);
 			expect(
 				helpers.diffSequences([{}], [{}]).map(function (operation) {
 					return operation.type;
 				})
-			).toEqual(['delete', 'insert']);
+			).toStrictEqual(['delete', 'insert']);
 		});
 
 		it('should call a custom equality as equals(itemOfA, itemOfB)', function () {
@@ -1364,7 +1473,7 @@ describe('Arrays helpers', function () {
 				expect(y.from).toBe('b');
 				return x.id === y.id;
 			});
-			expect(helpers.diffSequences(a, b, equals)).toEqual([
+			expect(helpers.diffSequences(a, b, equals)).toStrictEqual([
 				{ type: 'delete', value: a[0], indexA: 0 },
 				{ type: 'equal', value: a[1], indexA: 1, indexB: 0 },
 				{ type: 'insert', value: b[1], indexB: 1 }
@@ -1376,7 +1485,7 @@ describe('Arrays helpers', function () {
 			const a = Object.freeze([1, 2, 3]);
 			const b = Object.freeze([3, 2, 1]);
 			expectValidMinimalScript(a, b, helpers.diffSequences(a, b));
-			expect(a).toEqual([1, 2, 3]);
+			expect(a).toStrictEqual([1, 2, 3]);
 		});
 
 		it('should handle long, nearly identical sequences quickly', function () {
@@ -1412,21 +1521,21 @@ describe('Arrays helpers', function () {
 
 	describe('longestCommonSubsequence', function () {
 		it('should return a longest common subsequence', function () {
-			expect(helpers.longestCommonSubsequence([1, 2, 3, 4, 5], [2, 4, 6, 5])).toEqual([2, 4, 5]);
+			expect(helpers.longestCommonSubsequence([1, 2, 3, 4, 5], [2, 4, 6, 5])).toStrictEqual([2, 4, 5]);
 			expect(helpers.longestCommonSubsequence('ABCBDAB', 'BDCABA')).toHaveLength(4);
-			expect(helpers.longestCommonSubsequence('abc', 'abc')).toEqual(['a', 'b', 'c']);
+			expect(helpers.longestCommonSubsequence('abc', 'abc')).toStrictEqual(['a', 'b', 'c']);
 		});
 
 		it('should return an empty array when nothing is shared', function () {
-			expect(helpers.longestCommonSubsequence([], [1])).toEqual([]);
-			expect(helpers.longestCommonSubsequence([1, 2], [3, 4])).toEqual([]);
+			expect(helpers.longestCommonSubsequence([], [1])).toStrictEqual([]);
+			expect(helpers.longestCommonSubsequence([1, 2], [3, 4])).toStrictEqual([]);
 		});
 
 		it('should take the elements from a when a custom equality is used', function () {
 			const result = helpers.longestCommonSubsequence(['A', 'b', 'C'], ['a', 'c'], function (x, y) {
 				return x.toLowerCase() === y.toLowerCase();
 			});
-			expect(result).toEqual(['A', 'C']);
+			expect(result).toStrictEqual(['A', 'C']);
 		});
 
 		it('should validate its arguments under its own name', function () {

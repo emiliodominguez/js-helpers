@@ -1,10 +1,16 @@
-import { chunk, groupBy, removeDuplicates, sortBy } from '@emiliodominguez/js-helpers/arrays';
+import { chunk, countBy, flattenDeep, groupBy, keyBy, removeDuplicates, sortBy, symmetricDifference, uniqueBy } from '@emiliodominguez/js-helpers/arrays';
 
 const numbers = Array.from({ length: 10_000 }, function (_, index) {
 	return (index * 7919) % 10_007;
 });
 const users = numbers.map(function (n) {
-	return { id: n, team: `team-${n % 20}` };
+	return { id: n, team: `team-${n % 20}`, name: `user-${n}` };
+});
+const repeated = numbers.map(function (n) {
+	return n % 500;
+});
+const nested = Array.from({ length: 1000 }, function (_, index) {
+	return [index, [index + 1, [index + 2, [index + 3]]], index + 4];
 });
 
 export default [
@@ -36,6 +42,53 @@ export default [
 			return users.slice().sort(function (a, b) {
 				return a.id - b.id;
 			});
+		}
+	},
+	{
+		name: 'sortBy (10k objects, string keys)',
+		fn: function () {
+			return sortBy(users, function (user) {
+				return user.name;
+			});
+		}
+	},
+	{
+		name: 'keyBy (10k objects)',
+		fn: function () {
+			return keyBy(users, function (user) {
+				return user.id;
+			});
+		}
+	},
+	{
+		name: 'countBy (10k objects, 20 groups)',
+		fn: function () {
+			return countBy(users, function (user) {
+				return user.team;
+			});
+		}
+	},
+	{
+		name: 'uniqueBy (10k objects, 20 keys)',
+		fn: function () {
+			return uniqueBy(users, function (user) {
+				return user.team;
+			});
+		}
+	},
+	{
+		name: 'symmetricDifference (10k + 10k numbers)',
+		fn: function () {
+			return symmetricDifference(numbers, repeated);
+		}
+	},
+	{
+		name: 'flattenDeep (1k items, 4 levels)',
+		fn: function () {
+			return flattenDeep(nested);
+		},
+		baseline: function () {
+			return nested.flat(Infinity);
 		}
 	},
 	{

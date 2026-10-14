@@ -54,12 +54,12 @@ function isEven(n: number): boolean {
 describe('iterables', function () {
 	describe('count', function () {
 		it('counts from 0 by 1 by default', function () {
-			expect(helpers.toArray(helpers.take(helpers.count(), 4))).toEqual([0, 1, 2, 3]);
+			expect(helpers.toArray(helpers.take(helpers.count(), 4))).toStrictEqual([0, 1, 2, 3]);
 		});
 
 		it('supports a custom start and a negative, zero or fractional step', function () {
-			expect(helpers.toArray(helpers.take(helpers.count(10, -5), 3))).toEqual([10, 5, 0]);
-			expect(helpers.toArray(helpers.take(helpers.count(7, 0), 3))).toEqual([7, 7, 7]);
+			expect(helpers.toArray(helpers.take(helpers.count(10, -5), 3))).toStrictEqual([10, 5, 0]);
+			expect(helpers.toArray(helpers.take(helpers.count(7, 0), 3))).toStrictEqual([7, 7, 7]);
 			// start + i * step: no accumulated rounding error (repeated addition would give 0.8999999999999999)
 			expect(helpers.toArray(helpers.take(helpers.count(0, 0.1), 10))[9]).toBe(0.9);
 		});
@@ -82,13 +82,13 @@ describe('iterables', function () {
 
 	describe('repeatValue', function () {
 		it('repeats a value a given number of times', function () {
-			expect(helpers.toArray(helpers.repeatValue('a', 3))).toEqual(['a', 'a', 'a']);
-			expect(helpers.toArray(helpers.repeatValue('a', 0))).toEqual([]);
+			expect(helpers.toArray(helpers.repeatValue('a', 3))).toStrictEqual(['a', 'a', 'a']);
+			expect(helpers.toArray(helpers.repeatValue('a', 0))).toStrictEqual([]);
 		});
 
 		it('repeats forever by default', function () {
-			expect(helpers.toArray(helpers.take(helpers.repeatValue(1), 5))).toEqual([1, 1, 1, 1, 1]);
-			expect(helpers.toArray(helpers.take(helpers.repeatValue(1, Infinity), 2))).toEqual([1, 1]);
+			expect(helpers.toArray(helpers.take(helpers.repeatValue(1), 5))).toStrictEqual([1, 1, 1, 1, 1]);
+			expect(helpers.toArray(helpers.take(helpers.repeatValue(1, Infinity), 2))).toStrictEqual([1, 1]);
 		});
 
 		it('yields the same reference each time', function () {
@@ -109,11 +109,11 @@ describe('iterables', function () {
 
 	describe('cycle', function () {
 		it('repeats the items forever', function () {
-			expect(helpers.toArray(helpers.take(helpers.cycle([1, 2, 3]), 7))).toEqual([1, 2, 3, 1, 2, 3, 1]);
+			expect(helpers.toArray(helpers.take(helpers.cycle([1, 2, 3]), 7))).toStrictEqual([1, 2, 3, 1, 2, 3, 1]);
 		});
 
 		it('gives an empty iterator for an empty source', function () {
-			expect(helpers.toArray(helpers.cycle([]))).toEqual([]);
+			expect(helpers.toArray(helpers.cycle([]))).toStrictEqual([]);
 		});
 
 		it('iterates the source only once (caches the first pass), so one-shot generators can be cycled', function () {
@@ -123,7 +123,7 @@ describe('iterables', function () {
 					yield 'b';
 				})()
 			);
-			expect(helpers.toArray(helpers.take(helpers.cycle(iterable), 6))).toEqual(['a', 'b', 'a', 'b', 'a', 'b']);
+			expect(helpers.toArray(helpers.take(helpers.cycle(iterable), 6))).toStrictEqual(['a', 'b', 'a', 'b', 'a', 'b']);
 			expect(stats.opened).toBe(1);
 			expect(stats.pulled).toBe(3);
 			expect(stats.closed).toBe(0);
@@ -131,18 +131,18 @@ describe('iterables', function () {
 
 		it('closes the source when stopped during the first pass', function () {
 			const { iterable, stats } = spy([1, 2, 3]);
-			expect(helpers.toArray(helpers.take(helpers.cycle(iterable), 2))).toEqual([1, 2]);
+			expect(helpers.toArray(helpers.take(helpers.cycle(iterable), 2))).toStrictEqual([1, 2]);
 			expect(stats.closed).toBe(1);
 		});
 
 		it('rethrows the error given to throw() while replaying the cache (regression: was a TypeError)', function () {
 			const cycled = helpers.cycle([1, 2]);
-			expect([cycled.next().value, cycled.next().value, cycled.next().value]).toEqual([1, 2, 1]);
+			expect([cycled.next().value, cycled.next().value, cycled.next().value]).toStrictEqual([1, 2, 1]);
 			const error = new Error('stop');
 			expect(function () {
 				cycled.throw?.(error);
 			}).toThrow(error);
-			expect(cycled.next()).toEqual({ done: true, value: undefined });
+			expect(cycled.next()).toStrictEqual({ done: true, value: undefined });
 		});
 
 		it('throws a TypeError for a non-iterable', function () {
@@ -154,12 +154,12 @@ describe('iterables', function () {
 
 	describe('iterate', function () {
 		it('unfolds a sequence from a seed', function () {
-			expect(helpers.toArray(helpers.take(helpers.iterate(1, double), 5))).toEqual([1, 2, 4, 8, 16]);
+			expect(helpers.toArray(helpers.take(helpers.iterate(1, double), 5))).toStrictEqual([1, 2, 4, 8, 16]);
 		});
 
 		it('only computes the items that are requested', function () {
 			const next = jest.fn(double);
-			expect(helpers.toArray(helpers.take(helpers.iterate(1, next), 3))).toEqual([1, 2, 4]);
+			expect(helpers.toArray(helpers.take(helpers.iterate(1, next), 3))).toStrictEqual([1, 2, 4]);
 			expect(next).toHaveBeenCalledTimes(2);
 		});
 
@@ -178,25 +178,25 @@ describe('iterables', function () {
 						return value + index;
 					})
 				)
-			).toEqual(['a0', 'b1']);
+			).toStrictEqual(['a0', 'b1']);
 		});
 
 		it('works on any iterable (Set, Map, string, generator)', function () {
-			expect(helpers.toArray(helpers.map(new Set([1, 2]), double))).toEqual([2, 4]);
+			expect(helpers.toArray(helpers.map(new Set([1, 2]), double))).toStrictEqual([2, 4]);
 			expect(
 				helpers.toArray(
 					helpers.map(new Map([['k', 1]]), function ([key, value]) {
 						return key + value;
 					})
 				)
-			).toEqual(['k1']);
+			).toStrictEqual(['k1']);
 			expect(
 				helpers.toArray(
 					helpers.map('a😀', function (char) {
 						return char.length;
 					})
 				)
-			).toEqual([1, 2]);
+			).toStrictEqual([1, 2]);
 		});
 
 		it('does not pull anything before being iterated', function () {
@@ -205,7 +205,7 @@ describe('iterables', function () {
 			const mapped = helpers.map(iterable, fn);
 			expect(stats.opened).toBe(0);
 			expect(fn).not.toHaveBeenCalled();
-			expect(mapped.next()).toEqual({ done: false, value: 2 });
+			expect(mapped.next()).toStrictEqual({ done: false, value: 2 });
 			expect(stats.pulled).toBe(1);
 		});
 
@@ -241,14 +241,14 @@ describe('iterables', function () {
 
 	describe('filter', function () {
 		it('keeps matching items, passing the index', function () {
-			expect(helpers.toArray(helpers.filter([1, 2, 3, 4], isEven))).toEqual([2, 4]);
+			expect(helpers.toArray(helpers.filter([1, 2, 3, 4], isEven))).toStrictEqual([2, 4]);
 			expect(
 				helpers.toArray(
 					helpers.filter(['a', 'b', 'c'], function (_value, index) {
 						return index !== 1;
 					})
 				)
-			).toEqual(['a', 'c']);
+			).toStrictEqual(['a', 'c']);
 		});
 
 		it('narrows the type with a type guard', function () {
@@ -258,7 +258,7 @@ describe('iterables', function () {
 				})
 			);
 			const typed: number[] = numbers;
-			expect(typed).toEqual([1, 2]);
+			expect(typed).toStrictEqual([1, 2]);
 		});
 
 		it('validates its arguments', function () {
@@ -279,7 +279,7 @@ describe('iterables', function () {
 						return index === 1 ? [] : [n, [n]];
 					})
 				)
-			).toEqual([1, [1], 3, [3]]);
+			).toStrictEqual([1, [1], 3, [3]]);
 		});
 
 		it('accepts any iterable, including strings and generators', function () {
@@ -289,14 +289,14 @@ describe('iterables', function () {
 						return s;
 					})
 				)
-			).toEqual(['a', 'b', 'c']);
+			).toStrictEqual(['a', 'b', 'c']);
 			expect(
 				helpers.toArray(
 					helpers.flatMap([2], function (n) {
 						return helpers.repeatValue(n, n);
 					})
 				)
-			).toEqual([2, 2]);
+			).toStrictEqual([2, 2]);
 		});
 
 		it('throws a TypeError when the callback returns a non-iterable', function () {
@@ -314,7 +314,7 @@ describe('iterables', function () {
 			const flat = helpers.flatMap(outer.iterable, function () {
 				return inner.iterable;
 			});
-			expect(helpers.toArray(helpers.take(flat, 3))).toEqual([0, 1, 2]);
+			expect(helpers.toArray(helpers.take(flat, 3))).toStrictEqual([0, 1, 2]);
 			expect(outer.stats.closed).toBe(1);
 			expect(inner.stats.closed).toBe(1);
 		});
@@ -346,22 +346,22 @@ describe('iterables', function () {
 
 	describe('take', function () {
 		it('takes the first n items', function () {
-			expect(helpers.toArray(helpers.take([1, 2, 3], 2))).toEqual([1, 2]);
-			expect(helpers.toArray(helpers.take([1, 2], 5))).toEqual([1, 2]);
-			expect(helpers.toArray(helpers.take([1, 2], Infinity))).toEqual([1, 2]);
-			expect(helpers.toArray(helpers.take([], 2))).toEqual([]);
+			expect(helpers.toArray(helpers.take([1, 2, 3], 2))).toStrictEqual([1, 2]);
+			expect(helpers.toArray(helpers.take([1, 2], 5))).toStrictEqual([1, 2]);
+			expect(helpers.toArray(helpers.take([1, 2], Infinity))).toStrictEqual([1, 2]);
+			expect(helpers.toArray(helpers.take([], 2))).toStrictEqual([]);
 		});
 
 		it('pulls exactly n items, then closes the source once', function () {
 			const { iterable, stats } = spy(helpers.count());
-			expect(helpers.toArray(helpers.take(iterable, 3))).toEqual([0, 1, 2]);
+			expect(helpers.toArray(helpers.take(iterable, 3))).toStrictEqual([0, 1, 2]);
 			expect(stats.pulled).toBe(3);
 			expect(stats.closed).toBe(1);
 		});
 
 		it('does not even open the source for n = 0', function () {
 			const { iterable, stats } = spy([1]);
-			expect(helpers.toArray(helpers.take(iterable, 0))).toEqual([]);
+			expect(helpers.toArray(helpers.take(iterable, 0))).toStrictEqual([]);
 			expect(stats.opened).toBe(0);
 		});
 
@@ -385,13 +385,13 @@ describe('iterables', function () {
 
 	describe('drop', function () {
 		it('skips the first n items', function () {
-			expect(helpers.toArray(helpers.drop([1, 2, 3], 2))).toEqual([3]);
-			expect(helpers.toArray(helpers.drop([1, 2, 3], 0))).toEqual([1, 2, 3]);
-			expect(helpers.toArray(helpers.drop([1, 2], 5))).toEqual([]);
+			expect(helpers.toArray(helpers.drop([1, 2, 3], 2))).toStrictEqual([3]);
+			expect(helpers.toArray(helpers.drop([1, 2, 3], 0))).toStrictEqual([1, 2, 3]);
+			expect(helpers.toArray(helpers.drop([1, 2], 5))).toStrictEqual([]);
 		});
 
 		it('works on infinite iterators', function () {
-			expect(helpers.toArray(helpers.take(helpers.drop(helpers.count(), 5), 2))).toEqual([5, 6]);
+			expect(helpers.toArray(helpers.take(helpers.drop(helpers.count(), 5), 2))).toStrictEqual([5, 6]);
 		});
 
 		it('throws the same RangeError as arrays.drop', function () {
@@ -415,7 +415,7 @@ describe('iterables', function () {
 						return n < 4;
 					})
 				)
-			).toEqual([1, 2, 3]);
+			).toStrictEqual([1, 2, 3]);
 			expect(stats.pulled).toBe(4);
 			expect(stats.closed).toBe(1);
 		});
@@ -427,14 +427,14 @@ describe('iterables', function () {
 						return index < 2;
 					})
 				)
-			).toEqual(['a', 'b']);
+			).toStrictEqual(['a', 'b']);
 			expect(
 				helpers.toArray(
 					helpers.takeWhile([1, 2], function () {
 						return true;
 					})
 				)
-			).toEqual([1, 2]);
+			).toStrictEqual([1, 2]);
 		});
 
 		it('validates its arguments', function () {
@@ -452,7 +452,7 @@ describe('iterables', function () {
 			const predicate = jest.fn(function (n: number) {
 				return n < 2;
 			});
-			expect(helpers.toArray(helpers.dropWhile([1, 2, 3, 1], predicate))).toEqual([2, 3, 1]);
+			expect(helpers.toArray(helpers.dropWhile([1, 2, 3, 1], predicate))).toStrictEqual([2, 3, 1]);
 			// not called again once it failed
 			expect(predicate).toHaveBeenCalledTimes(2);
 			expect(predicate).toHaveBeenNthCalledWith(2, 2, 1);
@@ -465,7 +465,7 @@ describe('iterables', function () {
 						return true;
 					})
 				)
-			).toEqual([]);
+			).toStrictEqual([]);
 		});
 
 		it('validates its arguments', function () {
@@ -480,25 +480,25 @@ describe('iterables', function () {
 
 	describe('chunk', function () {
 		it('splits into chunks, the last one possibly shorter', function () {
-			expect(helpers.toArray(helpers.chunk([1, 2, 3, 4, 5], 2))).toEqual([[1, 2], [3, 4], [5]]);
-			expect(helpers.toArray(helpers.chunk([1, 2, 3, 4], 2))).toEqual([
+			expect(helpers.toArray(helpers.chunk([1, 2, 3, 4, 5], 2))).toStrictEqual([[1, 2], [3, 4], [5]]);
+			expect(helpers.toArray(helpers.chunk([1, 2, 3, 4], 2))).toStrictEqual([
 				[1, 2],
 				[3, 4]
 			]);
-			expect(helpers.toArray(helpers.chunk([], 3))).toEqual([]);
+			expect(helpers.toArray(helpers.chunk([], 3))).toStrictEqual([]);
 		});
 
 		it('yields each chunk as soon as it is full', function () {
 			const { iterable, stats } = spy(helpers.count());
 			const chunks = helpers.chunk(iterable, 3);
-			expect(chunks.next().value).toEqual([0, 1, 2]);
+			expect(chunks.next().value).toStrictEqual([0, 1, 2]);
 			expect(stats.pulled).toBe(3);
 		});
 
 		it('yields fresh arrays that later chunks do not touch', function () {
 			const chunks = helpers.toArray(helpers.chunk('abcd', 2));
 			chunks[0].push('z');
-			expect(chunks).toEqual([
+			expect(chunks).toStrictEqual([
 				['a', 'b', 'z'],
 				['c', 'd']
 			]);
@@ -518,34 +518,34 @@ describe('iterables', function () {
 
 	describe('windowed', function () {
 		it('yields sliding windows', function () {
-			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4], 2))).toEqual([
+			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4], 2))).toStrictEqual([
 				[1, 2],
 				[2, 3],
 				[3, 4]
 			]);
-			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5], 3, 2))).toEqual([
+			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5], 3, 2))).toStrictEqual([
 				[1, 2, 3],
 				[3, 4, 5]
 			]);
 		});
 
 		it('skips items between windows when step > size, and drops incomplete windows', function () {
-			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5, 6, 7, 8], 2, 3))).toEqual([
+			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5, 6, 7, 8], 2, 3))).toStrictEqual([
 				[1, 2],
 				[4, 5],
 				[7, 8]
 			]);
-			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5, 6, 7], 2, 3))).toEqual([
+			expect(helpers.toArray(helpers.windowed([1, 2, 3, 4, 5, 6, 7], 2, 3))).toStrictEqual([
 				[1, 2],
 				[4, 5]
 			]);
-			expect(helpers.toArray(helpers.windowed([1, 2], 3))).toEqual([]);
+			expect(helpers.toArray(helpers.windowed([1, 2], 3))).toStrictEqual([]);
 		});
 
 		it('yields independent arrays', function () {
 			const windows = helpers.toArray(helpers.windowed([1, 2, 3], 2));
 			windows[0][1] = 99;
-			expect(windows[1]).toEqual([2, 3]);
+			expect(windows[1]).toStrictEqual([2, 3]);
 		});
 
 		it('throws the same RangeErrors as arrays.windowed', function () {
@@ -562,22 +562,37 @@ describe('iterables', function () {
 	});
 
 	describe('zip', function () {
+		it('closes the sources already opened when opening a later one throws', function () {
+			const first = spy([1, 2]);
+			const second = spy([3, 4]);
+			const broken: Iterable<number> = {
+				[Symbol.iterator](): Iterator<number> {
+					throw new Error('cannot open');
+				}
+			};
+			expect(function () {
+				helpers.toArray(helpers.zip(first.iterable, second.iterable, broken));
+			}).toThrow('cannot open');
+			expect(first.stats).toStrictEqual({ opened: 1, pulled: 0, closed: 1 });
+			expect(second.stats).toStrictEqual({ opened: 1, pulled: 0, closed: 1 });
+		});
+
 		it('zips iterables into tuples, stopping at the shortest', function () {
 			const zipped = helpers.toArray(helpers.zip([1, 2, 3], 'ab', new Set([true, false, true])));
 			const typed: Array<[number, string, boolean]> = zipped;
-			expect(typed).toEqual([
+			expect(typed).toStrictEqual([
 				[1, 'a', true],
 				[2, 'b', false]
 			]);
 		});
 
 		it('is empty without arguments or with an empty iterable', function () {
-			expect(helpers.toArray(helpers.zip())).toEqual([]);
-			expect(helpers.toArray(helpers.zip([1], []))).toEqual([]);
+			expect(helpers.toArray(helpers.zip())).toStrictEqual([]);
+			expect(helpers.toArray(helpers.zip([1], []))).toStrictEqual([]);
 		});
 
 		it('works with infinite iterables as long as one is finite', function () {
-			expect(helpers.toArray(helpers.zip(helpers.count(), ['a', 'b']))).toEqual([
+			expect(helpers.toArray(helpers.zip(helpers.count(), ['a', 'b']))).toStrictEqual([
 				[0, 'a'],
 				[1, 'b']
 			]);
@@ -587,7 +602,7 @@ describe('iterables', function () {
 			const a = spy(helpers.count());
 			const b = spy([1]);
 			const c = spy(helpers.count());
-			expect(helpers.toArray(helpers.zip(a.iterable, b.iterable, c.iterable))).toEqual([[0, 1, 0]]);
+			expect(helpers.toArray(helpers.zip(a.iterable, b.iterable, c.iterable))).toStrictEqual([[0, 1, 0]]);
 			expect(a.stats.closed).toBe(1);
 			expect(b.stats.closed).toBe(0);
 			expect(c.stats.closed).toBe(1);
@@ -600,7 +615,7 @@ describe('iterables', function () {
 			const b = spy([4, 5, 6]);
 			const zipped = helpers.zip(a.iterable, b.iterable);
 			for (const tuple of zipped) {
-				expect(tuple).toEqual([1, 4]);
+				expect(tuple).toStrictEqual([1, 4]);
 				break;
 			}
 			zipped.return?.();
@@ -698,7 +713,7 @@ describe('iterables', function () {
 					};
 				}
 			};
-			expect(helpers.toArray(helpers.zip(plain, [1, 2]))).toEqual([
+			expect(helpers.toArray(helpers.zip(plain, [1, 2]))).toStrictEqual([
 				[7, 1],
 				[7, 2]
 			]);
@@ -715,7 +730,7 @@ describe('iterables', function () {
 		it('pairs items with their index', function () {
 			const pairs = helpers.toArray(helpers.enumerate(['a', 'b']));
 			const typed: Array<[number, string]> = pairs;
-			expect(typed).toEqual([
+			expect(typed).toStrictEqual([
 				[0, 'a'],
 				[1, 'b']
 			]);
@@ -730,15 +745,15 @@ describe('iterables', function () {
 
 	describe('unique', function () {
 		it('removes duplicates with SameValueZero, keeping first occurrences', function () {
-			expect(helpers.toArray(helpers.unique([1, 2, 1, 3, 2]))).toEqual([1, 2, 3]);
-			expect(helpers.toArray(helpers.unique([NaN, NaN, 0, -0]))).toEqual([NaN, 0]);
+			expect(helpers.toArray(helpers.unique([1, 2, 1, 3, 2]))).toStrictEqual([1, 2, 3]);
+			expect(helpers.toArray(helpers.unique([NaN, NaN, 0, -0]))).toStrictEqual([NaN, 0]);
 		});
 
 		it('uses keyFn (with the index) when given', function () {
 			const keyFn = jest.fn(function (s: string) {
 				return s.toLowerCase();
 			});
-			expect(helpers.toArray(helpers.unique(['a', 'B', 'A', 'b'], keyFn))).toEqual(['a', 'B']);
+			expect(helpers.toArray(helpers.unique(['a', 'B', 'A', 'b'], keyFn))).toStrictEqual(['a', 'B']);
 			expect(keyFn).toHaveBeenNthCalledWith(3, 'A', 2);
 		});
 
@@ -752,7 +767,7 @@ describe('iterables', function () {
 						3
 					)
 				)
-			).toEqual([0, 1, 2]);
+			).toStrictEqual([0, 1, 2]);
 		});
 
 		it('validates its arguments', function () {
@@ -777,7 +792,7 @@ describe('iterables', function () {
 						0
 					)
 				)
-			).toEqual([1, 3, 6]);
+			).toStrictEqual([1, 3, 6]);
 			expect(
 				helpers.toArray(
 					helpers.scan(
@@ -788,7 +803,7 @@ describe('iterables', function () {
 						0
 					)
 				)
-			).toEqual([]);
+			).toStrictEqual([]);
 		});
 
 		it('passes the index and allows a different accumulator type', function () {
@@ -802,7 +817,7 @@ describe('iterables', function () {
 						[] as string[]
 					)
 				)
-			).toEqual([['a0'], ['a0', 'b1']]);
+			).toStrictEqual([['a0'], ['a0', 'b1']]);
 		});
 
 		it('validates its arguments', function () {
@@ -817,8 +832,8 @@ describe('iterables', function () {
 
 	describe('concat', function () {
 		it('chains iterables', function () {
-			expect(helpers.toArray(helpers.concat<number | string>([1, 2], new Set([3]), 'ab'))).toEqual([1, 2, 3, 'a', 'b']);
-			expect(helpers.toArray(helpers.concat())).toEqual([]);
+			expect(helpers.toArray(helpers.concat<number | string>([1, 2], new Set([3]), 'ab'))).toStrictEqual([1, 2, 3, 'a', 'b']);
+			expect(helpers.toArray(helpers.concat())).toStrictEqual([]);
 		});
 
 		it('only opens a source once the previous one is exhausted', function () {
@@ -827,7 +842,7 @@ describe('iterables', function () {
 			const chained = helpers.concat(a.iterable, b.iterable);
 			chained.next();
 			expect(b.stats.opened).toBe(0);
-			expect(helpers.toArray(chained)).toEqual([2]);
+			expect(helpers.toArray(chained)).toStrictEqual([2]);
 			expect(b.stats.opened).toBe(1);
 		});
 
@@ -864,11 +879,11 @@ describe('iterables', function () {
 			const tapped = helpers.tap([1, 2, 3], function (value, index) {
 				seen.push([value, index]);
 			});
-			expect(seen).toEqual([]);
+			expect(seen).toStrictEqual([]);
 			expect(tapped.next().value).toBe(1);
-			expect(seen).toEqual([[1, 0]]);
-			expect(helpers.toArray(tapped)).toEqual([2, 3]);
-			expect(seen).toEqual([
+			expect(seen).toStrictEqual([[1, 0]]);
+			expect(helpers.toArray(tapped)).toStrictEqual([2, 3]);
+			expect(seen).toStrictEqual([
 				[1, 0],
 				[2, 1],
 				[3, 2]
@@ -981,11 +996,11 @@ describe('iterables', function () {
 			expect(stats.opened).toBe(0);
 			const first = result.next();
 			expect(first.done).toBe(false);
-			expect(result.return?.()).toEqual({ done: true, value: undefined });
+			expect(result.return?.()).toStrictEqual({ done: true, value: undefined });
 			expect(stats.closed).toBe(1);
 			// closing again, or iterating a closed iterator, does not touch the source
 			result.return?.();
-			expect(result.next()).toEqual({ done: true, value: undefined });
+			expect(result.next()).toStrictEqual({ done: true, value: undefined });
 			expect(stats.closed).toBe(1);
 		});
 
@@ -998,7 +1013,7 @@ describe('iterables', function () {
 				result.throw?.(error);
 			}).toThrow(error);
 			expect(stats.closed).toBe(1);
-			expect(result.next()).toEqual({ done: true, value: undefined });
+			expect(result.next()).toStrictEqual({ done: true, value: undefined });
 		});
 
 		it.each(transforms)('%s (return before the first next does not open the source)', function (_name, transform) {
@@ -1011,8 +1026,8 @@ describe('iterables', function () {
 
 	describe('toArray', function () {
 		it('collects the items', function () {
-			expect(helpers.toArray(new Set([1, 2]))).toEqual([1, 2]);
-			expect(helpers.toArray([])).toEqual([]);
+			expect(helpers.toArray(new Set([1, 2]))).toStrictEqual([1, 2]);
+			expect(helpers.toArray([])).toStrictEqual([]);
 		});
 
 		it('returns a fresh array', function () {
@@ -1046,7 +1061,7 @@ describe('iterables', function () {
 					},
 					[] as string[]
 				)
-			).toEqual(['a0', 'b1']);
+			).toStrictEqual(['a0', 'b1']);
 			expect(
 				helpers.reduce(
 					[],
@@ -1325,18 +1340,18 @@ describe('iterables', function () {
 						return n * 10 + index;
 					})
 				);
-				expect(result).toEqual([10, 21, 32]);
+				expect(result).toStrictEqual([10, 21, 32]);
 				expect(maxRunning).toBe(1);
 			});
 
 			it('accepts async iterables and sync iterables of promises', async function () {
 				const { iterable } = asyncSource([1, 2]);
-				expect(await helpers.toArrayAsync(helpers.mapAsync(iterable, double))).toEqual([2, 4]);
+				expect(await helpers.toArrayAsync(helpers.mapAsync(iterable, double))).toStrictEqual([2, 4]);
 				const mapped = helpers.mapAsync([Promise.resolve(1), 2], function (n) {
 					return n + 1;
 				});
 				const typed: AsyncIterableIterator<number> = mapped;
-				expect(await helpers.toArrayAsync(typed)).toEqual([2, 3]);
+				expect(await helpers.toArrayAsync(typed)).toStrictEqual([2, 3]);
 			});
 
 			it('closes the source on early exit', async function () {
@@ -1367,7 +1382,7 @@ describe('iterables', function () {
 							return isEven(n) && index > 1;
 						})
 					)
-				).toEqual([4]);
+				).toStrictEqual([4]);
 			});
 
 			it('narrows the type with a sync type guard', async function () {
@@ -1377,7 +1392,7 @@ describe('iterables', function () {
 					})
 				);
 				const typed: number[] = numbers;
-				expect(typed).toEqual([1]);
+				expect(typed).toStrictEqual([1]);
 			});
 
 			it('validates its arguments synchronously', function () {
@@ -1393,19 +1408,19 @@ describe('iterables', function () {
 		describe('takeAsync', function () {
 			it('takes the first n items, then closes the source', async function () {
 				const { iterable, stats } = asyncSource([1, 2, 3, 4]);
-				expect(await helpers.toArrayAsync(helpers.takeAsync(iterable, 2))).toEqual([1, 2]);
+				expect(await helpers.toArrayAsync(helpers.takeAsync(iterable, 2))).toStrictEqual([1, 2]);
 				expect(stats.pulled).toBe(2);
 				expect(stats.finalized).toBe(1);
 			});
 
 			it('handles n = 0, Infinity and short sources, and bounds infinite sync sources', async function () {
 				const { iterable, stats } = asyncSource([1]);
-				expect(await helpers.toArrayAsync(helpers.takeAsync(iterable, 0))).toEqual([]);
+				expect(await helpers.toArrayAsync(helpers.takeAsync(iterable, 0))).toStrictEqual([]);
 				expect(stats.pulled).toBe(0);
-				expect(await helpers.toArrayAsync(helpers.takeAsync([1, 2], Infinity))).toEqual([1, 2]);
-				expect(await helpers.toArrayAsync(helpers.takeAsync([1, 2], 5))).toEqual([1, 2]);
+				expect(await helpers.toArrayAsync(helpers.takeAsync([1, 2], Infinity))).toStrictEqual([1, 2]);
+				expect(await helpers.toArrayAsync(helpers.takeAsync([1, 2], 5))).toStrictEqual([1, 2]);
 				const counter = spy(helpers.count());
-				expect(await helpers.toArrayAsync(helpers.takeAsync(counter.iterable, 3))).toEqual([0, 1, 2]);
+				expect(await helpers.toArrayAsync(helpers.takeAsync(counter.iterable, 3))).toStrictEqual([0, 1, 2]);
 				expect(counter.stats.pulled).toBe(3);
 				expect(counter.stats.closed).toBe(1);
 			});
@@ -1423,9 +1438,9 @@ describe('iterables', function () {
 		describe('chunkAsync', function () {
 			it('splits into chunks', async function () {
 				const { iterable } = asyncSource([1, 2, 3, 4, 5]);
-				expect(await helpers.toArrayAsync(helpers.chunkAsync(iterable, 2))).toEqual([[1, 2], [3, 4], [5]]);
-				expect(await helpers.toArrayAsync(helpers.chunkAsync([1, 2], 2))).toEqual([[1, 2]]);
-				expect(await helpers.toArrayAsync(helpers.chunkAsync([], 2))).toEqual([]);
+				expect(await helpers.toArrayAsync(helpers.chunkAsync(iterable, 2))).toStrictEqual([[1, 2], [3, 4], [5]]);
+				expect(await helpers.toArrayAsync(helpers.chunkAsync([1, 2], 2))).toStrictEqual([[1, 2]]);
+				expect(await helpers.toArrayAsync(helpers.chunkAsync([], 2))).toStrictEqual([]);
 			});
 
 			it('validates its arguments synchronously', function () {
@@ -1441,10 +1456,10 @@ describe('iterables', function () {
 		describe('toArrayAsync', function () {
 			it('collects async and sync iterables, awaiting promises', async function () {
 				const { iterable } = asyncSource(['a', 'b']);
-				expect(await helpers.toArrayAsync(iterable)).toEqual(['a', 'b']);
+				expect(await helpers.toArrayAsync(iterable)).toStrictEqual(['a', 'b']);
 				const values = await helpers.toArrayAsync([Promise.resolve(1), 2]);
 				const typed: number[] = values;
-				expect(typed).toEqual([1, 2]);
+				expect(typed).toStrictEqual([1, 2]);
 			});
 
 			it('rejects when the source fails', async function () {
@@ -1460,6 +1475,291 @@ describe('iterables', function () {
 					helpers.toArrayAsync({} as any);
 				}).toThrow(new TypeError('toArrayAsync: `iterable` must be iterable, got object'));
 			});
+		});
+	});
+
+	describe('argument errors', function () {
+		function identity(value: unknown): unknown {
+			return value;
+		}
+		const notIterable = 42 as any;
+		// [function name, call with a non-iterable source]
+		const iterableCases: Array<[string, () => unknown]> = [
+			[
+				'map',
+				function () {
+					return helpers.map(notIterable, identity);
+				}
+			],
+			[
+				'filter',
+				function () {
+					return helpers.filter(notIterable, Boolean);
+				}
+			],
+			[
+				'flatMap',
+				function () {
+					return helpers.flatMap(notIterable, function () {
+						return [];
+					});
+				}
+			],
+			[
+				'take',
+				function () {
+					return helpers.take(notIterable, 1);
+				}
+			],
+			[
+				'drop',
+				function () {
+					return helpers.drop(notIterable, 1);
+				}
+			],
+			[
+				'takeWhile',
+				function () {
+					return helpers.takeWhile(notIterable, Boolean);
+				}
+			],
+			[
+				'dropWhile',
+				function () {
+					return helpers.dropWhile(notIterable, Boolean);
+				}
+			],
+			[
+				'chunk',
+				function () {
+					return helpers.chunk(notIterable, 1);
+				}
+			],
+			[
+				'windowed',
+				function () {
+					return helpers.windowed(notIterable, 1);
+				}
+			],
+			[
+				'enumerate',
+				function () {
+					return helpers.enumerate(notIterable);
+				}
+			],
+			[
+				'unique',
+				function () {
+					return helpers.unique(notIterable);
+				}
+			],
+			[
+				'scan',
+				function () {
+					return helpers.scan(notIterable, identity, 0);
+				}
+			],
+			[
+				'tap',
+				function () {
+					return helpers.tap(notIterable, identity);
+				}
+			],
+			[
+				'toArray',
+				function () {
+					return helpers.toArray(notIterable);
+				}
+			],
+			[
+				'reduce',
+				function () {
+					return helpers.reduce(notIterable, identity, 0);
+				}
+			],
+			[
+				'first',
+				function () {
+					return helpers.first(notIterable);
+				}
+			],
+			[
+				'last',
+				function () {
+					return helpers.last(notIterable);
+				}
+			],
+			[
+				'find',
+				function () {
+					return helpers.find(notIterable, Boolean);
+				}
+			],
+			[
+				'some',
+				function () {
+					return helpers.some(notIterable, Boolean);
+				}
+			],
+			[
+				'every',
+				function () {
+					return helpers.every(notIterable, Boolean);
+				}
+			],
+			[
+				'countItems',
+				function () {
+					return helpers.countItems(notIterable);
+				}
+			],
+			[
+				'mapAsync',
+				function () {
+					return helpers.mapAsync(notIterable, identity);
+				}
+			],
+			[
+				'filterAsync',
+				function () {
+					return helpers.filterAsync(notIterable, Boolean);
+				}
+			],
+			[
+				'takeAsync',
+				function () {
+					return helpers.takeAsync(notIterable, 1);
+				}
+			],
+			[
+				'chunkAsync',
+				function () {
+					return helpers.chunkAsync(notIterable, 1);
+				}
+			]
+		];
+		it.each(iterableCases)('%s names itself and `iterable` when the source is not iterable', function (name, call) {
+			expect(call).toThrow(new TypeError(`${name}: \`iterable\` must be iterable, got number`));
+		});
+
+		const notAFunction = 'nope' as any;
+		// [function name, parameter name, call with a non-function callback]
+		const functionCases: Array<[string, string, () => unknown]> = [
+			[
+				'map',
+				'fn',
+				function () {
+					return helpers.map([], notAFunction);
+				}
+			],
+			[
+				'filter',
+				'predicate',
+				function () {
+					return helpers.filter([], notAFunction);
+				}
+			],
+			[
+				'flatMap',
+				'fn',
+				function () {
+					return helpers.flatMap([], notAFunction);
+				}
+			],
+			[
+				'takeWhile',
+				'predicate',
+				function () {
+					return helpers.takeWhile([], notAFunction);
+				}
+			],
+			[
+				'dropWhile',
+				'predicate',
+				function () {
+					return helpers.dropWhile([], notAFunction);
+				}
+			],
+			[
+				'unique',
+				'keyFn',
+				function () {
+					return helpers.unique([], notAFunction);
+				}
+			],
+			[
+				'scan',
+				'reducer',
+				function () {
+					return helpers.scan([], notAFunction, 0);
+				}
+			],
+			[
+				'tap',
+				'fn',
+				function () {
+					return helpers.tap([], notAFunction);
+				}
+			],
+			[
+				'reduce',
+				'reducer',
+				function () {
+					return helpers.reduce([], notAFunction, 0);
+				}
+			],
+			[
+				'find',
+				'predicate',
+				function () {
+					return helpers.find([], notAFunction);
+				}
+			],
+			[
+				'some',
+				'predicate',
+				function () {
+					return helpers.some([], notAFunction);
+				}
+			],
+			[
+				'every',
+				'predicate',
+				function () {
+					return helpers.every([], notAFunction);
+				}
+			],
+			[
+				'countItems',
+				'predicate',
+				function () {
+					return helpers.countItems([], notAFunction);
+				}
+			],
+			[
+				'iterate',
+				'next',
+				function () {
+					return helpers.iterate(0, notAFunction);
+				}
+			],
+			[
+				'mapAsync',
+				'fn',
+				function () {
+					return helpers.mapAsync([], notAFunction);
+				}
+			],
+			[
+				'filterAsync',
+				'predicate',
+				function () {
+					return helpers.filterAsync([], notAFunction);
+				}
+			]
+		];
+		it.each(functionCases)('%s names itself and `%s` when the callback is not a function', function (name, parameter, call) {
+			expect(call).toThrow(new TypeError(`${name}: \`${parameter}\` must be a function, got string`));
 		});
 	});
 });

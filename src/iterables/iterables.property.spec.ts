@@ -51,7 +51,7 @@ describe('iterables (properties)', function () {
 		it('map ≡ Array#map', function () {
 			fc.assert(
 				fc.property(smallInts, function (xs) {
-					expect(helpers.toArray(helpers.map(once(xs), affine))).toEqual(xs.map(affine));
+					expect(helpers.toArray(helpers.map(once(xs), affine))).toStrictEqual(xs.map(affine));
 				})
 			);
 		});
@@ -62,7 +62,7 @@ describe('iterables (properties)', function () {
 					function predicate(value: number, index: number): boolean {
 						return (value + index) % 3 === 0;
 					}
-					expect(helpers.toArray(helpers.filter(once(xs), predicate))).toEqual(xs.filter(predicate));
+					expect(helpers.toArray(helpers.filter(once(xs), predicate))).toStrictEqual(xs.filter(predicate));
 				})
 			);
 		});
@@ -75,7 +75,7 @@ describe('iterables (properties)', function () {
 							return k + index;
 						});
 					}
-					expect(helpers.toArray(helpers.flatMap(once(xs), expand))).toEqual(xs.flatMap(expand));
+					expect(helpers.toArray(helpers.flatMap(once(xs), expand))).toStrictEqual(xs.flatMap(expand));
 				})
 			);
 		});
@@ -83,9 +83,9 @@ describe('iterables (properties)', function () {
 		it('take / drop ≡ slice ≡ arrays.take / arrays.drop', function () {
 			fc.assert(
 				fc.property(smallInts, count, function (xs, n) {
-					expect(helpers.toArray(helpers.take(once(xs), n))).toEqual(xs.slice(0, n));
-					expect(helpers.toArray(helpers.drop(once(xs), n))).toEqual(arrays.drop(xs, n));
-					expect(helpers.toArray(helpers.take(once(xs), n))).toEqual(arrays.take(xs, n));
+					expect(helpers.toArray(helpers.take(once(xs), n))).toStrictEqual(xs.slice(0, n));
+					expect(helpers.toArray(helpers.drop(once(xs), n))).toStrictEqual(arrays.drop(xs, n));
+					expect(helpers.toArray(helpers.take(once(xs), n))).toStrictEqual(arrays.take(xs, n));
 				})
 			);
 		});
@@ -93,7 +93,7 @@ describe('iterables (properties)', function () {
 		it('take(n) ++ drop(n) rebuilds the input', function () {
 			fc.assert(
 				fc.property(smallInts, count, function (xs, n) {
-					expect(helpers.toArray(helpers.concat(helpers.take(xs, n), helpers.drop(xs, n)))).toEqual(xs);
+					expect(helpers.toArray(helpers.concat(helpers.take(xs, n), helpers.drop(xs, n)))).toStrictEqual(xs);
 				})
 			);
 		});
@@ -105,8 +105,8 @@ describe('iterables (properties)', function () {
 						return !isPositive(x);
 					});
 					const cut = failing === -1 ? xs.length : failing;
-					expect(helpers.toArray(helpers.takeWhile(once(xs), isPositive))).toEqual(xs.slice(0, cut));
-					expect(helpers.toArray(helpers.dropWhile(once(xs), isPositive))).toEqual(xs.slice(cut));
+					expect(helpers.toArray(helpers.takeWhile(once(xs), isPositive))).toStrictEqual(xs.slice(0, cut));
+					expect(helpers.toArray(helpers.dropWhile(once(xs), isPositive))).toStrictEqual(xs.slice(cut));
 				})
 			);
 		});
@@ -114,7 +114,7 @@ describe('iterables (properties)', function () {
 		it('chunk ≡ arrays.chunk', function () {
 			fc.assert(
 				fc.property(smallInts, positive, function (xs, size) {
-					expect(helpers.toArray(helpers.chunk(once(xs), size))).toEqual(arrays.chunk(xs, size));
+					expect(helpers.toArray(helpers.chunk(once(xs), size))).toStrictEqual(arrays.chunk(xs, size));
 				})
 			);
 		});
@@ -122,7 +122,7 @@ describe('iterables (properties)', function () {
 		it('windowed ≡ arrays.windowed', function () {
 			fc.assert(
 				fc.property(smallInts, positive, positive, function (xs, size, step) {
-					expect(helpers.toArray(helpers.windowed(once(xs), size, step))).toEqual(arrays.windowed(xs, size, step));
+					expect(helpers.toArray(helpers.windowed(once(xs), size, step))).toStrictEqual(arrays.windowed(xs, size, step));
 				})
 			);
 		});
@@ -130,8 +130,8 @@ describe('iterables (properties)', function () {
 		it('zip ≡ arrays.zip', function () {
 			fc.assert(
 				fc.property(smallInts, fc.array(fc.string(), { maxLength: 30 }), fc.array(fc.boolean(), { maxLength: 30 }), function (a, b, c) {
-					expect(helpers.toArray(helpers.zip(once(a), once(b), once(c)))).toEqual(arrays.zip(a, b, c));
-					expect(helpers.toArray(helpers.zip(once(a)))).toEqual(arrays.zip(a));
+					expect(helpers.toArray(helpers.zip(once(a), once(b), once(c)))).toStrictEqual(arrays.zip(a, b, c));
+					expect(helpers.toArray(helpers.zip(once(a)))).toStrictEqual(arrays.zip(a));
 				})
 			);
 		});
@@ -139,7 +139,7 @@ describe('iterables (properties)', function () {
 		it('enumerate ≡ Array#map to [index, value]', function () {
 			fc.assert(
 				fc.property(smallInts, function (xs) {
-					expect(helpers.toArray(helpers.enumerate(once(xs)))).toEqual(
+					expect(helpers.toArray(helpers.enumerate(once(xs)))).toStrictEqual(
 						xs.map(function (value, index) {
 							return [index, value];
 						})
@@ -162,7 +162,7 @@ describe('iterables (properties)', function () {
 					function key(value: number, index: number): number {
 						return Math.abs(value) + (index % 2);
 					}
-					expect(helpers.toArray(helpers.unique(once(xs), key))).toEqual(arrays.uniqueBy(xs, key));
+					expect(helpers.toArray(helpers.unique(once(xs), key))).toStrictEqual(arrays.uniqueBy(xs, key));
 				})
 			);
 		});
@@ -174,7 +174,7 @@ describe('iterables (properties)', function () {
 						return acc * 2 - value + index;
 					}
 					const scanned = helpers.toArray(helpers.scan(once(xs), reducer, initial));
-					expect(scanned).toEqual(
+					expect(scanned).toStrictEqual(
 						xs.map(function (_value, i) {
 							return xs.slice(0, i + 1).reduce(reducer, initial);
 						})
@@ -186,7 +186,7 @@ describe('iterables (properties)', function () {
 		it('concat ≡ Array#concat', function () {
 			fc.assert(
 				fc.property(fc.array(smallInts, { maxLength: 5 }), function (lists) {
-					expect(helpers.toArray(helpers.concat(...lists.map(once)))).toEqual(([] as number[]).concat(...lists));
+					expect(helpers.toArray(helpers.concat(...lists.map(once)))).toStrictEqual(([] as number[]).concat(...lists));
 				})
 			);
 		});
@@ -201,8 +201,8 @@ describe('iterables (properties)', function () {
 								seen.push(value);
 							})
 						)
-					).toEqual(xs);
-					expect(seen).toEqual(xs);
+					).toStrictEqual(xs);
+					expect(seen).toStrictEqual(xs);
 				})
 			);
 		});
@@ -216,7 +216,7 @@ describe('iterables (properties)', function () {
 							: arrays.range(n).map(function (i) {
 									return xs[i % xs.length];
 								});
-					expect(helpers.toArray(helpers.take(helpers.cycle(once(xs)), n))).toEqual(expected);
+					expect(helpers.toArray(helpers.take(helpers.cycle(once(xs)), n))).toStrictEqual(expected);
 				})
 			);
 		});
@@ -238,7 +238,7 @@ describe('iterables (properties)', function () {
 					expect(helpers.every(once(xs), isPositive)).toBe(xs.every(isPositive));
 					expect(helpers.countItems(once(xs))).toBe(xs.length);
 					expect(helpers.countItems(once(xs), isPositive)).toBe(xs.filter(isPositive).length);
-					expect(helpers.toArray(once(xs))).toEqual(xs);
+					expect(helpers.toArray(once(xs))).toStrictEqual(xs);
 				})
 			);
 		});
@@ -317,7 +317,7 @@ describe('iterables (properties)', function () {
 			fc.assert(
 				fc.property(count, count, function (k, n) {
 					const { iterable, stats } = spy(helpers.count());
-					expect(helpers.toArray(helpers.take(helpers.drop(iterable, k), n))).toEqual(arrays.range(k, k + n));
+					expect(helpers.toArray(helpers.take(helpers.drop(iterable, k), n))).toStrictEqual(arrays.range(k, k + n));
 					expect(stats.pulled).toBe(n === 0 ? 0 : k + n);
 				})
 			);
@@ -328,7 +328,7 @@ describe('iterables (properties)', function () {
 				fc.property(count, positive, function (n, size) {
 					const { iterable, stats } = spy(helpers.count());
 					const chunks = helpers.toArray(helpers.take(helpers.chunk(iterable, size), n));
-					expect(chunks).toEqual(arrays.chunk(arrays.range(n * size), size));
+					expect(chunks).toStrictEqual(arrays.chunk(arrays.range(n * size), size));
 					expect(stats.pulled).toBe(n * size);
 					expect(stats.closed).toBe(n === 0 ? 0 : 1);
 				})
@@ -340,7 +340,7 @@ describe('iterables (properties)', function () {
 				fc.property(fc.integer({ min: 1, max: 30 }), positive, positive, function (n, size, step) {
 					const { iterable, stats } = spy(helpers.count());
 					const windows = helpers.toArray(helpers.take(helpers.windowed(iterable, size, step), n));
-					expect(windows).toEqual(arrays.windowed(arrays.range(size + (n - 1) * step), size, step));
+					expect(windows).toStrictEqual(arrays.windowed(arrays.range(size + (n - 1) * step), size, step));
 					expect(stats.pulled).toBe(size + (n - 1) * step);
 					expect(stats.closed).toBe(1);
 				})
@@ -425,17 +425,17 @@ describe('iterables (properties)', function () {
 								return affine(value, index);
 							})
 						)
-					).toEqual(xs.map(affine));
+					).toStrictEqual(xs.map(affine));
 					expect(
 						await helpers.toArrayAsync(
 							helpers.filterAsync(once(xs), async function (value) {
 								return isPositive(value);
 							})
 						)
-					).toEqual(xs.filter(isPositive));
-					expect(await helpers.toArrayAsync(helpers.takeAsync(once(xs), n))).toEqual(xs.slice(0, n));
-					expect(await helpers.toArrayAsync(helpers.chunkAsync(once(xs), size))).toEqual(arrays.chunk(xs, size));
-					expect(await helpers.toArrayAsync(xs.map(Promise.resolve.bind(Promise)))).toEqual(xs);
+					).toStrictEqual(xs.filter(isPositive));
+					expect(await helpers.toArrayAsync(helpers.takeAsync(once(xs), n))).toStrictEqual(xs.slice(0, n));
+					expect(await helpers.toArrayAsync(helpers.chunkAsync(once(xs), size))).toStrictEqual(arrays.chunk(xs, size));
+					expect(await helpers.toArrayAsync(xs.map(Promise.resolve.bind(Promise)))).toStrictEqual(xs);
 				})
 			);
 		});

@@ -1,3 +1,4 @@
+import { isIterable } from '../guards/index.js';
 import { sum } from '../math/index.js';
 import { assertFunction, assertInteger, assertNumber, describe, draw } from '../utils/assert.js';
 import type { RandomGenerator } from '../utils/index.js';
@@ -36,6 +37,11 @@ export type SortOrder = 'asc' | 'desc';
  * Largest length a JavaScript array can have.
  */
 const MAX_ARRAY_LENGTH = 2 ** 32 - 1;
+
+/**
+ * Nesting depth from which {@link flattenDeep} tracks the enclosing arrays in a `Set` (rather than scanning a list) to detect cycles.
+ */
+const DEEP_NESTING = 64;
 
 /**
  * Type guard telling whether a (possibly nested) element is an array.
@@ -124,32 +130,35 @@ export function flatten<T>(array: ReadonlyArray<T | ReadonlyArray<T>>): T[] {
  */
 export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
 	const result: Array<FlatDeep<T>> = [];
-	const stack: Array<ReadonlyArray<unknown>> = [array];
-	const positions: number[] = [0];
-	const ancestors = new Set<ReadonlyArray<unknown>>(stack);
-	while (stack.length > 0) {
-		const top = stack.length - 1;
-		const current = stack[top];
-		const index = positions[top];
-		if (index >= current.length) {
-			stack.pop();
-			positions.pop();
-			ancestors.delete(current);
-			continue;
-		}
-		positions[top] = index + 1;
-		if (!(index in current)) continue;
-		const value: unknown = current[index];
-		if (Array.isArray(value)) {
-			if (ancestors.has(value)) throw new TypeError('flattenDeep: cannot flatten a circular array');
-			ancestors.add(value);
-			stack.push(value);
-			positions.push(0);
-		} else {
-			result.push(value as FlatDeep<T>);
+	// The arrays enclosing `current` (outermost first), and the index to resume at in each of them.
+	const parents: Array<ReadonlyArray<unknown>> = [];
+	const positions: number[] = [];
+	// Cycle detection scans `parents`, which beats maintaining a Set for usual depths; past DEEP_NESTING levels a Set mirroring
+	// `parents` takes over, so that very deep inputs stay linear.
+	let deepParents: Set<ReadonlyArray<unknown>> | undefined;
+	let current: ReadonlyArray<unknown> = array;
+	let index = 0;
+	for (;;) {
+		if (index === current.length) {
+			if (parents.length === 0) return result;
+			current = parents.pop() as ReadonlyArray<unknown>;
+			index = positions.pop() as number;
+			deepParents?.delete(current);
+		} else if (index++ in current) {
+			const value = current[index - 1];
+			if (!Array.isArray(value)) {
+				result.push(value as FlatDeep<T>);
+				continue;
+			}
+			parents.push(current);
+			positions.push(index);
+			if (deepParents !== undefined) deepParents.add(current);
+			else if (parents.length === DEEP_NESTING) deepParents = new Set(parents);
+			if (deepParents === undefined ? parents.includes(value) : deepParents.has(value)) throw new TypeError('flattenDeep: cannot flatten a circular array');
+			current = value;
+			index = 0;
 		}
 	}
-	return result;
 }
 
 /**
@@ -182,7 +191,13 @@ function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
  * removeDuplicates([1, 2, 2, 3, 1]); // => [1, 2, 3]
  */
 export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
-	return appendUnseen(iterable, new Set<T>(), []);
+	const values = Array.from(iterable);
+	const set = new Set<T>(values);
+	const result = Array.from(set);
+	// A Set stores -0 as +0: when the first zero of the input is -0, it is put back, so every value is an original one.
+	const zero = 0 as T;
+	if (set.has(zero) && Object.is(values[values.indexOf(zero)], -0)) result[result.indexOf(zero)] = -0 as T;
+	return result;
 }
 
 /**
@@ -254,18 +269,9 @@ export function difference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * symmetricDifference([1, 2, 3], [3, 4]); // => [1, 2, 4]
  */
 export function symmetricDifference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const uniqueA = removeDuplicates(a);
-	const uniqueB = removeDuplicates(b);
-	const setA = new Set<T>(uniqueA);
-	const setB = new Set<T>(uniqueB);
-	const result: T[] = [];
-	for (const value of uniqueA) {
-		if (!setB.has(value)) result.push(value);
-	}
-	for (const value of uniqueB) {
-		if (!setA.has(value)) result.push(value);
-	}
-	return result;
+	const left = Array.from(a);
+	const right = Array.from(b);
+	return difference(left, right).concat(difference(right, left));
 }
 
 /**
@@ -536,11 +542,8 @@ function toComparable(key: SortKey): number | string | bigint {
  * @returns {number} A negative number, zero or a positive number, as for `Array.prototype.sort`
  */
 function compareKeys(a: number | string | bigint, b: number | string | bigint): number {
-	if (typeof a === 'string' || typeof b === 'string') {
-		if (typeof a !== 'string') return -1;
-		if (typeof b !== 'string') return 1;
-		return a < b ? -1 : a > b ? 1 : 0;
-	}
+	const isString = typeof a === 'string';
+	if (isString !== (typeof b === 'string')) return isString ? 1 : -1;
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
@@ -567,21 +570,27 @@ function compareKeys(a: number | string | bigint, b: number | string | bigint): 
 export function sortBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number) => SortKey, order: SortOrder = 'asc'): T[] {
 	assertFunction('sortBy', 'selector', selector);
 	if (order !== 'asc' && order !== 'desc') throw new RangeError(`sortBy: \`order\` must be 'asc' or 'desc', got ${String(order)}`);
-	const direction = order === 'asc' ? 1 : -1;
-	const entries = Array.from(array, function (item, index) {
-		return { item, index, key: toComparable(selector(item, index)) };
-	});
-	entries.sort(function (x, y): number {
-		const xNaN = Number.isNaN(x.key);
-		const yNaN = Number.isNaN(y.key);
-		if (xNaN || yNaN) {
-			if (xNaN === yNaN) return x.index - y.index;
-			return xNaN ? 1 : -1;
-		}
-		return compareKeys(x.key, y.key) * direction || x.index - y.index;
-	});
-	return entries.map(function (entry) {
-		return entry.item;
+	const keys: Array<number | string | bigint> = [];
+	// Indices of the items to sort, then of the items with a NaN key (they keep their input order, after all the others).
+	const sorted: number[] = [];
+	const unordered: number[] = [];
+	for (let i = 0; i < array.length; i++) {
+		const key = toComparable(selector(array[i], i));
+		keys.push(key);
+		(Number.isNaN(key) ? unordered : sorted).push(i);
+	}
+	// `sort` is stable and `sorted` is in input order, so items with equal keys keep their relative order.
+	sorted.sort(
+		order === 'asc'
+			? function (x: number, y: number): number {
+					return compareKeys(keys[x], keys[y]);
+				}
+			: function (x: number, y: number): number {
+					return compareKeys(keys[y], keys[x]);
+				}
+	);
+	return sorted.concat(unordered).map(function (index) {
+		return array[index];
 	});
 }
 
@@ -749,7 +758,7 @@ function extremeBy<T>(array: ReadonlyArray<T>, selector: (item: T, index: number
 		const key = toComparable(selector(array[i], i));
 		if (Number.isNaN(key)) continue;
 		// Strict comparison: on ties the first item wins.
-		if (bestKey === undefined || compareKeys(key, bestKey) * direction > 0) {
+		if (bestKey === undefined || compareKeys(key, bestKey) === direction) {
 			best = array[i];
 			bestKey = key;
 		}
@@ -1051,7 +1060,6 @@ export function cartesianProduct<T extends Array<ReadonlyArray<unknown>>>(...arr
 	for (const array of arrays) total *= array.length;
 	if (total > MAX_ARRAY_LENGTH) throw new RangeError(`cartesianProduct: the product would contain ${total} tuples, more than an array can hold`);
 	const result: Array<Zipped<T>> = [];
-	if (total === 0) return result;
 	const positions = new Array<number>(arrays.length).fill(0);
 	for (let count = 0; count < total; count++) {
 		const tuple: unknown[] = [];
@@ -1178,7 +1186,7 @@ function sameValueZero(x: unknown, y: unknown): boolean {
 }
 
 /**
- * Returns `value` itself when it is an array, or its elements in a new array when it is another iterable.
+ * Copies the elements of an iterable into a new array.
  * @template T - The element type
  * @param {string} caller - Name of the public function, used in the error message
  * @param {string} name - Name of the validated parameter
@@ -1187,10 +1195,7 @@ function sameValueZero(x: unknown, y: unknown): boolean {
  * @throws {TypeError} when `value` is not iterable
  */
 function toList<T>(caller: string, name: string, value: Iterable<T>): ReadonlyArray<T> {
-	if (Array.isArray(value)) return value;
-	if (value === null || value === undefined || typeof (value as Partial<Iterable<T>>)[Symbol.iterator] !== 'function') {
-		throw new TypeError(`${caller}: \`${name}\` must be an iterable, got ${describe(value)}`);
-	}
+	if (!isIterable(value)) throw new TypeError(`${caller}: \`${name}\` must be an iterable, got ${describe(value)}`);
 	return Array.from(value);
 }
 
@@ -1213,10 +1218,10 @@ function myersDiff<T>(caller: string, a: Iterable<T>, b: Iterable<T>, equals: (x
 	const deletions: number[] = [];
 	const insertions: number[] = [];
 	// Furthest-reaching x per diagonal for the forward and backward searches, shared by every sub-problem (each one only reads
-	// entries it wrote itself, plus the seed at diagonal 1). Diagonals range over [-(max + 1), max + 1] with max = ceil((N + M) / 2).
+	// entries it wrote itself, plus the seed at diagonal 1). Diagonals range over [-max, max] with max = ceil((N + M) / 2).
 	const offset = Math.ceil((left.length + right.length) / 2) + 1;
-	const forward = new Array<number>(2 * offset + 1).fill(0);
-	const backward = new Array<number>(2 * offset + 1).fill(0);
+	const forward = new Int32Array(2 * offset);
+	const backward = new Int32Array(2 * offset);
 
 	/**
 	 * Appends the pending deletions, then the pending insertions (so each change block reads "delete, then insert").

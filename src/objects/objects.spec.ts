@@ -10,23 +10,23 @@ describe('Objects helpers', function () {
 	describe('merge', function () {
 		it('should merge two objects correctly', function () {
 			const result = helpers.merge({ a: 1, b: 2 }, { c: 3, d: 4 });
-			expect(result).toEqual({ a: 1, b: 2, c: 3, d: 4 });
+			expect(result).toStrictEqual({ a: 1, b: 2, c: 3, d: 4 });
 		});
 
 		it('should merge multiple objects correctly', function () {
 			const result = helpers.merge({ a: 1, b: 2 }, { c: 3, d: 4 }, { e: 5, f: 6 });
-			expect(result).toEqual({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 });
+			expect(result).toStrictEqual({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 });
 		});
 
 		it('should override properties from earlier sources with properties from later sources', function () {
 			const result = helpers.merge({ a: 1, b: 2 }, { a: 3, c: 4 }, { a: 5, d: 6 });
-			expect(result).toEqual({ a: 5, b: 2, c: 4, d: 6 });
+			expect(result).toStrictEqual({ a: 5, b: 2, c: 4, d: 6 });
 		});
 
 		it('should return a copy of the target if no sources are provided', function () {
 			const target = { a: 1, b: 2 };
 			const result = helpers.merge(target);
-			expect(result).toEqual({ a: 1, b: 2 });
+			expect(result).toStrictEqual({ a: 1, b: 2 });
 			expect(result).not.toBe(target);
 		});
 
@@ -35,15 +35,15 @@ describe('Objects helpers', function () {
 			const target = { a: 1 };
 			const source = { b: nested };
 			const result = helpers.merge(target, source);
-			expect(target).toEqual({ a: 1 });
-			expect(source).toEqual({ b: nested });
+			expect(target).toStrictEqual({ a: 1 });
+			expect(source).toStrictEqual({ b: nested });
 			expect(result.b).toBe(nested);
 		});
 
 		it('copies symbol keys, lets undefined override, and skips nullish sources', function () {
 			const key = Symbol('k');
 			const result = helpers.merge({ a: 1, [key]: 1 }, { a: undefined }, null as any, undefined as any, { [key]: 2 });
-			expect(result).toEqual({ a: undefined, [key]: 2 });
+			expect(result).toStrictEqual({ a: undefined, [key]: 2 });
 			expect(Object.prototype.hasOwnProperty.call(result, 'a')).toBe(true);
 		});
 
@@ -69,21 +69,21 @@ describe('Objects helpers', function () {
 		it('should return a new object with the same properties', function () {
 			const original = { name: 'John', age: 30 };
 			const copy = helpers.clone(original);
-			expect(copy).toEqual(original);
+			expect(copy).toStrictEqual(original);
 			expect(copy).not.toBe(original);
 		});
 
 		it('is shallow: nested objects are shared', function () {
 			const original = { name: 'John', address: { street: '1st Ave', city: 'New York' } };
 			const copy = helpers.clone(original);
-			expect(copy).toEqual(original);
+			expect(copy).toStrictEqual(original);
 			expect(copy.address).toBe(original.address);
 		});
 
 		it('keeps arrays as arrays (was converted to an object before), preserving holes', function () {
 			const copy = helpers.clone([1, 2]);
 			expect(Array.isArray(copy)).toBe(true);
-			expect(copy).toEqual([1, 2]);
+			expect(copy).toStrictEqual([1, 2]);
 			// eslint-disable-next-line no-sparse-arrays
 			const sparse = helpers.clone([1, , 3]);
 			expect(sparse).toHaveLength(3);
@@ -128,7 +128,7 @@ describe('Objects helpers', function () {
 
 			const setCopy = helpers.clone(set);
 			expect(setCopy).not.toBe(set);
-			expect([...setCopy]).toEqual([1, 2]);
+			expect([...setCopy]).toStrictEqual([1, 2]);
 
 			const regexpCopy = helpers.clone(regexp);
 			expect(regexpCopy).not.toBe(regexp);
@@ -149,7 +149,7 @@ describe('Objects helpers', function () {
 			const copy = helpers.clone(bytes);
 			expect(copy).not.toBe(bytes);
 			expect(copy.buffer).not.toBe(bytes.buffer);
-			expect(Array.from(copy)).toEqual([1, 2, 3]);
+			expect(Array.from(copy)).toStrictEqual([1, 2, 3]);
 
 			const buffer = new ArrayBuffer(4);
 			const bufferCopy = helpers.clone(buffer);
@@ -195,7 +195,7 @@ describe('Objects helpers', function () {
 		it('copies nested structures without sharing references', function () {
 			const original = { a: [1, { b: 2 }], c: { d: { e: 'x' } }, when: new Date(10) };
 			const copy = helpers.deepClone(original);
-			expect(copy).toEqual(original);
+			expect(copy).toStrictEqual(original);
 			expect(copy.a).not.toBe(original.a);
 			expect(copy.a[1]).not.toBe(original.a[1]);
 			expect(copy.c.d).not.toBe(original.c.d);
@@ -234,11 +234,11 @@ describe('Objects helpers', function () {
 			const copy = helpers.deepClone(original);
 			const [[copiedKey, copiedValue]] = Array.from(copy.map);
 			const [copiedMember] = Array.from(copy.set);
-			expect(copiedKey).toEqual(key);
+			expect(copiedKey).toStrictEqual(key);
 			expect(copiedKey).not.toBe(key);
-			expect(copiedValue).toEqual(value);
+			expect(copiedValue).toStrictEqual(value);
 			expect(copiedValue).not.toBe(value);
-			expect(copiedMember).toEqual(member);
+			expect(copiedMember).toStrictEqual(member);
 			expect(copiedMember).not.toBe(member);
 		});
 
@@ -267,7 +267,7 @@ describe('Objects helpers', function () {
 			expect(copy.regexp.lastIndex).toBe(2);
 			expect(copy.floats).toBeInstanceOf(Float64Array);
 			expect(copy.floats.buffer).not.toBe(floats.buffer);
-			expect(Array.from(copy.floats)).toEqual([1.5, NaN]);
+			expect(Array.from(copy.floats)).toStrictEqual([1.5, NaN]);
 			expect(copy.view).toBeInstanceOf(DataView);
 			expect(copy.view.byteLength).toBe(2);
 			expect(copy.view.getUint8(0)).toBe(7);
@@ -288,7 +288,7 @@ describe('Objects helpers', function () {
 			expect(copy).toBeInstanceOf(Box);
 			expect(copy.size).toBe(1);
 			expect(copy.items).not.toBe(original.items);
-			expect(copy[sym]).toEqual({ deep: true });
+			expect(copy[sym]).toStrictEqual({ deep: true });
 			expect(copy[sym]).not.toBe(original[sym]);
 		});
 
@@ -297,7 +297,7 @@ describe('Objects helpers', function () {
 			const copy = helpers.deepClone(error);
 			expect(copy).toBeInstanceOf(RangeError);
 			expect(copy.message).toBe('bad');
-			expect(copy.cause).toEqual({ code: 1 });
+			expect(copy.cause).toStrictEqual({ code: 1 });
 			expect(copy.cause).not.toBe(error.cause);
 		});
 
@@ -308,7 +308,7 @@ describe('Objects helpers', function () {
 			expect(Object.getPrototypeOf(helpers.deepClone(bare))).toBe(null);
 			const listCopy = helpers.deepClone(list);
 			expect(listCopy).toBeInstanceOf(List);
-			expect(Array.from(listCopy)).toEqual([1, 2]);
+			expect(Array.from(listCopy)).toStrictEqual([1, 2]);
 		});
 
 		it('returns weak collections and promises by reference', function () {
@@ -366,7 +366,7 @@ describe('Objects helpers', function () {
 		it('should set (mutate) the specified property on the object', function () {
 			const obj = {};
 			helpers.setProperty(obj, 'property', 'value');
-			expect(obj).toEqual({ property: 'value' });
+			expect(obj).toStrictEqual({ property: 'value' });
 		});
 	});
 
@@ -374,19 +374,19 @@ describe('Objects helpers', function () {
 		it('should delete (mutate) the specified property from the object', function () {
 			const obj: { property?: string; other: number } = { property: 'value', other: 1 };
 			helpers.deleteProperty(obj, 'property');
-			expect(obj).toEqual({ other: 1 });
+			expect(obj).toStrictEqual({ other: 1 });
 		});
 	});
 
 	describe('getPropertyNames', function () {
 		it('should return an array of all the names of properties of the object', function () {
-			expect(helpers.getPropertyNames({ property1: 'value1', property2: 'value2' })).toEqual(['property1', 'property2']);
+			expect(helpers.getPropertyNames({ property1: 'value1', property2: 'value2' })).toStrictEqual(['property1', 'property2']);
 		});
 
 		it('includes non-enumerable own string keys but not symbols', function () {
-			expect(helpers.getPropertyNames([1])).toEqual(['0', 'length']);
+			expect(helpers.getPropertyNames([1])).toStrictEqual(['0', 'length']);
 			const obj = Object.defineProperty({ [Symbol('s')]: 1 }, 'hidden', { value: 1, enumerable: false });
-			expect(helpers.getPropertyNames(obj)).toEqual(['hidden']);
+			expect(helpers.getPropertyNames(obj)).toStrictEqual(['hidden']);
 		});
 	});
 
@@ -438,7 +438,7 @@ describe('Objects helpers', function () {
 			const target: Record<string, any> = { keep: 1 };
 			const result = helpers.setInObjectByKeys(target, 'a.list.0.id', 7);
 			expect(result).toBe(target);
-			expect(target).toEqual({ keep: 1, a: { list: [{ id: 7 }] } });
+			expect(target).toStrictEqual({ keep: 1, a: { list: [{ id: 7 }] } });
 			expect(Array.isArray(target.a.list)).toBe(true);
 		});
 
@@ -448,7 +448,7 @@ describe('Objects helpers', function () {
 			helpers.setInObjectByKeys(target, 'n.deep', true);
 			helpers.setInObjectByKeys(target, 'list.0.y', 3);
 			helpers.setInObjectByKeys(target, 'top', 'v');
-			expect(target).toEqual({ a: { b: 1, c: 2 }, n: { deep: true }, list: [{ x: 1, y: 3 }], top: 'v' });
+			expect(target).toStrictEqual({ a: { b: 1, c: 2 }, n: { deep: true }, list: [{ x: 1, y: 3 }], top: 'v' });
 		});
 
 		it('throws RangeError for empty segments', function () {
@@ -469,7 +469,7 @@ describe('Objects helpers', function () {
 				expect(function () {
 					helpers.setInObjectByKeys(target, path, 1);
 				}).toThrow(RangeError);
-				expect(target).toEqual({});
+				expect(target).toStrictEqual({});
 			}
 			expect(({} as any).polluted).toBeUndefined();
 		});
@@ -521,7 +521,7 @@ describe('Objects helpers', function () {
 		it('pick keeps only the requested keys', function () {
 			const result = helpers.pick({ a: 1, b: 'x', c: true }, ['a', 'c']);
 			assertType<Equals<typeof result, { a: number; c: boolean }>>(true);
-			expect(result).toEqual({ a: 1, c: true });
+			expect(result).toStrictEqual({ a: 1, c: true });
 		});
 
 		it('pick skips missing keys and reads inherited getters', function () {
@@ -531,23 +531,23 @@ describe('Objects helpers', function () {
 					return this.first.toUpperCase();
 				}
 			}
-			expect(helpers.pick({} as { a?: number }, ['a'])).toEqual({});
-			expect(helpers.pick(new User(), ['upper'])).toEqual({ upper: 'ADA' });
+			expect(helpers.pick({} as { a?: number }, ['a'])).toStrictEqual({});
+			expect(helpers.pick(new User(), ['upper'])).toStrictEqual({ upper: 'ADA' });
 		});
 
 		it('omit drops the requested keys and keeps symbol keys', function () {
 			const sym = Symbol('s');
 			const result = helpers.omit({ a: 1, b: 'x', [sym]: 2 }, ['b']);
 			assertType<Equals<typeof result, { a: number; [sym]: number }>>(true);
-			expect(result).toEqual({ a: 1, [sym]: 2 });
-			expect(helpers.omit({ a: 1 }, [])).toEqual({ a: 1 });
+			expect(result).toStrictEqual({ a: 1, [sym]: 2 });
+			expect(helpers.omit({ a: 1 }, [])).toStrictEqual({ a: 1 });
 		});
 
 		it('do not mutate the input', function () {
 			const input = { a: 1, b: 2 };
 			helpers.pick(input, ['a']);
 			helpers.omit(input, ['a']);
-			expect(input).toEqual({ a: 1, b: 2 });
+			expect(input).toStrictEqual({ a: 1, b: 2 });
 		});
 	});
 
@@ -557,12 +557,12 @@ describe('Objects helpers', function () {
 				return `${String(key)}=${value * 10}`;
 			});
 			assertType<Equals<typeof result, { a: string; b: string }>>(true);
-			expect(result).toEqual({ a: 'a=10', b: 'b=20' });
+			expect(result).toStrictEqual({ a: 'a=10', b: 'b=20' });
 			expect(
 				helpers.mapValues({}, function () {
 					return 1;
 				})
-			).toEqual({});
+			).toStrictEqual({});
 		});
 
 		it('mapValues passes the object and handles symbol keys', function () {
@@ -580,12 +580,12 @@ describe('Objects helpers', function () {
 				helpers.mapKeys({ a: 1, b: 2 }, function (_value, key) {
 					return String(key).toUpperCase();
 				})
-			).toEqual({ A: 1, B: 2 });
+			).toStrictEqual({ A: 1, B: 2 });
 			expect(
 				helpers.mapKeys({ a: 1, b: 2 }, function () {
 					return 'same';
 				})
-			).toEqual({ same: 2 });
+			).toStrictEqual({ same: 2 });
 		});
 	});
 
@@ -593,15 +593,15 @@ describe('Objects helpers', function () {
 		it('swaps keys and values', function () {
 			const result = helpers.invert({ a: 'x', b: 'y' } as const);
 			assertType<Equals<typeof result, { x: 'a'; y: 'b' }>>(true);
-			expect(result).toEqual({ x: 'a', y: 'b' });
+			expect(result).toStrictEqual({ x: 'a', y: 'b' });
 		});
 
 		it('stringifies numeric values, supports symbols, last duplicate wins', function () {
 			const sym = Symbol('s');
-			expect(helpers.invert({ a: 1, b: 1, c: 2 })).toEqual({ 1: 'b', 2: 'c' });
+			expect(helpers.invert({ a: 1, b: 1, c: 2 })).toStrictEqual({ 1: 'b', 2: 'c' });
 			expect(helpers.invert({ a: sym })[sym]).toBe('a');
-			expect(helpers.invert({ 1: 'one' })).toEqual({ one: '1' });
-			expect(helpers.invert({})).toEqual({});
+			expect(helpers.invert({ 1: 'one' })).toStrictEqual({ one: '1' });
+			expect(helpers.invert({})).toStrictEqual({});
 		});
 
 		it('handles a "__proto__" value safely', function () {
@@ -621,7 +621,7 @@ describe('Objects helpers', function () {
 		it('recursively merges plain objects; later sources win', function () {
 			const result = helpers.deepMerge({ a: { x: 1, y: 2 }, keep: 'k' }, { a: { y: 3 } }, { a: { z: 4 }, extra: true });
 			assertType<Equals<typeof result, { a: { x: number; y: number; z: number }; keep: string; extra: boolean }>>(true);
-			expect(result).toEqual({ a: { x: 1, y: 3, z: 4 }, keep: 'k', extra: true });
+			expect(result).toStrictEqual({ a: { x: 1, y: 3, z: 4 }, keep: 'k', extra: true });
 		});
 
 		it('replaces arrays and non-plain values by reference', function () {
@@ -635,15 +635,15 @@ describe('Objects helpers', function () {
 
 		it('replaces a scalar with an object and lets undefined override', function () {
 			const result = helpers.deepMerge({ a: 1 as unknown, b: 2 }, { a: { c: 1 }, b: undefined });
-			expect(result).toEqual({ a: { c: 1 }, b: undefined });
+			expect(result).toStrictEqual({ a: { c: 1 }, b: undefined });
 		});
 
 		it('does not mutate inputs and never shares merged plain objects with them', function () {
 			const target = { a: { x: 1 } };
 			const source = { a: { y: 2 }, b: { z: 3 } };
 			const result = helpers.deepMerge(target, source);
-			expect(target).toEqual({ a: { x: 1 } });
-			expect(source).toEqual({ a: { y: 2 }, b: { z: 3 } });
+			expect(target).toStrictEqual({ a: { x: 1 } });
+			expect(source).toStrictEqual({ a: { y: 2 }, b: { z: 3 } });
 			expect(result.a).not.toBe(target.a);
 			expect(result.b).not.toBe(source.b);
 			result.b.z = 99;
@@ -658,7 +658,7 @@ describe('Objects helpers', function () {
 			expect(({} as any).polluted).toBeUndefined();
 			expect((Object.prototype as any).polluted).toBeUndefined();
 			expect(result.polluted).toBeUndefined();
-			expect(Object.keys(result)).toEqual(['safe']);
+			expect(Object.keys(result)).toStrictEqual(['safe']);
 			expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(false);
 			expect(Object.getPrototypeOf(result.safe)).toBe(Object.prototype);
 			expect(result.safe.polluted).toBeUndefined();
@@ -670,12 +670,12 @@ describe('Objects helpers', function () {
 			const result: any = helpers.deepMerge(bare, { [sym]: 1 }, null as any, undefined as any, { a: { c: 2 } });
 			expect(Object.getPrototypeOf(result)).toBe(null);
 			expect(result[sym]).toBe(1);
-			expect({ ...result.a }).toEqual({ b: 1, c: 2 });
+			expect({ ...result.a }).toStrictEqual({ b: 1, c: 2 });
 		});
 
 		it('supports shared (non-circular) references', function () {
 			const shared = { v: 1 };
-			expect(helpers.deepMerge({}, { a: shared, b: shared })).toEqual({ a: { v: 1 }, b: { v: 1 } });
+			expect(helpers.deepMerge({}, { a: shared, b: shared })).toStrictEqual({ a: { v: 1 }, b: { v: 1 } });
 		});
 
 		it('throws TypeError on circular references and non-plain inputs', function () {
@@ -697,7 +697,7 @@ describe('Objects helpers', function () {
 			assertType<Equals<typeof result, { a: { x: number } | { x: number; y: string } }>>(true);
 			const spread = helpers.deepMerge({ a: 1 }, ...([] as Array<{ a: number }>));
 			assertType<Equals<typeof spread, { a: number }>>(true);
-			expect(result).toEqual({ a: { x: 1 } });
+			expect(result).toStrictEqual({ a: { x: 1 } });
 		});
 	});
 
@@ -811,6 +811,9 @@ describe('Objects helpers', function () {
 			expect(helpers.isEqual(new Set([{ a: 1 }, { a: 2 }]), new Set([{ a: 2 }, { a: 1 }]))).toBe(true);
 			expect(helpers.isEqual(new Set([{ a: 1 }, { a: 1 }]), new Set([{ a: 1 }, { a: 2 }]))).toBe(false);
 			expect(helpers.isEqual(new Set([1]), new Set([1, 2]))).toBe(false);
+			const x = { v: 1 };
+			const y = { v: 2 };
+			expect(helpers.isEqual(new Set([x, { k: x }, y]), new Set([y, x, { k: y }]))).toBe(false);
 			expect(helpers.isEqual(new Set([1, 2]), new Set([1, 3]))).toBe(false);
 			expect(helpers.isEqual(new Set([1, { a: 1 }]), new Set([{ a: 1 }, 1]))).toBe(true);
 			expect(helpers.isEqual(new Map([[{ k: 1 }, 1]]), new Map([[{ k: 2 }, 1]]))).toBe(false);
@@ -990,8 +993,8 @@ describe('Objects helpers', function () {
 		it('omit drops numeric keys (they are strings at runtime)', function () {
 			const result = helpers.omit({ 1: 'a', 2: 'b', x: true }, [1, 'x']);
 			assertType<Equals<typeof result, { 2: string }>>(true);
-			expect(result).toEqual({ 2: 'b' });
-			expect(Object.keys(result)).toEqual(['2']);
+			expect(result).toStrictEqual({ 2: 'b' });
+			expect(Object.keys(result)).toStrictEqual(['2']);
 		});
 
 		it('mapValues returns an array for an array input, as its return type says', function () {
@@ -1001,7 +1004,7 @@ describe('Objects helpers', function () {
 			});
 			assertType<Equals<typeof result, string[]>>(true);
 			expect(Array.isArray(result)).toBe(true);
-			expect(result).toEqual(['1', '2', '3']);
+			expect(result).toStrictEqual(['1', '2', '3']);
 			// eslint-disable-next-line no-sparse-arrays
 			const sparse = helpers.mapValues([1, , 3], function (value) {
 				return value;
@@ -1014,7 +1017,7 @@ describe('Objects helpers', function () {
 			const target: Record<string, any> = {};
 			helpers.setInObjectByKeys(target, 'toString.polluted', 1);
 			expect((Object.prototype.toString as any).polluted).toBeUndefined();
-			expect(target.toString).toEqual({ polluted: 1 });
+			expect(target.toString).toStrictEqual({ polluted: 1 });
 			expect(Object.prototype.hasOwnProperty.call(target, 'toString')).toBe(true);
 
 			const list: any[] = [];
@@ -1025,7 +1028,7 @@ describe('Objects helpers', function () {
 			const instance = Object.create(shared) as Record<string, any>;
 			helpers.setInObjectByKeys(instance, 'defaults.a', 2);
 			expect(shared.defaults.a).toBe(1);
-			expect(instance.defaults).toEqual({ a: 2 });
+			expect(instance.defaults).toStrictEqual({ a: 2 });
 		});
 
 		it('setInObjectByKeys only creates arrays for canonical array indices', function () {
@@ -1035,11 +1038,11 @@ describe('Objects helpers', function () {
 			helpers.setInObjectByKeys(target, 'c.4294967294', 3);
 			helpers.setInObjectByKeys(target, 'd.0', 4);
 			expect(Array.isArray(target.a)).toBe(false);
-			expect(target.a).toEqual({ '01': 1 });
+			expect(target.a).toStrictEqual({ '01': 1 });
 			expect(Array.isArray(target.b)).toBe(false);
 			expect(Array.isArray(target.c)).toBe(true);
-			expect(target.d).toEqual([4]);
-			expect(JSON.parse(JSON.stringify(target.a))).toEqual({ '01': 1 });
+			expect(target.d).toStrictEqual([4]);
+			expect(JSON.parse(JSON.stringify(target.a))).toStrictEqual({ '01': 1 });
 		});
 	});
 
@@ -1049,22 +1052,22 @@ describe('Objects helpers', function () {
 			const input = { a: 1, b: 'x', 3: true, [sym]: 0 };
 			const keys = helpers.typedKeys(input);
 			assertType<Equals<typeof keys, Array<'a' | 'b' | '3'>>>(true);
-			expect(keys).toEqual(['3', 'a', 'b']);
+			expect(keys).toStrictEqual(['3', 'a', 'b']);
 			const entries = helpers.typedEntries(input);
 			assertType<Equals<typeof entries, Array<['a', number] | ['b', string] | ['3', boolean]>>>(true);
-			expect(entries).toEqual([
+			expect(entries).toStrictEqual([
 				['3', true],
 				['a', 1],
 				['b', 'x']
 			]);
-			expect(helpers.typedKeys(Object.create({ inherited: 1 }))).toEqual([]);
+			expect(helpers.typedKeys(Object.create({ inherited: 1 }))).toStrictEqual([]);
 		});
 
 		it('typedEntries keeps undefined in optional value types', function () {
 			const input: { a?: number } = { a: undefined };
 			const entries = helpers.typedEntries(input);
 			assertType<Equals<typeof entries, Array<['a', number | undefined]>>>(true);
-			expect(entries).toEqual([['a', undefined]]);
+			expect(entries).toStrictEqual([['a', undefined]]);
 		});
 
 		it('typedFromEntries builds a typed object, last duplicate wins, __proto__ is a plain key', function () {
@@ -1075,7 +1078,7 @@ describe('Objects helpers', function () {
 			];
 			const result = helpers.typedFromEntries(entries);
 			assertType<Equals<typeof result, { a: number; b: string }>>(true);
-			expect(result).toEqual({ a: 2, b: 'x' });
+			expect(result).toStrictEqual({ a: 2, b: 'x' });
 
 			const unsafe = helpers.typedFromEntries([['__proto__', { polluted: true }] as [string, unknown]]);
 			expect(Object.getPrototypeOf(unsafe)).toBe(Object.prototype);
@@ -1090,12 +1093,12 @@ describe('Objects helpers', function () {
 						[2, 3]
 					])
 				)
-			).toEqual({ [sym]: 1, 2: 3 });
+			).toStrictEqual({ [sym]: 1, 2: 3 });
 		});
 
 		it('round-trips through typedEntries', function () {
 			const input = { a: 1, b: [2] };
-			expect(helpers.typedFromEntries(helpers.typedEntries(input))).toEqual(input);
+			expect(helpers.typedFromEntries(helpers.typedEntries(input))).toStrictEqual(input);
 		});
 	});
 
@@ -1107,7 +1110,7 @@ describe('Objects helpers', function () {
 				return typeof value === 'number' && value > 1;
 			});
 			assertType<Equals<typeof result, Partial<typeof input>>>(true);
-			expect(result).toEqual({ c: 3, [sym]: 4 });
+			expect(result).toStrictEqual({ c: 3, [sym]: 4 });
 		});
 
 		it('omitBy drops properties matching the predicate and passes key and object', function () {
@@ -1117,9 +1120,9 @@ describe('Objects helpers', function () {
 				seen.push(object);
 				return String(key).startsWith('_');
 			});
-			expect(result).toEqual({ a: 1 });
-			expect(seen).toEqual([input, input]);
-			expect(input).toEqual({ a: 1, _b: 2 });
+			expect(result).toStrictEqual({ a: 1 });
+			expect(seen).toStrictEqual([input, input]);
+			expect(input).toStrictEqual({ a: 1, _b: 2 });
 		});
 
 		it('store __proto__ keys as plain own properties', function () {
@@ -1145,9 +1148,9 @@ describe('Objects helpers', function () {
 			};
 			const result = helpers.compactObject(input);
 			assertType<Equals<typeof result, { a: number; c: null; e: number; b?: string; d?: boolean; [sym]?: never }>>(true);
-			expect(result).toEqual({ a: 0, c: null, d: false, e: NaN });
-			expect(Object.keys(result)).toEqual(['a', 'c', 'd', 'e']);
-			expect(Object.getOwnPropertySymbols(result)).toEqual([]);
+			expect(result).toStrictEqual({ a: 0, c: null, d: false, e: NaN });
+			expect(Object.keys(result)).toStrictEqual(['a', 'c', 'd', 'e']);
+			expect(Object.getOwnPropertySymbols(result)).toStrictEqual([]);
 			expect(input.b).toBeUndefined();
 			expect('b' in input).toBe(true);
 		});
@@ -1162,7 +1165,7 @@ describe('Objects helpers', function () {
 	describe('flattenObject / unflattenObject', function () {
 		it('flattens nested objects and arrays into leaf paths', function () {
 			const when = new Date(0);
-			expect(helpers.flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {}, f: [], when, n: null })).toEqual({
+			expect(helpers.flattenObject({ a: { b: 1, c: [2, { d: 3 }] }, e: {}, f: [], when, n: null })).toStrictEqual({
 				'a.b': 1,
 				'a.c.0': 2,
 				'a.c.1.d': 3,
@@ -1171,16 +1174,16 @@ describe('Objects helpers', function () {
 				when,
 				n: null
 			});
-			expect(helpers.flattenObject({})).toEqual({});
-			expect(helpers.flattenObject([1, [2]])).toEqual({ 0: 1, '1.0': 2 });
+			expect(helpers.flattenObject({})).toStrictEqual({});
+			expect(helpers.flattenObject([1, [2]])).toStrictEqual({ 0: 1, '1.0': 2 });
 		});
 
 		it('supports custom separators and keeps leaves by reference', function () {
 			const map = new Map();
 			const result = helpers.flattenObject({ a: { b: map } }, { separator: '/' });
-			expect(result).toEqual({ 'a/b': map });
+			expect(result).toStrictEqual({ 'a/b': map });
 			expect(result['a/b']).toBe(map);
-			expect(helpers.flattenObject({ a: { b: 1 } }, { separator: '::' })).toEqual({ 'a::b': 1 });
+			expect(helpers.flattenObject({ a: { b: 1 } }, { separator: '::' })).toStrictEqual({ 'a::b': 1 });
 		});
 
 		it('recurses into null-prototype objects, skips symbols and holes, and stores __proto__ safely', function () {
@@ -1188,9 +1191,9 @@ describe('Objects helpers', function () {
 			bare.x = 1;
 			// eslint-disable-next-line no-sparse-arrays
 			const result = helpers.flattenObject({ bare, [Symbol('s')]: 1, list: [1, , 3] });
-			expect(result).toEqual({ 'bare.x': 1, 'list.0': 1, 'list.2': 3 });
+			expect(result).toStrictEqual({ 'bare.x': 1, 'list.0': 1, 'list.2': 3 });
 			const unsafe = helpers.flattenObject(JSON.parse('{"__proto__": {"polluted": true}}'));
-			expect(Object.keys(unsafe)).toEqual(['__proto__.polluted']);
+			expect(Object.keys(unsafe)).toStrictEqual(['__proto__.polluted']);
 			expect(({} as any).polluted).toBeUndefined();
 		});
 
@@ -1213,13 +1216,13 @@ describe('Objects helpers', function () {
 
 		it('flattens shared (non-circular) references', function () {
 			const shared = { v: 1 };
-			expect(helpers.flattenObject({ a: shared, b: shared })).toEqual({ 'a.v': 1, 'b.v': 1 });
+			expect(helpers.flattenObject({ a: shared, b: shared })).toStrictEqual({ 'a.v': 1, 'b.v': 1 });
 		});
 
 		it('unflattens paths, creating arrays for numeric segments', function () {
-			expect(helpers.unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} })).toEqual({ a: { b: 1, c: [2, { d: 3 }] }, e: {} });
-			expect(helpers.unflattenObject({ 'a/b': 1 }, { separator: '/' })).toEqual({ a: { b: 1 } });
-			expect(helpers.unflattenObject({})).toEqual({});
+			expect(helpers.unflattenObject({ 'a.b': 1, 'a.c.0': 2, 'a.c.1.d': 3, e: {} })).toStrictEqual({ a: { b: 1, c: [2, { d: 3 }] }, e: {} });
+			expect(helpers.unflattenObject({ 'a/b': 1 }, { separator: '/' })).toStrictEqual({ a: { b: 1 } });
+			expect(helpers.unflattenObject({})).toStrictEqual({});
 			const nested = helpers.unflattenObject({ 'x.01': 1, 'y.1': 2 }) as Record<string, any>;
 			expect(Array.isArray(nested.x)).toBe(false);
 			expect(Array.isArray(nested.y)).toBe(true);
@@ -1228,7 +1231,7 @@ describe('Objects helpers', function () {
 
 		it('round-trips', function () {
 			const input = { a: { b: 1, c: [2, { d: [3, []] }] }, e: {}, f: 'x' };
-			expect(helpers.unflattenObject(helpers.flattenObject(input))).toEqual(input);
+			expect(helpers.unflattenObject(helpers.flattenObject(input))).toStrictEqual(input);
 		});
 
 		it('rejects unsafe segments, empty segments and bad separators', function () {
@@ -1258,7 +1261,7 @@ describe('Objects helpers', function () {
 			expect(function () {
 				helpers.unflattenObject(record);
 			}).toThrow(/already set/);
-			expect(leaf).toEqual({});
+			expect(leaf).toStrictEqual({});
 			expect(function () {
 				helpers.unflattenObject({ 'a.b': 1, a: 2 });
 			}).toThrow(/already holds/);
@@ -1287,7 +1290,7 @@ describe('Objects helpers', function () {
 		it('deleteFromObjectByKeys deletes own properties and reports success', function () {
 			const target: Record<string, any> = { a: { b: 1, c: 2 }, list: [1, 2, 3] };
 			expect(helpers.deleteFromObjectByKeys(target, 'a.b')).toBe(true);
-			expect(target).toEqual({ a: { c: 2 }, list: [1, 2, 3] });
+			expect(target).toStrictEqual({ a: { c: 2 }, list: [1, 2, 3] });
 			expect(helpers.deleteFromObjectByKeys(target, 'a.b')).toBe(false);
 			expect(helpers.deleteFromObjectByKeys(target, 'list.1')).toBe(true);
 			expect(target.list).toHaveLength(3);
@@ -1295,7 +1298,7 @@ describe('Objects helpers', function () {
 			expect(helpers.deleteFromObjectByKeys(target, 'a.toString')).toBe(false);
 			expect(helpers.deleteFromObjectByKeys(target, 'nope.x')).toBe(false);
 			expect(helpers.deleteFromObjectByKeys(target, 'a')).toBe(true);
-			expect(target).toEqual({ list: [1, , 3] }); // eslint-disable-line no-sparse-arrays
+			expect(target).toStrictEqual({ list: [1, , 3] }); // eslint-disable-line no-sparse-arrays
 		});
 
 		it('deleteFromObjectByKeys never deletes inherited properties and returns false for non-configurable ones', function () {
@@ -1313,12 +1316,12 @@ describe('Objects helpers', function () {
 		it('lists added paths in the order of b and removed paths in the order of a', function () {
 			const a = { a: [], z: 1 };
 			const b = { c: 0, a: [0] };
-			expect(helpers.diff(a, b)).toEqual({ added: ['c', 'a.0'], removed: ['z'], changed: [] });
-			expect(helpers.diff(b, a)).toEqual({ added: ['z'], removed: ['c', 'a.0'], changed: [] });
+			expect(helpers.diff(a, b)).toStrictEqual({ added: ['c', 'a.0'], removed: ['z'], changed: [] });
+			expect(helpers.diff(b, a)).toStrictEqual({ added: ['z'], removed: ['c', 'a.0'], changed: [] });
 		});
 
 		it('reports added, removed and changed dot paths', function () {
-			expect(helpers.diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 })).toEqual({
+			expect(helpers.diff({ a: 1, b: { c: 2, d: [1] } }, { b: { c: 3, d: [1, 2] }, e: 0 })).toStrictEqual({
 				added: ['b.d.1', 'e'],
 				removed: ['a'],
 				changed: ['b.c']
@@ -1330,31 +1333,31 @@ describe('Objects helpers', function () {
 				{ date: new Date(0), same: new Date(1), nan: NaN, kind: [1], set: new Set([1]), nil: null },
 				{ date: new Date(5), same: new Date(1), nan: NaN, kind: { 0: 1 }, set: new Set([1]), nil: undefined }
 			);
-			expect(result).toEqual({ added: [], removed: [], changed: ['date', 'kind', 'nil'] });
+			expect(result).toStrictEqual({ added: [], removed: [], changed: ['date', 'kind', 'nil'] });
 		});
 
 		it('handles arrays at the root, holes and identical inputs', function () {
-			expect(helpers.diff([1, 2, 3], [1, 5])).toEqual({ added: [], removed: ['2'], changed: ['1'] });
+			expect(helpers.diff([1, 2, 3], [1, 5])).toStrictEqual({ added: [], removed: ['2'], changed: ['1'] });
 			// eslint-disable-next-line no-sparse-arrays
-			expect(helpers.diff([1, , 3], [1, 2, 3])).toEqual({ added: ['1'], removed: [], changed: [] });
+			expect(helpers.diff([1, , 3], [1, 2, 3])).toStrictEqual({ added: ['1'], removed: [], changed: [] });
 			const tree = { a: { b: [1, { c: 2 }] } };
-			expect(helpers.diff(tree, tree)).toEqual({ added: [], removed: [], changed: [] });
-			expect(helpers.diff(tree, helpers.deepClone(tree))).toEqual({ added: [], removed: [], changed: [] });
-			expect(helpers.diff({ a: {} }, { a: { x: { y: 1 } } })).toEqual({ added: ['a.x'], removed: [], changed: [] });
+			expect(helpers.diff(tree, tree)).toStrictEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff(tree, helpers.deepClone(tree))).toStrictEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff({ a: {} }, { a: { x: { y: 1 } } })).toStrictEqual({ added: ['a.x'], removed: [], changed: [] });
 		});
 
 		it('only considers own enumerable string keys', function () {
 			const hidden = Object.defineProperty({ a: 1 }, 'h', { value: 1, enumerable: false });
-			expect(helpers.diff(hidden, { a: 1, h: 1 })).toEqual({ added: ['h'], removed: [], changed: [] });
-			expect(helpers.diff({ a: 1, h: 1 }, hidden)).toEqual({ added: [], removed: ['h'], changed: [] });
-			expect(helpers.diff({ [Symbol('s')]: 1 }, {})).toEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff(hidden, { a: 1, h: 1 })).toStrictEqual({ added: ['h'], removed: [], changed: [] });
+			expect(helpers.diff({ a: 1, h: 1 }, hidden)).toStrictEqual({ added: [], removed: ['h'], changed: [] });
+			expect(helpers.diff({ [Symbol('s')]: 1 }, {})).toStrictEqual({ added: [], removed: [], changed: [] });
 		});
 
 		it('works when one tree contains the other', function () {
 			const inner = { p: {} };
 			// `b` is the subtree `a.p`: it must not be mistaken for a cycle; it is compared like any other pair.
-			expect(helpers.diff({ p: inner }, inner)).toEqual({ added: [], removed: ['p.p'], changed: [] });
-			expect(helpers.diff({ p: inner }, { p: { q: 1 } })).toEqual({ added: ['p.q'], removed: ['p.p'], changed: [] });
+			expect(helpers.diff({ p: inner }, inner)).toStrictEqual({ added: [], removed: ['p.p'], changed: [] });
+			expect(helpers.diff({ p: inner }, { p: { q: 1 } })).toStrictEqual({ added: ['p.q'], removed: ['p.p'], changed: [] });
 		});
 
 		it('rejects mismatched roots and circular structures', function () {
@@ -1406,6 +1409,205 @@ describe('Objects helpers', function () {
 			expect(function () {
 				helpers.invert({ a: true } as any);
 			}).toThrow(new TypeError('invert: `object.a` must be a string, number or symbol, got boolean'));
+		});
+	});
+
+	describe('built-in subclasses and property writes', function () {
+		it('still recognises subclasses of built-ins and objects with custom tags', function () {
+			class Registry extends Map<string, object> {
+				override get [Symbol.toStringTag](): string {
+					return 'Registry';
+				}
+			}
+			const registry = new Registry([['a', { deep: 1 }]]);
+			const copy = helpers.deepClone(registry);
+			expect(copy).toBeInstanceOf(Registry);
+			expect(copy.get('a')).toStrictEqual({ deep: 1 });
+			expect(copy.get('a')).not.toBe(registry.get('a'));
+			expect(helpers.clone(registry).get('a')).toBe(registry.get('a'));
+			expect(helpers.isEqual(registry, new Registry([['a', { deep: 1 }]]))).toBe(true);
+			expect(helpers.isEqual(registry, new Registry([['a', { deep: 2 }]]))).toBe(false);
+			const frozen = helpers.deepFreeze(new Registry([['a', { deep: 1 }]]));
+			expect(Object.isFrozen(frozen.get('a'))).toBe(true);
+			const thenable = { then: function (): void {} };
+			expect(helpers.deepClone({ thenable }).thenable).toBe(thenable);
+			expect(helpers.clone(thenable)).toBe(thenable);
+			expect(helpers.isEqual(thenable, { then: thenable.then })).toBe(false);
+		});
+
+		it('defines copied keys as own data properties, without running inherited setters', function () {
+			let calls = 0;
+			class Temperature {
+				set celsius(value: number) {
+					calls += value;
+				}
+			}
+			const original = Object.defineProperty(new Temperature(), 'celsius', { value: 21, enumerable: true, writable: true, configurable: true });
+			for (const copy of [helpers.clone(original), helpers.deepClone(original)]) {
+				expect(Object.getOwnPropertyDescriptor(copy, 'celsius')).toStrictEqual({ value: 21, enumerable: true, writable: true, configurable: true });
+			}
+			expect(calls).toBe(0);
+			const merged = helpers.merge({ toString: 1, a: 1 }, { a: 2, hasOwnProperty: 3 });
+			expect(merged).toStrictEqual({ toString: 1, a: 2, hasOwnProperty: 3 });
+			expect(Object.keys(helpers.deepMerge({ a: { valueOf: 1 } }, { a: { valueOf: 2 } }).a)).toStrictEqual(['valueOf']);
+		});
+	});
+
+	describe('edge cases', function () {
+		it('copies SharedArrayBuffers and compares buffers and views by content', function () {
+			const shared = new SharedArrayBuffer(2);
+			new Uint8Array(shared).set([1, 2]);
+			for (const copy of [helpers.clone(shared), helpers.deepClone(shared)]) {
+				expect(copy).toBeInstanceOf(SharedArrayBuffer);
+				expect(copy).not.toBe(shared);
+				expect(Array.from(new Uint8Array(copy))).toStrictEqual([1, 2]);
+			}
+			expect(helpers.isEqual(new Uint8Array([1]).buffer, new Uint8Array([2]).buffer)).toBe(false);
+			expect(helpers.isEqual(new Uint8Array([1, 2]).buffer, new Uint8Array([1, 2]).buffer)).toBe(true);
+			expect(helpers.isEqual(new DataView(new Uint8Array([1]).buffer), new DataView(new Uint8Array([2]).buffer))).toBe(false);
+			expect(helpers.isEqual(new DataView(new Uint8Array([1, 2]).buffer, 1), new DataView(new Uint8Array([3, 2]).buffer, 1))).toBe(true);
+		});
+
+		it('compares typed arrays element-wise with SameValueZero', function () {
+			expect(helpers.isEqual(new Float64Array([1.5]), new Float64Array([1.25]))).toBe(false);
+			expect(helpers.isEqual(new Int16Array([300]), new Int16Array([44]))).toBe(false);
+			expect(helpers.isEqual(new Float64Array([-0, NaN]), new Float64Array([0, NaN]))).toBe(true);
+			expect(helpers.isEqual(new Float64Array([NaN]), new Float64Array([1]))).toBe(false);
+			expect(helpers.isEqual(new Float64Array([1]), new Float64Array([NaN]))).toBe(false);
+			expect(helpers.isEqual(new Uint8Array([1]), new Uint8Array([1, 2]))).toBe(false);
+			expect(helpers.isEqual(new Date(NaN), new Date(0))).toBe(false);
+		});
+
+		it('compares boxed primitives, arrays and errors beyond their enumerable keys', function () {
+			expect(helpers.isEqual(Object(1n), Object(2n))).toBe(false);
+			expect(helpers.clone(Object(1n)).valueOf()).toBe(1n);
+			// eslint-disable-next-line no-sparse-arrays
+			expect(helpers.isEqual([1, ,], [1])).toBe(false);
+			const renamed = Object.defineProperty(new TypeError('x'), 'name', { value: 'Other' });
+			expect(helpers.isEqual(renamed, new TypeError('x'))).toBe(false);
+			const fake = Object.create(Number.prototype, { [Symbol.toStringTag]: { value: 'Number' }, x: { value: 1, enumerable: true } });
+			expect(Object.getPrototypeOf(helpers.clone(fake))).toBe(Number.prototype);
+			expect(helpers.clone(fake).x).toBe(1);
+		});
+
+		it('matches Map entries and Set members one-to-one', function () {
+			expect(
+				helpers.isEqual(
+					new Map([[1, 1]]),
+					new Map([
+						[1, 1],
+						[2, 2]
+					])
+				)
+			).toBe(false);
+			expect(helpers.isEqual(new Set([1]), new Set([1, 2]))).toBe(false);
+			const x = { v: 1 };
+			const y = { v: 2 };
+			expect(helpers.isEqual(new Set([x, { k: x }, y]), new Set([y, x, { k: y }]))).toBe(false);
+			const twins = new Map([
+				[{ x: 1 }, 1],
+				[{ x: 1 }, 1]
+			]);
+			const distinct = new Map([
+				[{ x: 1 }, 1],
+				[{ x: 2 }, 1]
+			]);
+			expect(helpers.isEqual(twins, distinct)).toBe(false);
+			expect(helpers.isEqual(new Set([{ x: 1 }, { x: 1 }]), new Set([{ x: 1 }, { x: 2 }]))).toBe(false);
+		});
+
+		it('only assumes equality for the exact pair of objects already being compared', function () {
+			const a: Record<string, unknown> = {};
+			a.self = a;
+			const c: Record<string, unknown> = { x: 1 };
+			c.self = c;
+			const b = { self: c };
+			expect(helpers.isEqual(a, b)).toBe(false);
+			expect(helpers.isEqual(b, a)).toBe(false);
+		});
+
+		it('deep-clones circular errors', function () {
+			const error = new Error('loop') as Error & { cause?: unknown };
+			error.cause = error;
+			const copy = helpers.deepClone(error);
+			expect(copy).not.toBe(error);
+			expect(copy.cause).toBe(copy);
+		});
+
+		it('omits symbol keys', function () {
+			const hidden = Symbol('hidden');
+			expect(helpers.omit({ [hidden]: 1, a: 2 }, [hidden])).toStrictEqual({ a: 2 });
+		});
+
+		it('isEmpty handles every kind of value', function () {
+			for (const value of [null, undefined, 0, 1, true, 1n, Symbol('s'), {}, [], '', new Map(), new Set(), function () {}]) {
+				expect(helpers.isEmpty(value)).toBe(true);
+			}
+			for (const value of [{ a: 1 }, [0], new Array(3), 'a', new Map([[1, 1]]), new Set([1]), Object.assign(function () {}, { a: 1 })]) {
+				expect(helpers.isEmpty(value)).toBe(false);
+			}
+		});
+
+		it('creates path containers as ordinary own properties and overwrites existing leaves', function () {
+			const target = helpers.setInObjectByKeys({ a: { b: 1 } } as Record<string, any>, 'a.b', 2);
+			expect(target).toStrictEqual({ a: { b: 2 } });
+			const created = helpers.setInObjectByKeys({} as Record<string, any>, 'x.y', 1);
+			expect(Object.getOwnPropertyDescriptor(created, 'x')).toStrictEqual({ value: { y: 1 }, writable: true, enumerable: true, configurable: true });
+		});
+
+		it('names the offending path prefix in path errors', function () {
+			expect(function () {
+				helpers.setInObjectByKeys({ a: { b: 1 } }, 'a.b.c.d', 2);
+			}).toThrow(new TypeError('setInObjectByKeys: cannot set "a.b.c.d": "a.b" is a number, not an object'));
+			expect(function () {
+				helpers.unflattenObject({ 'a.b': 1, 'a.b.c.d': 2 });
+			}).toThrow(new TypeError('unflattenObject: cannot set "a.b.c.d": "a.b" is already set by another key'));
+			expect(function () {
+				helpers.unflattenObject({ 'a/b/c': 1, 'a/b': 2 }, { separator: '/' });
+			}).toThrow(new TypeError('unflattenObject: cannot set "a/b": "a/b" already holds values set by other keys'));
+		});
+
+		it('names the function in separator and circularity errors', function () {
+			expect(function () {
+				helpers.flattenObject({}, { separator: 1 as any });
+			}).toThrow(new TypeError('flattenObject: `separator` must be a string, got number'));
+			expect(function () {
+				helpers.unflattenObject({}, { separator: '' });
+			}).toThrow(new RangeError('unflattenObject: `separator` must not be empty'));
+			const loop: Record<string, unknown> = {};
+			loop.self = loop;
+			expect(function () {
+				helpers.flattenObject(loop);
+			}).toThrow(new TypeError('flattenObject: cannot flatten a circular structure'));
+			expect(function () {
+				helpers.deepMerge({}, loop);
+			}).toThrow(new TypeError('deepMerge: cannot merge objects with circular references'));
+			expect(function () {
+				helpers.diff(loop, { self: {} });
+			}).toThrow(new TypeError('diff: cannot diff circular structures'));
+			expect(function () {
+				helpers.diff({ self: {} }, loop);
+			}).toThrow(new TypeError('diff: cannot diff circular structures'));
+			expect(function () {
+				helpers.diff({}, []);
+			}).toThrow(new TypeError('diff: `a` and `b` must both be plain objects or both be arrays'));
+		});
+
+		it('diff walks shared subtrees once per path and skips identical references', function () {
+			const shared = { n: 1 };
+			expect(helpers.diff({ x: shared, y: shared }, { x: { n: 2 }, y: { n: 3 } })).toStrictEqual({ added: [], removed: [], changed: ['x.n', 'y.n'] });
+			const loop: Record<string, unknown> = {};
+			loop.self = loop;
+			expect(helpers.diff({ a: loop }, { a: loop })).toStrictEqual({ added: [], removed: [], changed: [] });
+			expect(helpers.diff(loop, loop)).toStrictEqual({ added: [], removed: [], changed: [] });
+		});
+
+		it('hasInObjectByKeys does not see properties of primitives', function () {
+			expect(helpers.hasInObjectByKeys({ name: 'abc' }, 'name.length')).toBe(false);
+			expect(helpers.hasInObjectByKeys({ name: 'abc' }, 'name.0')).toBe(false);
+			expect(helpers.deleteFromObjectByKeys({ name: 'abc' }, 'name.0')).toBe(false);
+			expect(helpers.hasInObjectByKeys({ a: null }, 'a.b.c')).toBe(false);
+			expect(helpers.hasInObjectByKeys({ a: undefined }, 'a.b.c')).toBe(false);
 		});
 	});
 });
