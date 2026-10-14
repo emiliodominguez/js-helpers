@@ -229,7 +229,7 @@ describe('Math helpers', function () {
 		it('should return the logarithm of a number with the specified base', function () {
 			expect(helpers.log(16, 2)).toBe(4);
 			expect(helpers.log(100, 10)).toBe(2);
-			expect(helpers.log(81, 3)).toBeCloseTo(4, 12);
+			expect(helpers.log(81, 3)).toBe(4);
 		});
 
 		it('should be exact for powers of 10, 2 and e', function () {
@@ -668,6 +668,440 @@ describe('Math helpers', function () {
 		it('should return NaN when the total is 0', function () {
 			expect(helpers.percentage(3, 0)).toBeNaN();
 			expect(helpers.percentage(0, 0)).toBeNaN();
+		});
+	});
+
+	describe('regressions (round 2 bug hunt)', function () {
+		it('log should return the exact integer for exact powers of any base', function () {
+			expect(helpers.log(81, 3)).toBe(4);
+			expect(helpers.log(125, 5)).toBe(3);
+			expect(helpers.log(7 ** 20, 7)).toBe(20);
+			expect(helpers.log(1 / 27, 3)).toBe(-3);
+			expect(helpers.log(0.25, 0.5)).toBe(2);
+			expect(helpers.log(1, 3)).toBe(0);
+			expect(helpers.log(80, 3)).toBeCloseTo(3.98869, 4);
+		});
+
+		it('modulo should stay inside [0, divisor) when a tiny negative dividend rounds up to the divisor', function () {
+			expect(helpers.modulo(-1e-20, 3)).toBe(0);
+			expect(helpers.modulo(1e-20, -3)).toBe(0);
+			expect(helpers.modulo(-1e-20, 360)).toBe(0);
+		});
+
+		it('lerp should return the endpoints exactly even when the other endpoint is infinite', function () {
+			expect(helpers.lerp(0, Infinity, 0)).toBe(0);
+			expect(helpers.lerp(-Infinity, 0, 1)).toBe(0);
+		});
+
+		it('lerp should return the constant when both endpoints are equal', function () {
+			expect(helpers.lerp(0.1, 0.1, 0.3)).toBe(0.1);
+			expect(helpers.mapRange(3, 0, 10, 0.1, 0.1)).toBe(0.1);
+		});
+
+		it('median should not underflow when averaging two equal subnormal middle values', function () {
+			expect(helpers.median([Number.MIN_VALUE, Number.MIN_VALUE])).toBe(Number.MIN_VALUE);
+			expect(helpers.median([Number.MAX_VALUE, Number.MAX_VALUE])).toBe(Number.MAX_VALUE);
+			expect(helpers.median([-Number.MAX_VALUE, Number.MAX_VALUE])).toBe(0);
+		});
+
+		it('variance should return Infinity (not a negative number or NaN) when finite inputs overflow', function () {
+			expect(helpers.variance([1e308, -1e308])).toBe(Infinity);
+			expect(helpers.variance([1e308, -1e308, 1e308, 5])).toBe(Infinity);
+			expect(helpers.standardDeviation([-1e308, 1e308])).toBe(Infinity);
+			expect(helpers.variance([1, Infinity])).toBeNaN();
+		});
+	});
+
+	describe('quantile', function () {
+		it('should interpolate linearly between closest ranks (R-7 / PERCENTILE.INC)', function () {
+			expect(helpers.quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
+			expect(helpers.quantile([1, 2, 3, 4], 0.25)).toBe(1.75);
+			expect(helpers.quantile([1, 2, 3, 4], 0.75)).toBe(3.25);
+			expect(helpers.quantile([15, 20, 35, 40, 50], 0.4)).toBe(29);
+			expect(helpers.quantile([10], 0.3)).toBe(10);
+		});
+
+		it('should return the minimum and maximum at q = 0 and q = 1 regardless of order', function () {
+			expect(helpers.quantile([7, 1, 3], 0)).toBe(1);
+			expect(helpers.quantile([7, 1, 3], 1)).toBe(7);
+		});
+
+		it('should agree with median at q = 0.5', function () {
+			expect(helpers.quantile([5, 3, 9, 1], 0.5)).toBe(helpers.median([5, 3, 9, 1]));
+		});
+
+		it('should handle infinities and huge spans', function () {
+			expect(helpers.quantile([-Infinity, 1, 2], 0.25)).toBe(-Infinity);
+			expect(helpers.quantile([Infinity, Infinity], 0.5)).toBe(Infinity);
+			expect(helpers.quantile([-Number.MAX_VALUE, Number.MAX_VALUE], 0.5)).toBe(0);
+		});
+
+		it('should return NaN for empty input or input containing NaN', function () {
+			expect(helpers.quantile([], 0.5)).toBeNaN();
+			expect(helpers.quantile([1, NaN, 3], 0.5)).toBeNaN();
+		});
+
+		it('should not mutate the input', function () {
+			const input = [3, 1, 2];
+			helpers.quantile(input, 0.5);
+			expect(input).toEqual([3, 1, 2]);
+		});
+
+		it('should throw a RangeError when q is outside [0, 1]', function () {
+			expect(function () {
+				helpers.quantile([1, 2], -0.1);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.quantile([1, 2], 1.1);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.quantile([1, 2], NaN);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('percentile', function () {
+		it('should be quantile with p / 100', function () {
+			expect(helpers.percentile([1, 2, 3, 4], 50)).toBe(2.5);
+			expect(helpers.percentile([15, 20, 35, 40, 50], 40)).toBe(29);
+			expect(helpers.percentile([15, 20, 35, 40, 50], 0)).toBe(15);
+			expect(helpers.percentile([15, 20, 35, 40, 50], 100)).toBe(50);
+			expect(helpers.percentile([], 10)).toBeNaN();
+		});
+
+		it('should throw a RangeError when p is outside [0, 100]', function () {
+			expect(function () {
+				helpers.percentile([1], 101);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.percentile([1], -1);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.percentile([1], NaN);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('cumulativeSum', function () {
+		it('should return running totals', function () {
+			expect(helpers.cumulativeSum([1, 2, 3, 4])).toEqual([1, 3, 6, 10]);
+			expect(helpers.cumulativeSum([5])).toEqual([5]);
+			expect(helpers.cumulativeSum([])).toEqual([]);
+		});
+
+		it('should compensate rounding errors', function () {
+			expect(helpers.cumulativeSum([1e100, 1, -1e100])).toEqual([1e100, 1e100, 1]);
+			expect(helpers.cumulativeSum(new Array(10).fill(0.1))[9]).toBe(1);
+		});
+
+		it('should accept any iterable and not mutate arrays', function () {
+			const input = Object.freeze([1, 2]);
+			expect(helpers.cumulativeSum(input)).toEqual([1, 3]);
+			expect(helpers.cumulativeSum(new Set([1, 2, 3]))).toEqual([1, 3, 6]);
+		});
+
+		it('should propagate non-finite values', function () {
+			expect(helpers.cumulativeSum([1, Infinity, 1])).toEqual([1, Infinity, Infinity]);
+			expect(helpers.cumulativeSum([1, NaN])).toEqual([1, NaN]);
+			expect(helpers.cumulativeSum([Infinity, -Infinity])).toEqual([Infinity, NaN]);
+		});
+	});
+
+	describe('approximatelyEqual', function () {
+		it('should use a relative tolerance of 1e-9 by default', function () {
+			expect(helpers.approximatelyEqual(0.1 + 0.2, 0.3)).toBe(true);
+			expect(helpers.approximatelyEqual(1e10, 1e10 + 1)).toBe(true);
+			expect(helpers.approximatelyEqual(1, 1 + 1e-8)).toBe(false);
+			expect(helpers.approximatelyEqual(1, 1.1)).toBe(false);
+		});
+
+		it('should honour custom relative and absolute tolerances', function () {
+			expect(helpers.approximatelyEqual(1, 1.1, { relative: 0.1 })).toBe(true);
+			expect(helpers.approximatelyEqual(1, 1.2, { relative: 0.1 })).toBe(false);
+			expect(helpers.approximatelyEqual(1e-12, 0)).toBe(false);
+			expect(helpers.approximatelyEqual(1e-12, 0, { absolute: 1e-9 })).toBe(true);
+			expect(helpers.approximatelyEqual(5, 6, { relative: 0, absolute: 1 })).toBe(true);
+			expect(helpers.approximatelyEqual(5, 6, { relative: 0 })).toBe(false);
+		});
+
+		it('should treat NaN as never close and infinities as close only to themselves', function () {
+			expect(helpers.approximatelyEqual(NaN, NaN)).toBe(false);
+			expect(helpers.approximatelyEqual(NaN, 1, { absolute: Infinity })).toBe(false);
+			expect(helpers.approximatelyEqual(Infinity, Infinity)).toBe(true);
+			expect(helpers.approximatelyEqual(-Infinity, -Infinity)).toBe(true);
+			expect(helpers.approximatelyEqual(Infinity, -Infinity, { absolute: Infinity })).toBe(false);
+			expect(helpers.approximatelyEqual(Infinity, Number.MAX_VALUE, { relative: 1 })).toBe(false);
+			expect(helpers.approximatelyEqual(0, -0)).toBe(true);
+		});
+
+		it('should throw a RangeError for negative or NaN tolerances', function () {
+			expect(function () {
+				helpers.approximatelyEqual(1, 1, { relative: -1 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.approximatelyEqual(1, 1, { absolute: NaN });
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('weightedAverage', function () {
+		it('should compute the weighted mean', function () {
+			expect(helpers.weightedAverage([1, 2, 3], [3, 2, 1])).toBeCloseTo(10 / 6, 15);
+			expect(helpers.weightedAverage([10, 20], [1, 1])).toBe(15);
+			expect(helpers.weightedAverage([10, 20], [0, 2])).toBe(20);
+			expect(helpers.weightedAverage([0.1, 0.2, 0.3], [0.5, 0.25, 0.25])).toBeCloseTo(0.175, 15);
+		});
+
+		it('should only depend on weight ratios, even for huge or subnormal weights', function () {
+			expect(helpers.weightedAverage([1e-9], [5e-324])).toBe(1e-9);
+			expect(helpers.weightedAverage([10, 20], [Number.MAX_VALUE, Number.MAX_VALUE])).toBe(15);
+			expect(helpers.weightedAverage([10, 20], [1e300, 3e300])).toBe(17.5);
+		});
+
+		it('should return NaN when the total weight is 0', function () {
+			expect(helpers.weightedAverage([10, 20], [0, 0])).toBeNaN();
+			expect(helpers.weightedAverage([], [])).toBeNaN();
+		});
+
+		it('should throw a RangeError on length mismatch', function () {
+			expect(function () {
+				helpers.weightedAverage([1, 2], [1]);
+			}).toThrow(RangeError);
+		});
+
+		it('should throw a RangeError on negative, NaN or infinite weights', function () {
+			expect(function () {
+				helpers.weightedAverage([1, 2], [1, -1]);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.weightedAverage([1, 2], [1, NaN]);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.weightedAverage([1, 2], [1, Infinity]);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('normalize', function () {
+		it('should rescale to [0, 1]', function () {
+			expect(helpers.normalize([10, 20, 15])).toEqual([0, 1, 0.5]);
+			expect(helpers.normalize([-1, 0, 1])).toEqual([0, 0.5, 1]);
+		});
+
+		it('should map all-equal input to zeros and keep empty input empty', function () {
+			expect(helpers.normalize([5, 5, 5])).toEqual([0, 0, 0]);
+			expect(helpers.normalize([7])).toEqual([0]);
+			expect(helpers.normalize([])).toEqual([]);
+		});
+
+		it('should not overflow for ranges larger than Number.MAX_VALUE', function () {
+			expect(helpers.normalize([-Number.MAX_VALUE, 0, Number.MAX_VALUE])).toEqual([0, 0.5, 1]);
+		});
+
+		it('should not mutate the input', function () {
+			const input = [3, 1, 2];
+			expect(helpers.normalize(input)).toEqual([1, 0, 0.5]);
+			expect(input).toEqual([3, 1, 2]);
+		});
+
+		it('should throw a RangeError on non-finite elements', function () {
+			expect(function () {
+				helpers.normalize([1, NaN]);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.normalize([1, Infinity]);
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('formatBytes', function () {
+		it('should use SI units by default', function () {
+			expect(helpers.formatBytes(0)).toBe('0 B');
+			expect(helpers.formatBytes(512)).toBe('512 B');
+			expect(helpers.formatBytes(1000)).toBe('1 kB');
+			expect(helpers.formatBytes(1500)).toBe('1.5 kB');
+			expect(helpers.formatBytes(1_500_000)).toBe('1.5 MB');
+			expect(helpers.formatBytes(3e9)).toBe('3 GB');
+			expect(helpers.formatBytes(1e24)).toBe('1 YB');
+		});
+
+		it('should use IEC units with base 1024', function () {
+			expect(helpers.formatBytes(1023, { base: 1024 })).toBe('1023 B');
+			expect(helpers.formatBytes(1024, { base: 1024 })).toBe('1 KiB');
+			expect(helpers.formatBytes(1536, { base: 1024 })).toBe('1.5 KiB');
+			expect(helpers.formatBytes(1024 ** 3 * 2.25, { base: 1024, decimals: 2 })).toBe('2.25 GiB');
+		});
+
+		it('should honour decimals and drop trailing zeros', function () {
+			expect(helpers.formatBytes(1234567, { decimals: 2 })).toBe('1.23 MB');
+			expect(helpers.formatBytes(1234567, { decimals: 0 })).toBe('1 MB');
+			expect(helpers.formatBytes(1005, { decimals: 3 })).toBe('1.005 kB');
+			expect(helpers.formatBytes(1.5)).toBe('1.5 B');
+		});
+
+		it('should move up a unit when rounding reaches the base', function () {
+			expect(helpers.formatBytes(999_999)).toBe('1 MB');
+			expect(helpers.formatBytes(999.96)).toBe('1 kB');
+			expect(helpers.formatBytes(1023.99, { base: 1024 })).toBe('1 KiB');
+			expect(helpers.formatBytes(999.94)).toBe('999.9 B');
+		});
+
+		it('should keep the sign of negative values and never print -0', function () {
+			expect(helpers.formatBytes(-1500)).toBe('-1.5 kB');
+			expect(helpers.formatBytes(-2048, { base: 1024 })).toBe('-2 KiB');
+			expect(helpers.formatBytes(-0.01)).toBe('0 B');
+			expect(helpers.formatBytes(-0)).toBe('0 B');
+		});
+
+		it('should express values beyond the largest unit in that unit', function () {
+			expect(helpers.formatBytes(1e27)).toBe('1000 YB');
+		});
+
+		it('should throw a RangeError on invalid arguments', function () {
+			expect(function () {
+				helpers.formatBytes(Infinity);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatBytes(NaN);
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatBytes(1, { decimals: -1 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatBytes(1, { decimals: 1.5 });
+			}).toThrow(RangeError);
+			expect(function () {
+				helpers.formatBytes(1, { base: 1001 as any });
+			}).toThrow(RangeError);
+		});
+	});
+
+	describe('ordinal', function () {
+		it('should append the English ordinal suffix', function () {
+			const expected: Array<[number, string]> = [
+				[0, '0th'],
+				[1, '1st'],
+				[2, '2nd'],
+				[3, '3rd'],
+				[4, '4th'],
+				[11, '11th'],
+				[12, '12th'],
+				[13, '13th'],
+				[21, '21st'],
+				[22, '22nd'],
+				[23, '23rd'],
+				[101, '101st'],
+				[111, '111th'],
+				[112, '112th'],
+				[1013, '1013th']
+			];
+			for (const [n, text] of expected) expect(helpers.ordinal(n)).toBe(text);
+		});
+
+		it('should keep the sign of negative integers and treat -0 as 0', function () {
+			expect(helpers.ordinal(-1)).toBe('-1st');
+			expect(helpers.ordinal(-2)).toBe('-2nd');
+			expect(helpers.ordinal(-11)).toBe('-11th');
+			expect(helpers.ordinal(-112)).toBe('-112th');
+			expect(helpers.ordinal(-0)).toBe('0th');
+		});
+
+		it('should write huge integers in full digits', function () {
+			expect(helpers.ordinal(1e21)).toBe('1000000000000000000000th');
+			expect(helpers.ordinal(-1e21 - 2 ** 20)).toBe('-1000000000000001048576th');
+		});
+
+		it('should throw a RangeError for non-integers', function () {
+			for (const value of [1.5, NaN, Infinity, -Infinity]) {
+				expect(function () {
+					helpers.ordinal(value);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('nthRoot', function () {
+		it('should compute exact roots of perfect powers', function () {
+			expect(helpers.nthRoot(27, 3)).toBe(3);
+			expect(helpers.nthRoot(16, 4)).toBe(2);
+			expect(helpers.nthRoot(9, 2)).toBe(3);
+			expect(helpers.nthRoot(3 ** 10, 10)).toBe(3);
+			expect(helpers.nthRoot(1e15, 5)).toBe(1000);
+			expect(helpers.nthRoot(7, 1)).toBe(7);
+		});
+
+		it('should return negative odd roots of negative numbers', function () {
+			expect(helpers.nthRoot(-8, 3)).toBe(-2);
+			expect(helpers.nthRoot(-32, 5)).toBe(-2);
+			expect(helpers.nthRoot(-7, 1)).toBe(-7);
+			expect(helpers.nthRoot(-2, 7) ** 7).toBeCloseTo(-2, 12);
+		});
+
+		it('should return NaN for even roots of negative numbers', function () {
+			expect(helpers.nthRoot(-16, 4)).toBeNaN();
+			expect(helpers.nthRoot(-4, 2)).toBeNaN();
+		});
+
+		it('should approximate irrational roots', function () {
+			expect(helpers.nthRoot(2, 5) ** 5).toBeCloseTo(2, 12);
+		});
+
+		it('should handle special values', function () {
+			expect(helpers.nthRoot(0, 4)).toBe(0);
+			expect(helpers.nthRoot(-0, 4)).toBe(-0);
+			expect(helpers.nthRoot(Infinity, 4)).toBe(Infinity);
+			expect(helpers.nthRoot(-Infinity, 5)).toBe(-Infinity);
+			expect(helpers.nthRoot(NaN, 5)).toBeNaN();
+		});
+
+		it('should throw a RangeError when n is not a positive integer', function () {
+			for (const n of [0, -2, 2.5, NaN, Infinity]) {
+				expect(function () {
+					helpers.nthRoot(8, n);
+				}).toThrow(RangeError);
+			}
+		});
+	});
+
+	describe('roundToStep', function () {
+		it('should snap to the nearest multiple of the step', function () {
+			expect(helpers.roundToStep(1.13, 0.25)).toBe(1.25);
+			expect(helpers.roundToStep(1.12, 0.25)).toBe(1);
+			expect(helpers.roundToStep(7, 5)).toBe(5);
+			expect(helpers.roundToStep(8, 5)).toBe(10);
+			expect(helpers.roundToStep(123456.789, 0.01)).toBe(123456.79);
+		});
+
+		it('should avoid binary floating-point artefacts', function () {
+			expect(helpers.roundToStep(0.3, 0.1)).toBe(0.3);
+			expect(helpers.roundToStep(0.7, 0.1)).toBe(0.7);
+			expect(helpers.roundToStep(1, 1 / 3)).toBe(1);
+			expect(helpers.roundToStep(1e-20, 1e-21)).toBe(1e-20);
+		});
+
+		it('should round ties half away from zero', function () {
+			expect(helpers.roundToStep(0.35, 0.1)).toBe(0.4);
+			expect(helpers.roundToStep(-0.35, 0.1)).toBe(-0.4);
+			expect(helpers.roundToStep(-7.5, 5)).toBe(-10);
+			expect(helpers.roundToStep(1.125, 0.25)).toBe(1.25);
+		});
+
+		it('should fall back to plain division when the decimal shift overflows', function () {
+			expect(helpers.roundToStep(1e300, 1e-300)).toBe(1e300);
+			expect(helpers.roundToStep(1e-300, 1e300)).toBe(0);
+		});
+
+		it('should return non-finite values unchanged', function () {
+			expect(helpers.roundToStep(Infinity, 0.5)).toBe(Infinity);
+			expect(helpers.roundToStep(NaN, 0.5)).toBeNaN();
+		});
+
+		it('should throw a RangeError for invalid steps', function () {
+			for (const step of [0, -1, NaN, Infinity]) {
+				expect(function () {
+					helpers.roundToStep(1, step);
+				}).toThrow(RangeError);
+			}
 		});
 	});
 });

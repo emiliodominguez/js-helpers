@@ -245,7 +245,8 @@ export function pow(base: number, exponent: number): number {
 /**
  * Returns the logarithm of a number in the given base.
  * Bases `10`, `2` and `Math.E` use the dedicated (exact for exact powers) `Math.log10`, `Math.log2` and `Math.log`;
- * other bases use `Math.log(number) / Math.log(base)`.
+ * other bases use `Math.log(number) / Math.log(base)`, snapped to the nearest integer `k` when `base ** k === number`
+ * exactly (so exact powers such as `log(81, 3)` give an exact integer instead of `4.000000000000001`).
  * @param {number} number - The number whose logarithm is wanted
  * @param {number} base - The base of the logarithm
  * @returns {number} `log_base(number)`
@@ -258,7 +259,10 @@ export function log(number: number, base: number): number {
 	if (base === 10) return Math.log10(number);
 	if (base === 2) return Math.log2(number);
 	if (base === Math.E) return Math.log(number);
-	return Math.log(number) / Math.log(base);
+	const ratio = Math.log(number) / Math.log(base);
+	const nearest = Math.round(ratio);
+	if (Number.isFinite(ratio) && Math.abs(ratio - nearest) <= 1e-9 * Math.max(1, Math.abs(nearest)) && Math.pow(base, nearest) === number) return nearest;
+	return ratio;
 }
 
 /**
@@ -287,6 +291,8 @@ export function floor(number: number): number {
  * Mathematical (floored) modulo: the result always has the sign of the `divisor`
  * (so for a positive divisor it lies in `[0, divisor)`), unlike the JavaScript `%` operator (see {@link remainder}).
  * A zero result is always `+0`. Returns `NaN` when `divisor` is `0` or either argument is `NaN`.
+ * When the exact result is so close to `divisor` that it rounds to it (e.g. `modulo(-1e-20, 3)`), `0` — the congruent
+ * value nearest on the circle — is returned, so the result never equals a finite `divisor`.
  * @param {number} dividend - The number to be divided
  * @param {number} divisor - The number to divide by
  * @returns {number} `dividend mod divisor`
@@ -298,7 +304,9 @@ export function floor(number: number): number {
 export function modulo(dividend: number, divisor: number): number {
 	const rest = dividend % divisor;
 	if (rest === 0) return 0;
-	return rest < 0 !== divisor < 0 ? rest + divisor : rest;
+	if (rest < 0 === divisor < 0) return rest;
+	const wrapped = rest + divisor;
+	return wrapped === divisor && Number.isFinite(divisor) ? 0 : wrapped;
 }
 
 /**
@@ -403,7 +411,8 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 /**
- * Linear interpolation between `start` and `end`. `t = 0` gives exactly `start`, `t = 1` exactly `end`;
+ * Linear interpolation between `start` and `end`. `t = 0` gives exactly `start`, `t = 1` exactly `end`
+ * (even when the other endpoint is infinite), and `start === end` gives exactly `start` for every finite `t`;
  * `t` outside `[0, 1]` extrapolates.
  * @param {number} start - Value at `t = 0`
  * @param {number} end - Value at `t = 1`
@@ -414,6 +423,9 @@ export function clamp(value: number, minimum: number, maximum: number): number {
  * lerp(10, 20, 0.25); // 12.5
  */
 export function lerp(start: number, end: number, t: number): number {
+	if (t === 0) return start;
+	if (t === 1) return end;
+	if (start === end && Number.isFinite(t)) return start;
 	return (1 - t) * start + t * end;
 }
 
@@ -498,7 +510,12 @@ export function median(numbers: ReadonlyArray<number>): number {
 	const sorted = Array.from(numbers).sort(compareAscending);
 	if (Number.isNaN(sorted[length - 1])) return NaN;
 	const middle = length >> 1;
-	return length % 2 === 1 ? sorted[middle] : sorted[middle - 1] / 2 + sorted[middle] / 2;
+	if (length % 2 === 1) return sorted[middle];
+	const low = sorted[middle - 1];
+	const high = sorted[middle];
+	const total = low + high;
+	// `(low + high) / 2` is correctly rounded (and exact for equal values, even subnormal); halve first only on overflow.
+	return Number.isFinite(total) ? total / 2 : low / 2 + high / 2;
 }
 
 /**
@@ -532,7 +549,8 @@ export function mode(numbers: ReadonlyArray<number>): number[] {
  * sample variance (divide by `n - 1`).
  * @param {ReadonlyArray<number>} numbers - The numbers
  * @param {VarianceOptions} [options={}] - `sample`: compute the sample variance instead of the population one
- * @returns {number} The variance; `NaN` for an empty array, for a sample of fewer than 2 values, or if an element is not finite
+ * @returns {number} The variance; `NaN` for an empty array, for a sample of fewer than 2 values, or if an element is not finite;
+ * `Infinity` when every element is finite but the variance overflows (e.g. `variance([1e308, -1e308])`)
  * @example
  * variance([2, 4, 4, 4, 5, 5, 7, 9]); // 4
  * variance([1, 2, 3, 4], { sample: true }); // 1.6666666666666667
@@ -543,14 +561,19 @@ export function variance(numbers: ReadonlyArray<number>, options: VarianceOption
 	let count = 0;
 	let mean = 0;
 	let squaredDistance = 0;
+	let allFinite = true;
 	for (const value of numbers) {
 		count++;
+		if (!Number.isFinite(value)) allFinite = false;
 		const delta = value - mean;
 		mean += delta / count;
 		squaredDistance += delta * (value - mean);
 	}
 	const divisor = sample ? count - 1 : count;
-	if (divisor <= 0) return NaN;
+	if (divisor <= 0 || !allFinite) return NaN;
+	// With finite inputs the intermediate deltas can only overflow when the true variance is astronomically large,
+	// which Welford's update turns into `-Infinity` or `NaN`: report the overflow as `Infinity`.
+	if (!(squaredDistance >= 0 && squaredDistance < Infinity)) return Infinity;
 	return squaredDistance / divisor;
 }
 
@@ -669,4 +692,357 @@ export function isOdd(number: number): boolean {
 export function percentage(value: number, total: number): number {
 	if (total === 0) return NaN;
 	return (value / total) * 100;
+}
+
+/**
+ * Options accepted by {@link approximatelyEqual}.
+ */
+export interface ApproximatelyEqualOptions {
+	/**
+	 * Maximum allowed difference relative to the larger magnitude of the two values. Must be `>= 0`.
+	 * @default 1e-9
+	 */
+	relative?: number;
+	/**
+	 * Minimum absolute tolerance, useful for comparisons near zero. Must be `>= 0`.
+	 * @default 0
+	 */
+	absolute?: number;
+}
+
+/**
+ * Options accepted by {@link formatBytes}.
+ */
+export interface FormatBytesOptions {
+	/**
+	 * Maximum number of decimal places (trailing zeros are dropped). Non-negative integer.
+	 * @default 1
+	 */
+	decimals?: number;
+	/**
+	 * `1000` for SI units (`kB`, `MB`, …) or `1024` for IEC binary units (`KiB`, `MiB`, …).
+	 * @default 1000
+	 */
+	base?: 1000 | 1024;
+}
+
+const SI_BYTE_UNITS: ReadonlyArray<string> = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+const IEC_BYTE_UNITS: ReadonlyArray<string> = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB'];
+
+/**
+ * Interpolates between two sorted values `low <= high`, monotonically in `t` and never leaving `[low, high]`.
+ * @param {number} low - Value at `t = 0`
+ * @param {number} high - Value at `t = 1` (must be `>= low`)
+ * @param {number} t - Factor in `[0, 1)`
+ * @returns {number} The interpolated value
+ * @example
+ * interpolateSorted(1, 3, 0.5); // 2
+ */
+function interpolateSorted(low: number, high: number, t: number): number {
+	if (t === 0 || low === high) return low;
+	const span = high - low;
+	if (!Number.isFinite(span)) return (1 - t) * low + t * high;
+	return Math.min(low + t * span, high);
+}
+
+/**
+ * Counts the decimal places in the shortest decimal representation of a finite number.
+ * @param {number} value - A finite number
+ * @returns {number} The number of digits after the decimal point (`0` for integers)
+ * @example
+ * decimalPlaces(0.25); // 2
+ * decimalPlaces(1e-7); // 7
+ */
+function decimalPlaces(value: number): number {
+	const [mantissa, exponent = '0'] = String(Math.abs(value)).split('e');
+	const fraction = mantissa.split('.')[1] ?? '';
+	return Math.max(0, fraction.length - Number(exponent));
+}
+
+/**
+ * Computes the `q`-quantile of an array of numbers by linear interpolation between closest ranks
+ * (R type 7, the default of R, NumPy and Excel's `PERCENTILE.INC`): with the values sorted ascending,
+ * `h = (n - 1) * q` and the result interpolates between the values at ranks `floor(h)` and `ceil(h)`.
+ * The input is not mutated.
+ * @param {ReadonlyArray<number>} numbers - The numbers
+ * @param {number} q - The quantile to compute, in `[0, 1]` (`0` gives the minimum, `0.5` the median, `1` the maximum)
+ * @returns {number} The quantile, or `NaN` if the array is empty or contains `NaN`
+ * @throws {RangeError} when `q` is not in `[0, 1]` (including `NaN`)
+ * @example
+ * quantile([1, 2, 3, 4], 0.5); // 2.5
+ * quantile([1, 2, 3, 4], 0.25); // 1.75
+ * quantile([7, 1, 3], 1); // 7
+ * quantile([], 0.5); // NaN
+ */
+export function quantile(numbers: ReadonlyArray<number>, q: number): number {
+	if (!(q >= 0 && q <= 1)) throw new RangeError(`quantile: q must be in [0, 1], received ${q}`);
+	const length = numbers.length;
+	if (length === 0) return NaN;
+	const sorted = Array.from(numbers).sort(compareAscending);
+	if (Number.isNaN(sorted[length - 1])) return NaN;
+	const position = (length - 1) * q;
+	const lowerIndex = Math.floor(position);
+	if (lowerIndex === length - 1) return sorted[lowerIndex];
+	return interpolateSorted(sorted[lowerIndex], sorted[lowerIndex + 1], position - lowerIndex);
+}
+
+/**
+ * Computes the `p`-th percentile of an array of numbers: `quantile(numbers, p / 100)`
+ * (linear interpolation, same semantics as Excel's `PERCENTILE.INC`).
+ * @param {ReadonlyArray<number>} numbers - The numbers
+ * @param {number} p - The percentile to compute, in `[0, 100]`
+ * @returns {number} The percentile, or `NaN` if the array is empty or contains `NaN`
+ * @throws {RangeError} when `p` is not in `[0, 100]` (including `NaN`)
+ * @example
+ * percentile([1, 2, 3, 4], 50); // 2.5
+ * percentile([15, 20, 35, 40, 50], 40); // 29
+ */
+export function percentile(numbers: ReadonlyArray<number>, p: number): number {
+	if (!(p >= 0 && p <= 100)) throw new RangeError(`percentile: p must be in [0, 100], received ${p}`);
+	return quantile(numbers, p / 100);
+}
+
+/**
+ * Computes the running totals of a sequence of numbers using the same compensated (Neumaier) summation as {@link sum},
+ * so the last element is exactly `sum(numbers)` and rounding errors do not accumulate along the sequence.
+ * @param {Iterable<number>} numbers - The numbers to accumulate
+ * @returns {number[]} A new array of the same length whose `i`-th element is the sum of the first `i + 1` numbers
+ * @example
+ * cumulativeSum([1, 2, 3, 4]); // [1, 3, 6, 10]
+ * cumulativeSum([1e100, 1, -1e100]); // [1e100, 1e100, 1] (naive running sums end with 0)
+ * cumulativeSum([]); // []
+ */
+export function cumulativeSum(numbers: Iterable<number>): number[] {
+	const result: number[] = [];
+	let total = 0;
+	let compensation = 0;
+	for (const value of numbers) {
+		const next = total + value;
+		if (Math.abs(total) >= Math.abs(value)) {
+			compensation += total - next + value;
+		} else {
+			compensation += value - next + total;
+		}
+		total = next;
+		result.push(Number.isFinite(total) ? total + compensation : total);
+	}
+	return result;
+}
+
+/**
+ * Checks whether two numbers are close to each other, with the semantics of Python's `math.isclose`:
+ * `|a - b| <= max(relative * max(|a|, |b|), absolute)`.
+ * `NaN` is never close to anything (not even itself), and an infinity is only close to itself.
+ * Note that with the default `absolute = 0`, no non-zero number is close to `0`; pass an `absolute` tolerance for that.
+ * @param {number} a - First number
+ * @param {number} b - Second number
+ * @param {ApproximatelyEqualOptions} [options={}] - `relative` (default `1e-9`) and `absolute` (default `0`) tolerances
+ * @returns {boolean} `true` if the numbers are within tolerance of each other
+ * @throws {RangeError} when a tolerance is negative or `NaN`
+ * @example
+ * approximatelyEqual(0.1 + 0.2, 0.3); // true
+ * approximatelyEqual(1, 1.1); // false
+ * approximatelyEqual(1, 1.1, { relative: 0.1 }); // true
+ * approximatelyEqual(1e-12, 0); // false
+ * approximatelyEqual(1e-12, 0, { absolute: 1e-9 }); // true
+ */
+export function approximatelyEqual(a: number, b: number, options: ApproximatelyEqualOptions = {}): boolean {
+	const { relative = 1e-9, absolute = 0 } = options;
+	if (!(relative >= 0) || !(absolute >= 0)) {
+		throw new RangeError(`approximatelyEqual: tolerances must be non-negative, received relative ${relative} and absolute ${absolute}`);
+	}
+	if (a === b) return true;
+	if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+	const difference = Math.abs(a - b);
+	return difference <= Math.abs(relative * a) || difference <= Math.abs(relative * b) || difference <= absolute;
+}
+
+/**
+ * Computes the weighted arithmetic mean `Σ(value × weight) / Σ(weight)`, using the compensated {@link sum}.
+ * Weights are rescaled by the largest one first, so only their ratios matter and very large or tiny (subnormal) weights neither overflow nor underflow.
+ * @param {ReadonlyArray<number>} values - The values to average
+ * @param {ReadonlyArray<number>} weights - One finite, non-negative weight per value
+ * @returns {number} The weighted mean, or `NaN` when the total weight is `0` (including empty arrays)
+ * @throws {RangeError} when `values` and `weights` have different lengths, or a weight is negative, `NaN` or infinite
+ * @example
+ * weightedAverage([1, 2, 3], [3, 2, 1]); // 1.6666666666666667
+ * weightedAverage([10, 20], [1, 1]); // 15
+ * weightedAverage([10, 20], [0, 0]); // NaN
+ */
+export function weightedAverage(values: ReadonlyArray<number>, weights: ReadonlyArray<number>): number {
+	if (values.length !== weights.length) {
+		throw new RangeError(`weightedAverage: values and weights must have the same length, received ${values.length} and ${weights.length}`);
+	}
+	let largestWeight = 0;
+	for (let i = 0; i < weights.length; i++) {
+		const weight = weights[i];
+		if (!(weight >= 0 && weight < Infinity)) throw new RangeError(`weightedAverage: weights must be finite and non-negative, received ${weight} at index ${i}`);
+		if (weight > largestWeight) largestWeight = weight;
+	}
+	if (largestWeight === 0) return NaN;
+	// Rescaling the weights into [0, 1] keeps the products and the total weight from overflowing or underflowing.
+	const scaledWeights = weights.map(function (weight) {
+		return weight / largestWeight;
+	});
+	const products = values.map(function (value, index) {
+		return value * scaledWeights[index];
+	});
+	return sum(products) / sum(scaledWeights);
+}
+
+/**
+ * Min–max normalization: linearly rescales the numbers so the smallest becomes `0` and the largest `1`.
+ * Order is preserved (`a <= b` implies `normalize(a) <= normalize(b)`) and every result lies in `[0, 1]`.
+ * When all numbers are equal, every result is `0`.
+ * @param {ReadonlyArray<number>} numbers - The finite numbers to rescale
+ * @returns {number[]} A new array of the same length with values in `[0, 1]`
+ * @throws {RangeError} when an element is not finite (`NaN` or `±Infinity`)
+ * @example
+ * normalize([10, 20, 15]); // [0, 1, 0.5]
+ * normalize([5, 5]); // [0, 0]
+ * normalize([]); // []
+ */
+export function normalize(numbers: ReadonlyArray<number>): number[] {
+	for (const value of numbers) {
+		if (!Number.isFinite(value)) throw new RangeError(`normalize: elements must be finite, received ${value}`);
+	}
+	const low = min(numbers);
+	const high = max(numbers);
+	if (low === high)
+		return numbers.map(function () {
+			return 0;
+		});
+	const range = high - low;
+	// When the range overflows, work on halved values (exact for normal doubles) to keep it finite.
+	const scale = Number.isFinite(range) ? 1 : 0.5;
+	const scaledRange = high * scale - low * scale;
+	return numbers.map(function (value) {
+		return (value * scale - low * scale) / scaledRange;
+	});
+}
+
+/**
+ * Formats a byte count as a human-readable string, using SI units (`kB`, `MB`, …, powers of `1000`) by default,
+ * or IEC binary units (`KiB`, `MiB`, …, powers of `1024`) with `{ base: 1024 }`.
+ * The value is rounded with {@link round} to at most `decimals` places (trailing zeros are dropped), and moves up to the
+ * next unit when rounding reaches the base (`999_999` → `'1 MB'`, not `'1000 kB'`). Negative values keep their sign.
+ * Values beyond the largest unit (`YB` / `YiB`) are expressed in that unit.
+ * @param {number} bytes - The number of bytes (may be negative or fractional)
+ * @param {FormatBytesOptions} [options={}] - `decimals` (default `1`) and `base` (`1000` (default) or `1024`)
+ * @returns {string} The formatted size, e.g. `'1.5 kB'`
+ * @throws {RangeError} when `bytes` is not finite, `decimals` is not a non-negative integer, or `base` is not `1000` or `1024`
+ * @example
+ * formatBytes(0); // '0 B'
+ * formatBytes(1500); // '1.5 kB'
+ * formatBytes(1536, { base: 1024 }); // '1.5 KiB'
+ * formatBytes(1234567, { decimals: 2 }); // '1.23 MB'
+ * formatBytes(-2048, { base: 1024 }); // '-2 KiB'
+ */
+export function formatBytes(bytes: number, options: FormatBytesOptions = {}): string {
+	const { decimals = 1, base = 1000 } = options;
+	if (!Number.isFinite(bytes)) throw new RangeError(`formatBytes: bytes must be finite, received ${bytes}`);
+	if (!Number.isInteger(decimals) || decimals < 0) throw new RangeError(`formatBytes: decimals must be a non-negative integer, received ${decimals}`);
+	if (base !== 1000 && base !== 1024) throw new RangeError(`formatBytes: base must be 1000 or 1024, received ${base}`);
+
+	const units = base === 1024 ? IEC_BYTE_UNITS : SI_BYTE_UNITS;
+	const magnitude = Math.abs(bytes);
+	let exponent = 0;
+	while (exponent < units.length - 1 && magnitude >= Math.pow(base, exponent + 1)) exponent++;
+	let value = round(bytes / Math.pow(base, exponent), decimals);
+	if (Math.abs(value) >= base && exponent < units.length - 1) {
+		exponent++;
+		value = round(bytes / Math.pow(base, exponent), decimals);
+	}
+	// `+ 0` turns `-0` into `0` so tiny negative values do not print as "-0".
+	return `${value + 0} ${units[exponent]}`;
+}
+
+/**
+ * Converts an integer to its English ordinal string (`1st`, `2nd`, `3rd`, `4th`, `11th`, `12th`, `13th`, `21st`, `112th`, …).
+ * Negative integers keep their minus sign and take the suffix of their absolute value (`-1` → `'-1st'`, `-12` → `'-12th'`);
+ * `-0` is treated as `0` (`'0th'`). Every integer is written out in full digits, even above `1e21` (no exponent notation).
+ * @param {number} n - An integer
+ * @returns {string} The number followed by its ordinal suffix
+ * @throws {RangeError} when `n` is not an integer (including `NaN` and `±Infinity`)
+ * @example
+ * ordinal(1); // '1st'
+ * ordinal(22); // '22nd'
+ * ordinal(13); // '13th'
+ * ordinal(112); // '112th'
+ * ordinal(-3); // '-3rd'
+ */
+export function ordinal(n: number): string {
+	if (!Number.isInteger(n)) throw new RangeError(`ordinal: argument must be an integer, received ${n}`);
+	const digits = BigInt(n).toString();
+	const lastTwo = Number(digits.slice(-2).replace('-', ''));
+	const last = lastTwo % 10;
+	let suffix = 'th';
+	if (lastTwo < 11 || lastTwo > 13) {
+		if (last === 1) suffix = 'st';
+		else if (last === 2) suffix = 'nd';
+		else if (last === 3) suffix = 'rd';
+	}
+	return `${digits}${suffix}`;
+}
+
+/**
+ * Computes the real `n`-th root of a number. Odd roots of negative numbers are negative (`nthRoot(-8, 3) === -2`),
+ * even roots of negative numbers are `NaN`. Uses `Math.sqrt` / `Math.cbrt` for `n = 2` / `n = 3`, and otherwise snaps the
+ * result to an integer `k` when `k ** n === |value|` exactly (so `nthRoot(16, 4) === 2`, not `1.9999999999999998`).
+ * @param {number} value - The radicand
+ * @param {number} n - The degree of the root, a positive integer
+ * @returns {number} The real `n`-th root of `value`, or `NaN` when it does not exist
+ * @throws {RangeError} when `n` is not a positive integer
+ * @example
+ * nthRoot(27, 3); // 3
+ * nthRoot(-32, 5); // -2
+ * nthRoot(16, 4); // 2
+ * nthRoot(-16, 4); // NaN
+ */
+export function nthRoot(value: number, n: number): number {
+	if (!Number.isInteger(n) || n < 1) throw new RangeError(`nthRoot: n must be a positive integer, received ${n}`);
+	if (n === 1) return value;
+	if (n === 2) return Math.sqrt(value);
+	if (n === 3) return Math.cbrt(value);
+	if (value === 0) return value;
+	if (value < 0 && n % 2 === 0) return NaN;
+	const magnitude = Math.abs(value);
+	let root = Math.pow(magnitude, 1 / n);
+	const nearest = Math.round(root);
+	if (Math.pow(nearest, n) === magnitude) root = nearest;
+	return value < 0 ? -root : root;
+}
+
+/**
+ * Rounds a number to the nearest multiple of `step` (e.g. snapping to quarters with `step = 0.25`).
+ * Like {@link round}, the computation works on decimal representations, so `roundToStep(0.3, 0.1) === 0.3`
+ * (not `0.30000000000000004`), and ties are rounded half away from zero (`roundToStep(0.35, 0.1) === 0.4`).
+ * Non-finite `value`s are returned as-is, as are values more than `2 ** 53` steps away from zero (already as close to a
+ * multiple of `step` as their precision allows).
+ * @param {number} value - The number to round
+ * @param {number} step - The positive, finite step size
+ * @returns {number} The multiple of `step` nearest to `value`
+ * @throws {RangeError} when `step` is not a finite number greater than `0`
+ * @example
+ * roundToStep(1.13, 0.25); // 1.25
+ * roundToStep(7, 5); // 5
+ * roundToStep(-7.5, 5); // -10
+ * roundToStep(0.3, 0.1); // 0.3
+ */
+export function roundToStep(value: number, step: number): number {
+	if (!(step > 0 && step < Infinity)) throw new RangeError(`roundToStep: step must be a finite number greater than 0, received ${step}`);
+	if (!Number.isFinite(value)) return value;
+	// Work on the magnitude and restore the sign at the end, exactly like `round` (ties away from zero, `-0` preserved).
+	const negative = value < 0 || Object.is(value, -0);
+	const magnitude = Math.abs(value);
+	const stepDecimals = decimalPlaces(step);
+	const shift = Math.max(decimalPlaces(magnitude), stepDecimals);
+	const scaledValue = shiftDecimal(magnitude, shift);
+	const scaledStep = shiftDecimal(step, shift);
+	// Dividing the decimal-shifted integers avoids binary-fraction artefacts such as 0.35 / 0.1 === 3.4999999999999996.
+	const quotient = Number.isFinite(scaledValue) && Number.isFinite(scaledStep) ? scaledValue / scaledStep : magnitude / step;
+	// Beyond 2 ** 53 steps, every double is already (within its own precision) a multiple of `step`.
+	if (!(quotient < 2 ** 53)) return value;
+	const rounded = round(Math.round(quotient) * step, stepDecimals);
+	return negative ? -rounded : rounded;
 }

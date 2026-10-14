@@ -330,4 +330,318 @@ describe('Math helpers (property-based)', function () {
 			);
 		});
 	});
+
+	describe('regressions (round 2 bug hunt)', function () {
+		it('modulo should stay in [0, d) for any finite double dividend', function () {
+			fc.assert(
+				fc.property(fc.double({ noNaN: true, noDefaultInfinity: true }), fc.integer({ min: 1, max: 1000 }), function (a, d) {
+					const result = helpers.modulo(a, d);
+					expect(result).toBeGreaterThanOrEqual(0);
+					expect(result).toBeLessThan(d);
+				})
+			);
+		});
+
+		it('lerp(a, a, t) should be a for any finite t', function () {
+			fc.assert(
+				fc.property(finiteDouble, fc.double({ noNaN: true, noDefaultInfinity: true }), function (a, t) {
+					expect(helpers.lerp(a, a, t)).toBe(a);
+				})
+			);
+		});
+
+		it('median of a constant array should be that constant', function () {
+			fc.assert(
+				fc.property(fc.double({ noNaN: true }), fc.integer({ min: 1, max: 10 }), function (value, length) {
+					expect(helpers.median(new Array(length).fill(value))).toBe(value === 0 ? helpers.median([value]) : value);
+				})
+			);
+		});
+
+		it('variance of finite numbers should never be negative or NaN', function () {
+			fc.assert(
+				fc.property(fc.array(fc.double({ noNaN: true, noDefaultInfinity: true }), { minLength: 1, maxLength: 20 }), function (numbers) {
+					expect(helpers.variance(numbers)).toBeGreaterThanOrEqual(0);
+				})
+			);
+		});
+
+		it('log should return exactly k for base ** k', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: 2, max: 20 }), fc.integer({ min: -10, max: 10 }), function (base, k) {
+					const value = base ** k;
+					fc.pre(Math.pow(base, k) === value);
+					expect(helpers.log(value, base)).toBe(k);
+				})
+			);
+		});
+	});
+
+	describe('quantile / percentile', function () {
+		const q = fc.double({ min: 0, max: 1, noNaN: true });
+
+		it('should be monotonic in q', function () {
+			fc.assert(
+				fc.property(finiteArray, q, q, function (numbers, q1, q2) {
+					const [low, high] = q1 <= q2 ? [q1, q2] : [q2, q1];
+					expect(helpers.quantile(numbers, low)).toBeLessThanOrEqual(helpers.quantile(numbers, high));
+				})
+			);
+		});
+
+		it('should give min at q = 0, max at q = 1 and stay within [min, max]', function () {
+			fc.assert(
+				fc.property(finiteArray, q, function (numbers, value) {
+					const result = helpers.quantile(numbers, value);
+					expect(helpers.quantile(numbers, 0)).toBe(helpers.min(numbers));
+					expect(helpers.quantile(numbers, 1)).toBe(helpers.max(numbers));
+					expect(result).toBeGreaterThanOrEqual(helpers.min(numbers));
+					expect(result).toBeLessThanOrEqual(helpers.max(numbers));
+				})
+			);
+		});
+
+		it('should equal median at q = 0.5 (within rounding)', function () {
+			fc.assert(
+				fc.property(finiteArray, function (numbers) {
+					expect(helpers.quantile(numbers, 0.5)).toBeCloseTo(helpers.median(numbers), 6);
+				})
+			);
+		});
+
+		it('should be order-independent', function () {
+			fc.assert(
+				fc.property(
+					finiteArray.chain(function (numbers) {
+						return fc.tuple(fc.constant(numbers), fc.shuffledSubarray(numbers, { minLength: numbers.length, maxLength: numbers.length }), q);
+					}),
+					function ([numbers, shuffled, value]) {
+						expect(helpers.quantile(shuffled, value)).toBe(helpers.quantile(numbers, value));
+					}
+				)
+			);
+		});
+
+		it('percentile(p) should equal quantile(p / 100)', function () {
+			fc.assert(
+				fc.property(finiteArray, fc.double({ min: 0, max: 100, noNaN: true }), function (numbers, p) {
+					expect(helpers.percentile(numbers, p)).toBe(helpers.quantile(numbers, p / 100));
+				})
+			);
+		});
+	});
+
+	describe('cumulativeSum', function () {
+		it('should preserve length and end with sum', function () {
+			fc.assert(
+				fc.property(fc.array(finiteDouble, { maxLength: 50 }), function (numbers) {
+					const result = helpers.cumulativeSum(numbers);
+					expect(result).toHaveLength(numbers.length);
+					if (numbers.length > 0) expect(result[result.length - 1]).toBe(helpers.sum(numbers));
+				})
+			);
+		});
+
+		it('should equal the sum of each prefix', function () {
+			fc.assert(
+				fc.property(intArray, function (numbers) {
+					const result = helpers.cumulativeSum(numbers);
+					result.forEach(function (value, index) {
+						expect(value).toBe(helpers.sum(numbers.slice(0, index + 1)));
+					});
+				})
+			);
+		});
+	});
+
+	describe('approximatelyEqual', function () {
+		const anyDouble = fc.double();
+		const tolerance = fc.double({ min: 0, max: 1, noNaN: true });
+
+		it('should be reflexive for non-NaN values and never true for NaN', function () {
+			fc.assert(
+				fc.property(anyDouble, function (value) {
+					expect(helpers.approximatelyEqual(value, value)).toBe(!Number.isNaN(value));
+				})
+			);
+		});
+
+		it('should be symmetric', function () {
+			fc.assert(
+				fc.property(anyDouble, anyDouble, tolerance, tolerance, function (a, b, relative, absolute) {
+					expect(helpers.approximatelyEqual(a, b, { relative, absolute })).toBe(helpers.approximatelyEqual(b, a, { relative, absolute }));
+				})
+			);
+		});
+
+		it('should match the math.isclose reference formula for finite values', function () {
+			fc.assert(
+				fc.property(finiteDouble, finiteDouble, tolerance, tolerance, function (a, b, relative, absolute) {
+					const reference = Math.abs(a - b) <= Math.max(relative * Math.max(Math.abs(a), Math.abs(b)), absolute);
+					expect(helpers.approximatelyEqual(a, b, { relative, absolute })).toBe(reference);
+				})
+			);
+		});
+	});
+
+	describe('weightedAverage', function () {
+		it('should equal average with equal weights', function () {
+			fc.assert(
+				fc.property(fc.array(smallInt, { minLength: 1, maxLength: 50 }), fc.integer({ min: 1, max: 1000 }), function (values, weight) {
+					const weights = values.map(function () {
+						return weight;
+					});
+					expect(helpers.weightedAverage(values, weights)).toBe(helpers.average(values));
+				})
+			);
+		});
+
+		it('should lie between the smallest and largest value with positive weight', function () {
+			fc.assert(
+				fc.property(fc.array(fc.tuple(finiteDouble, fc.double({ min: 0, max: 100, noNaN: true })), { minLength: 1, maxLength: 30 }), function (pairs) {
+					const values = pairs.map(function (pair) {
+						return pair[0];
+					});
+					const weights = pairs.map(function (pair) {
+						return pair[1];
+					});
+					const used = values.filter(function (_value, index) {
+						return weights[index] > 0;
+					});
+					fc.pre(used.length > 0);
+					const result = helpers.weightedAverage(values, weights);
+					const slack = 1e-9 * Math.max(1, Math.abs(helpers.max(used)), Math.abs(helpers.min(used)));
+					expect(result).toBeGreaterThanOrEqual(helpers.min(used) - slack);
+					expect(result).toBeLessThanOrEqual(helpers.max(used) + slack);
+				})
+			);
+		});
+	});
+
+	describe('normalize', function () {
+		it('should output values in [0, 1] with the extremes at 0 and 1, preserving order', function () {
+			fc.assert(
+				fc.property(fc.array(fc.double({ noNaN: true, noDefaultInfinity: true }), { minLength: 2, maxLength: 30 }), function (numbers) {
+					const result = helpers.normalize(numbers);
+					expect(result).toHaveLength(numbers.length);
+					const allEqual = helpers.min(numbers) === helpers.max(numbers);
+					for (let i = 0; i < numbers.length; i++) {
+						expect(result[i]).toBeGreaterThanOrEqual(0);
+						expect(result[i]).toBeLessThanOrEqual(1);
+						if (!allEqual && numbers[i] === helpers.min(numbers)) expect(result[i]).toBe(0);
+						if (!allEqual && numbers[i] === helpers.max(numbers)) expect(result[i]).toBe(1);
+						for (let j = 0; j < numbers.length; j++) {
+							if (numbers[i] < numbers[j]) expect(result[i]).toBeLessThanOrEqual(result[j]);
+						}
+					}
+				})
+			);
+		});
+	});
+
+	describe('formatBytes', function () {
+		it('should use a mantissa below the base (except in the largest unit) and keep the sign', function () {
+			fc.assert(
+				fc.property(
+					fc.double({ min: -1e20, max: 1e20, noNaN: true }),
+					fc.constantFrom<1000 | 1024>(1000, 1024),
+					fc.integer({ min: 0, max: 4 }),
+					function (bytes, base, decimals) {
+						const text = helpers.formatBytes(bytes, { base, decimals });
+						const match = /^(-?\d+(?:\.\d+)?) ([kKMGTPEZY]?i?B)$/.exec(text);
+						expect(match).not.toBeNull();
+						const mantissa = Number((match as RegExpExecArray)[1]);
+						expect(Math.abs(mantissa)).toBeLessThan(base);
+						expect(((match as RegExpExecArray)[1].split('.')[1] ?? '').length).toBeLessThanOrEqual(decimals);
+						if (mantissa !== 0) expect(Math.sign(mantissa)).toBe(Math.sign(bytes));
+					}
+				)
+			);
+		});
+
+		it('should be within rounding of the input when parsed back', function () {
+			const factors: Record<string, number> = { B: 1, kB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12, PB: 1e15, EB: 1e18 };
+			fc.assert(
+				fc.property(fc.double({ min: 1, max: 1e18, noNaN: true }), function (bytes) {
+					const [mantissa, unitName] = helpers.formatBytes(bytes, { decimals: 3 }).split(' ');
+					const parsed = Number(mantissa) * factors[unitName];
+					expect(Math.abs(parsed - bytes)).toBeLessThanOrEqual(0.0005 * factors[unitName] * (1 + 1e-9));
+				})
+			);
+		});
+	});
+
+	describe('ordinal', function () {
+		function referenceSuffix(n: number): string {
+			const abs = Math.abs(n);
+			if (abs % 100 >= 11 && abs % 100 <= 13) return 'th';
+			return ['th', 'st', 'nd', 'rd', 'th', 'th', 'th', 'th', 'th', 'th'][abs % 10];
+		}
+
+		it('should match the reference suffix rule and keep the digits', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: -1_000_000_000, max: 1_000_000_000 }), function (n) {
+					expect(helpers.ordinal(n)).toBe(`${n}${referenceSuffix(n)}`);
+				})
+			);
+		});
+	});
+
+	describe('nthRoot', function () {
+		it('nthRoot(x, n) ** n should approximate x', function () {
+			fc.assert(
+				fc.property(fc.double({ min: -1e6, max: 1e6, noNaN: true }), fc.integer({ min: 1, max: 12 }), function (x, n) {
+					const root = helpers.nthRoot(x, n);
+					if (x < 0 && n % 2 === 0) {
+						expect(root).toBeNaN();
+					} else {
+						expect(Math.abs(root ** n - x)).toBeLessThanOrEqual(1e-12 * Math.max(1, Math.abs(x)) * n);
+						expect(Math.sign(root)).toBe(Math.sign(x));
+					}
+				})
+			);
+		});
+
+		it('should be exact for perfect integer powers', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: -50, max: 50 }), fc.integer({ min: 1, max: 9 }), function (k, n) {
+					fc.pre(k >= 0 || n % 2 === 1);
+					fc.pre(Number.isSafeInteger(k ** n));
+					expect(helpers.nthRoot(k ** n, n)).toBe(k);
+				})
+			);
+		});
+	});
+
+	describe('roundToStep', function () {
+		const step = fc.constantFrom(0.01, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 1 / 3, 0.125);
+
+		it('should return a multiple of step within step / 2 of the input', function () {
+			fc.assert(
+				fc.property(finiteDouble, step, function (value, size) {
+					const result = helpers.roundToStep(value, size);
+					const multiple = result / size;
+					expect(Math.abs(multiple - Math.round(multiple))).toBeLessThan(1e-6);
+					expect(Math.abs(result - value)).toBeLessThanOrEqual(size / 2 + 1e-9);
+				})
+			);
+		});
+
+		it('should be idempotent', function () {
+			fc.assert(
+				fc.property(finiteDouble, step, function (value, size) {
+					const once = helpers.roundToStep(value, size);
+					expect(helpers.roundToStep(once, size)).toBe(once);
+				})
+			);
+		});
+
+		it('should agree with round() for decimal steps', function () {
+			fc.assert(
+				fc.property(finiteDouble, fc.integer({ min: 0, max: 4 }), function (value, decimals) {
+					expect(helpers.roundToStep(value, Number(`1e-${decimals}`))).toBe(helpers.round(value, decimals));
+				})
+			);
+		});
+	});
 });
