@@ -61,3 +61,25 @@ range(0, 1, 0); // throws RangeError
 - Any other comment is prose and isn't checked: use it for random values or the current time.
 - The module's exports are in scope; use `import { x } from '@emiliodominguez/js-helpers/<module>'` lines for other modules. `@decorator` syntax works (TC39 standard decorators).
 - Blocks must be self-contained. Dates use local constructors (`new Date(2024, 0, 31)`) so examples pass in every time zone. A block that can't run (DOM, network, placeholders) starts with `// doctest: skip`.
+
+### Mutation testing
+
+Coverage only shows that code ran. [Stryker](https://stryker-mutator.io) checks that the tests _notice_ when the code changes: it introduces small bugs ("mutants") such as flipping `>=` to `>` or deleting a condition, and reports every mutant that no test kills.
+
+```bash
+yarn test:mutation                                # whole library (slow: tens of minutes)
+yarn test:mutation --mutate "src/math/index.ts"   # one module (seconds to a few minutes)
+```
+
+The report is written to `reports/mutation/index.html`. A surviving mutant usually means a missing test, such as a boundary value or an error message. Sometimes the mutant is _equivalent_: it changes the code without changing the behaviour. Then the best fix is often to simplify the code so that the redundant branch disappears.
+
+## Performance
+
+`bench/*.bench.mjs` files hold micro-benchmarks that run against the built package:
+
+```bash
+yarn build && yarn bench            # every bench file
+yarn build && yarn bench arrays     # only bench/arrays.bench.mjs
+```
+
+Each case can include a `baseline` (usually the naive or native approach), which is reported side by side. Before claiming an optimization, run the bench before and after on an idle machine.

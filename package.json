@@ -70,6 +70,8 @@
 		"test:coverage": "jest --coverage",
 		"test:tz": "node scripts/test-timezones.mjs",
 		"test:docs": "node scripts/doctest.mjs",
+		"test:mutation": "stryker run",
+		"bench": "node scripts/bench.mjs",
 		"test:dist": "node scripts/smoke-dist.mjs",
 		"check:exports": "attw --pack . --profile esm-only",
 		"check:size": "node scripts/check-size.mjs",
@@ -88,6 +90,8 @@
 	"devDependencies": {
 		"@arethetypeswrong/cli": "^0.18.5",
 		"@eslint/js": "^10.0.1",
+		"@stryker-mutator/core": "^10",
+		"@stryker-mutator/jest-runner": "^10",
 		"@types/jest": "^30.0.0",
 		"@types/node": "^20.19.43",
 		"esbuild": "^0.28.2",
