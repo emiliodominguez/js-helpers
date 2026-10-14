@@ -183,6 +183,27 @@ export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
 }
 
 /**
+ * Appends to `result` every value of `values` not yet in `seen`, recording it in `seen`. The original value is kept, so `-0` stays
+ * `-0` (a `Set` would hand back `+0`).
+ * @template T
+ * @param {Iterable<T>} values - The values to scan
+ * @param {Set<T>} seen - The values already emitted (mutated)
+ * @param {T[]} result - The output array (mutated)
+ * @returns {T[]} `result`
+ * @example
+ * appendUnseen([1, 1, 2], new Set(), []); // [1, 2]
+ */
+function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
+	for (const value of values) {
+		if (!seen.has(value)) {
+			seen.add(value);
+			result.push(value);
+		}
+	}
+	return result;
+}
+
+/**
  * Remove duplicates from an iterable (SameValueZero equality), keeping the first occurrence of each value.
  * @template T
  * @param {Iterable<T>} iterable - The iterable to be processed
@@ -191,7 +212,7 @@ export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
  * removeDuplicates([1, 2, 2, 3, 1]); // [1, 2, 3]
  */
 export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
-	return Array.from(new Set(iterable));
+	return appendUnseen(iterable, new Set<T>(), []);
 }
 
 /**
@@ -205,9 +226,8 @@ export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
  * union([1, 2, 3], [3, 4, 5]); // [1, 2, 3, 4, 5]
  */
 export function union<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const result = new Set<T>(a);
-	for (const value of b) result.add(value);
-	return Array.from(result);
+	const seen = new Set<T>();
+	return appendUnseen(b, seen, appendUnseen(a, seen, []));
 }
 
 /**
@@ -264,13 +284,15 @@ export function difference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * symmetricDifference([1, 2, 3], [3, 4]); // [1, 2, 4]
  */
 export function symmetricDifference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const setA = new Set<T>(a);
-	const setB = new Set<T>(b);
+	const uniqueA = removeDuplicates(a);
+	const uniqueB = removeDuplicates(b);
+	const setA = new Set<T>(uniqueA);
+	const setB = new Set<T>(uniqueB);
 	const result: T[] = [];
-	for (const value of setA) {
+	for (const value of uniqueA) {
 		if (!setB.has(value)) result.push(value);
 	}
-	for (const value of setB) {
+	for (const value of uniqueB) {
 		if (!setA.has(value)) result.push(value);
 	}
 	return result;

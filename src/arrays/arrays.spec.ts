@@ -145,6 +145,14 @@ describe('Arrays helpers', function () {
 	});
 
 	describe('removeDuplicates', function () {
+		it('should keep the original -0 instead of the +0 a Set hands back', function () {
+			expect(Object.is(helpers.removeDuplicates([-0, 0])[0], -0)).toBe(true);
+			expect(Object.is(helpers.union([-0], [1])[0], -0)).toBe(true);
+			expect(Object.is(helpers.union([1], [-0])[1], -0)).toBe(true);
+			expect(Object.is(helpers.symmetricDifference([-0], [1])[0], -0)).toBe(true);
+			expect(Object.is(helpers.symmetricDifference([1], [-0])[1], -0)).toBe(true);
+		});
+
 		it('should remove duplicates from an array', function () {
 			expect(helpers.removeDuplicates([1, 2, 2, 3, 4, 4])).toEqual([1, 2, 3, 4]);
 		});

@@ -148,21 +148,17 @@ describe('iterables (properties)', function () {
 			);
 		});
 
-		it('unique ≡ arrays.removeDuplicates (up to the sign of zero), and unique(keyFn) ≡ arrays.uniqueBy', function () {
+		it('unique ≡ arrays.removeDuplicates, and unique(keyFn) ≡ arrays.uniqueBy', function () {
 			fc.assert(
 				fc.property(fc.array(fc.oneof(smallInt, fc.constant(NaN), fc.constant(-0)), { maxLength: 30 }), function (xs) {
 					const deduplicated = helpers.toArray(helpers.unique(once(xs)));
-					// unique keeps the original first item, while removeDuplicates goes through a Set, which stores -0 as +0
-					expect(deduplicated).toEqual(
+					// Both keep the original first item (so -0 stays -0); toStrictEqual tells -0 and +0 apart.
+					expect(deduplicated).toStrictEqual(
 						arrays.uniqueBy(xs, function (value) {
 							return value;
 						})
 					);
-					expect(
-						deduplicated.map(function (value) {
-							return value === 0 ? 0 : value;
-						})
-					).toEqual(arrays.removeDuplicates(xs));
+					expect(deduplicated).toStrictEqual(arrays.removeDuplicates(xs));
 					function key(value: number, index: number): number {
 						return Math.abs(value) + (index % 2);
 					}
