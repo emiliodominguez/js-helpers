@@ -162,6 +162,23 @@ describe('Format helpers', function () {
 			expect(spy).toHaveBeenCalledTimes(1);
 		});
 
+		it('should share a cached formatter between an absent option and an undefined one once the memo has moved on', function () {
+			const spy = jest.spyOn(Intl, 'NumberFormat');
+			helpers.formatNumber(1, { minimumIntegerDigits: 13 });
+			helpers.formatNumber(1, { minimumIntegerDigits: 14 });
+			// The call site's memo now holds the second formatter: the first one comes back from the shared cache.
+			expect(helpers.formatNumber(1, { minimumIntegerDigits: 13, maximumFractionDigits: undefined })).toBe('0,000,000,000,001');
+			expect(spy).toHaveBeenCalledTimes(2);
+		});
+
+		it('should treat an undefined option as absent when comparing with the previous call (memo)', function () {
+			helpers.formatPercent(0.5, { decimals: 4, minimumIntegerDigits: undefined });
+			const entries = jest.spyOn(Object, 'entries');
+			expect(helpers.formatPercent(0.25, { decimals: 4 })).toBe('25.0000%');
+			expect(entries).not.toHaveBeenCalled();
+			entries.mockRestore();
+		});
+
 		it('should give the right output when a call site alternates between options and locales (memo)', function () {
 			for (let round = 0; round < 2; round++) {
 				expect(helpers.formatNumber(1.25, { maximumFractionDigits: 0 })).toBe('1');

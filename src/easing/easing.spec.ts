@@ -131,6 +131,22 @@ describe('Easing helpers', function () {
 			expect(flat(0.5)).toBeCloseTo(0.5, 12);
 		});
 
+		it('should solve x(s) = t to ~1e-12 for every curve of a grid of control points (diagonal: the identity)', function () {
+			const grid: number[] = [];
+			for (let k = 0; k <= 20; k++) grid.push(k / 20);
+			for (const a of grid) {
+				for (const b of grid) {
+					const identity = helpers.cubicBezier(a, a, b, b);
+					for (let k = 1; k < 128; k++) expect(Math.abs(identity(k / 128) - k / 128)).toBeLessThanOrEqual(1e-11);
+				}
+			}
+		});
+
+		it('should fall back to bisection where a Newton step leaves the bracket of the root (nearly flat middle)', function () {
+			const identity = helpers.cubicBezier(0.95, 0.95, 0, 0);
+			for (let k = 1; k < 1000; k++) expect(Math.abs(identity(k / 1000) - k / 1000)).toBeLessThanOrEqual(1e-11);
+		});
+
 		it('should stay accurate next to an end with a vertical tangent', function () {
 			// x1 = x2 = 0, y1 = y2 = 1: x(s) = s³ and y(s) = 3s - 3s² + s³.
 			const start = helpers.cubicBezier(0, 1, 0, 1);
@@ -347,6 +363,18 @@ describe('Easing helpers', function () {
 				const x = position(duration) - 1;
 				const v = (position(duration + h) - position(duration - h)) / (2 * h);
 				expect((stiffness * x * x + mass * v * v) / (stiffness * restDelta * restDelta)).toBeCloseTo(1, 4);
+			}
+		});
+
+		it('should scale its duration with 1 / ω (stiff and soft springs are as precise as usual ones)', function () {
+			// Multiplying the stiffness by s² and the damping by s keeps ζ and speeds the motion up by s: position_s(t) = position(s · t).
+			for (const zeta of [0.5, 1, 2]) {
+				const base = helpers.spring({ stiffness: 1, damping: 2 * zeta });
+				for (const scale of [1e-6, 1e2, 1e6, 1e8]) {
+					const scaled = helpers.spring({ stiffness: scale * scale, damping: 2 * zeta * scale });
+					expect(Math.abs(scaled.duration * scale - base.duration)).toBeLessThanOrEqual(1e-12 * base.duration);
+					expect(scaled.position(0.5 / scale)).toBeCloseTo(base.position(0.5), 12);
+				}
 			}
 		});
 

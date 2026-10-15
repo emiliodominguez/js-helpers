@@ -1,21 +1,25 @@
 import * as helpers from '.';
 
 /**
- * Loads a fresh copy of the module while `Intl.Segmenter` is unavailable, to exercise the code-point fallback.
+ * Loads a fresh copy of the module while `Intl.Segmenter` (or, with `withoutIntl`, the whole `Intl` global) is unavailable, to exercise
+ * the code-point fallback.
  */
-function loadWithoutSegmenter(): typeof helpers {
+function loadWithoutSegmenter(withoutIntl: boolean = false): typeof helpers {
+	const global = globalThis as any;
 	const intl = Intl as any;
 	const original = intl.Segmenter;
 	let isolated: typeof helpers | undefined;
 
 	try {
-		delete intl.Segmenter;
+		if (withoutIntl) delete global.Intl;
+		else delete intl.Segmenter;
 		jest.isolateModules(function () {
 			isolated = jest.requireActual<typeof helpers>('./index');
 		});
 		// The segmenter is resolved lazily (and only for text that is not plain ASCII/Latin), so trigger it while Intl.Segmenter is still missing.
 		isolated!.reverse('warm-up \u{1F44D}');
 	} finally {
+		global.Intl = intl;
 		intl.Segmenter = original;
 	}
 
@@ -60,6 +64,12 @@ describe('String helpers', function () {
 				expect(fallback.capitalize('')).toEqual('');
 				expect(fallback.truncate('😀😀😀', 2)).toEqual('😀😀...');
 			});
+
+			it('should also fall back on runtimes without any Intl global', function () {
+				const noIntl = loadWithoutSegmenter(true);
+				expect(noIntl.reverse('a😀e\u0301')).toEqual('\u0301e😀a');
+				expect(noIntl.truncate('😀😀😀', 2)).toEqual('😀😀...');
+			});
 		});
 	});
 
@@ -84,6 +94,12 @@ describe('String helpers', function () {
 			expect(helpers.capitalize('e\u0301lan')).toEqual('E\u0301lan');
 			expect(helpers.capitalize('😀 smile')).toEqual('😀 smile');
 			expect(helpers.capitalize('𐐨x')).toEqual('𐐀x');
+		});
+
+		it('should upper-case the whole first grapheme, combining marks included', function () {
+			// U+0345 (combining ypogegrammeni) upper-cases to U+0399 (Ι): only visible when the mark is converted with its base letter.
+			expect(helpers.capitalize('a\u0345b')).toEqual('A\u0399b');
+			expect(helpers.capitalize('\u03b1\u0345\u03b2')).toEqual('\u0391\u0399\u03b2');
 		});
 	});
 
@@ -1088,6 +1104,11 @@ describe('String helpers', function () {
 			expect(helpers.toSnakeCase('日本Go')).toBe('日本go');
 			expect(helpers.toSnakeCase('Go日本Go')).toBe('go日本go');
 			expect(helpers.toKebabCase('xʰAb')).toBe('xʰab');
+		});
+
+		it('should start a new word at a title-case letter after a lower-case one', function () {
+			expect(helpers.toKebabCase('aǅ')).toBe('a-ǆ');
+			expect(helpers.toSnakeCase('xǈ')).toBe('x_ǉ');
 		});
 	});
 

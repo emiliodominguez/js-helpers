@@ -933,7 +933,8 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
 	for (;;) {
 		const match = separator.exec(joined);
 		const end = match === null ? joined.length : match.index;
-		const next = match === null ? end : separator.lastIndex;
+		// The start of the next line (only read when there is one: after the last line, `exec` resets `lastIndex` to 0).
+		const next = separator.lastIndex;
 		const firstValue = valueIndex;
 		let indentationEnd = start;
 
@@ -946,9 +947,8 @@ function dedentParts(parts: ReadonlyArray<string>): string[] {
 		if (valueIndex === firstValue && indentationEnd === end) {
 			// A blank line is emptied; the first line (the only one starting at 0) is dropped with its line separator, and the last one
 			// with the separator before it (for a single line, that is the whole text either way).
-			removed.fill(1, start, start === 0 ? next : end);
-
 			if (match === null) removed.fill(1, previousEnd);
+			else removed.fill(1, start, start === 0 ? next : end);
 		} else {
 			const indentation = joined.slice(start, indentationEnd);
 			let length = 0;
