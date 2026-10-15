@@ -66,6 +66,64 @@ describe('Objects helpers', function () {
 	});
 
 	describe('clone', function () {
+		it('should not trust a forged ArrayBuffer tag, and should copy typed-array subclasses with a custom tag', function () {
+			const fakeBuffer = { [Symbol.toStringTag]: 'ArrayBuffer', byteLength: 4 };
+			const fakeShared = { [Symbol.toStringTag]: 'SharedArrayBuffer' };
+			const fakeArray = Object.assign([1, 2], { [Symbol.toStringTag]: 'ArrayBuffer' });
+
+			// (Jest's own equality trusts the tag too, so these copies are checked field by field.)
+			const bufferCopy = helpers.clone(fakeBuffer);
+			const sharedFakeCopy = helpers.deepClone(fakeShared);
+			expect(bufferCopy).not.toBe(fakeBuffer);
+			expect(Object.getPrototypeOf(bufferCopy)).toBe(Object.prototype);
+			expect([bufferCopy.byteLength, bufferCopy[Symbol.toStringTag]]).toEqual([4, 'ArrayBuffer']);
+			expect(sharedFakeCopy).not.toBe(fakeShared);
+			expect(sharedFakeCopy[Symbol.toStringTag]).toBe('SharedArrayBuffer');
+			expect(helpers.isEqual(fakeArray, Object.assign([1, 2], { [Symbol.toStringTag]: 'ArrayBuffer' }))).toBe(true);
+			expect(helpers.isEqual(fakeArray, Object.assign([1, 3], { [Symbol.toStringTag]: 'ArrayBuffer' }))).toBe(false);
+
+			class Tagged extends Uint8Array {}
+			// A subclass can report any tag; the copy must still use the real typed-array constructor.
+			Object.defineProperty(Tagged.prototype, Symbol.toStringTag, {
+				get: function () {
+					return 'Custom';
+				}
+			});
+			const tagged = new Tagged([1, 2, 3]);
+			const copy = helpers.deepClone(tagged);
+			expect(copy).toBeInstanceOf(Tagged);
+			expect(Array.from(copy)).toEqual([1, 2, 3]);
+			expect(copy.buffer).not.toBe(tagged.buffer);
+
+			const shared = new SharedArrayBuffer(4);
+			new Uint8Array(shared)[0] = 7;
+			const sharedCopy = helpers.clone(shared);
+			expect(sharedCopy).not.toBe(shared);
+			expect(new Uint8Array(sharedCopy)[0]).toBe(7);
+
+			// Where SharedArrayBuffer is hidden (browser pages that are not cross-origin isolated), a forged tag is still rejected.
+			const global = globalThis as any;
+			const original = global.SharedArrayBuffer;
+			let isolated: typeof helpers | undefined;
+			try {
+				delete global.SharedArrayBuffer;
+				jest.isolateModules(function () {
+					isolated = jest.requireActual<typeof helpers>('./index');
+				});
+			} finally {
+				global.SharedArrayBuffer = original;
+			}
+			const isolatedCopy = isolated!.clone(fakeShared);
+			expect(isolatedCopy).not.toBe(fakeShared);
+			expect(isolatedCopy[Symbol.toStringTag]).toBe('SharedArrayBuffer');
+
+			const view = new DataView(new ArrayBuffer(2));
+			view.setUint8(1, 9);
+			const viewCopy = helpers.clone(view);
+			expect(viewCopy).toBeInstanceOf(DataView);
+			expect(viewCopy.getUint8(1)).toBe(9);
+		});
+
 		it('should return a new object with the same properties', function () {
 			const original = { name: 'John', age: 30 };
 			const copy = helpers.clone(original);

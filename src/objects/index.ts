@@ -2,6 +2,7 @@ import {
 	isArray,
 	isBoolean,
 	isDate,
+	isArrayBuffer,
 	isError,
 	isFunction,
 	isMap,
@@ -220,6 +221,18 @@ function adoptPrototype<T extends object>(copy: T, original: object): T {
 }
 
 /**
+ * The built-in `%TypedArray%.prototype[Symbol.toStringTag]` getter: a typed array's real constructor name, `undefined` otherwise.
+ */
+const typedArrayTag = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag)?.get as () => unknown;
+
+/**
+ * The built-in `SharedArrayBuffer.prototype.byteLength` getter (absent where `SharedArrayBuffer` is unavailable); it throws for anything
+ * that is not a real `SharedArrayBuffer`.
+ */
+const sharedByteLength: (() => unknown) | undefined =
+	typeof SharedArrayBuffer === 'function' ? Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, 'byteLength')?.get : undefined;
+
+/**
  * Copies an `ArrayBuffer`, a typed array or a `DataView` (the underlying bytes are duplicated).
  * @param {ArrayBuffer | ArrayBufferView} value - The buffer or view to copy
  * @returns {ArrayBuffer | ArrayBufferView} An independent copy with the same prototype
@@ -228,8 +241,10 @@ function copyBinary(value: ArrayBuffer | ArrayBufferView): ArrayBuffer | ArrayBu
 	if (!ArrayBuffer.isView(value)) return adoptPrototype(value.slice(0), value);
 
 	const bytes = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
-	// The tag names the constructor: a typed array's, or `DataView`.
-	const View = (globalThis as unknown as Record<string, new (buffer: ArrayBufferLike) => ArrayBufferView>)[getTag(value).slice(8, -1)];
+	// The built-in tag getter reads the typed array's internal name, so a subclass overriding `Symbol.toStringTag` can't mislead it;
+	// it returns `undefined` for a `DataView`.
+	const name = (typedArrayTag.call(value) as string | undefined) ?? 'DataView';
+	const View = (globalThis as unknown as Record<string, new (buffer: ArrayBufferLike) => ArrayBufferView>)[name];
 	return adoptPrototype(new View(bytes), value);
 }
 
@@ -240,8 +255,15 @@ function copyBinary(value: ArrayBuffer | ArrayBufferView): ArrayBuffer | ArrayBu
  */
 function isBinary(value: unknown): value is ArrayBuffer | ArrayBufferView {
 	if (ArrayBuffer.isView(value)) return true;
+	// The tag is only a cheap pre-filter: anything can claim it, so the internal slot is checked too.
 	const tag = getTag(value);
-	return isObject(value) && (tag === '[object ArrayBuffer]' || tag === '[object SharedArrayBuffer]');
+	if (tag === '[object ArrayBuffer]') return isArrayBuffer(value);
+	if (tag !== '[object SharedArrayBuffer]') return false;
+	try {
+		return sharedByteLength?.call(value) !== undefined;
+	} catch {
+		return false;
+	}
 }
 
 /**
