@@ -50,8 +50,9 @@ function nextDown(value: number): number {
  * sortsAfter(0, -0); // => true
  */
 function sortsAfter(a: number, b: number): boolean {
-	// `1 / 0 > 1 / -0`; a `NaN` (the only value not equal to itself) is larger than any number.
-	return a > b || (a === b ? 1 / a > 1 / b : a !== a && b === b);
+	// `1 / 0 > 1 / -0`; a `NaN` (the only value not equal to itself) is larger than any number. Also reporting `NaN` after `NaN` only
+	// makes the insertion sort move a `NaN` past an identical one.
+	return a > b || (a === b ? 1 / a > 1 / b : a !== a);
 }
 
 /**
@@ -895,8 +896,8 @@ export function weightedAverage(values: ReadonlyArray<number>, weights: Readonly
 		if (!(weight >= 0 && weight < Infinity)) assertNumber('weightedAverage', `weights[${i}]`, weight, false, 'a finite number >= 0');
 		largestWeight = Math.max(largestWeight, weight);
 	}
-	if (largestWeight === 0) return NaN;
-	// Rescaling the weights into [0, 1] keeps the products and the total weight from overflowing or underflowing.
+	// Rescaling the weights into [0, 1] keeps the products and the total weight from overflowing or underflowing. A zero total weight
+	// (including empty arrays) needs no special case: `0 / 0` makes every scaled weight, and so the result, `NaN`.
 	const scaledWeights = weights.map(function (weight) {
 		return weight / largestWeight;
 	});
@@ -1051,7 +1052,6 @@ export function nthRoot(value: number, n: number): number {
  */
 export function roundToStep(value: number, step: number): number {
 	assertNumber('roundToStep', 'step', step, step > 0 && step < Infinity, 'a finite number > 0');
-	if (!Number.isFinite(value)) return value;
 	// Work on the magnitude and restore the sign at the end, exactly like `round` (ties away from zero, `-0` preserved).
 	const negative = 1 / value < 0;
 	const magnitude = Math.abs(value);
@@ -1059,9 +1059,12 @@ export function roundToStep(value: number, step: number): number {
 	const shift = Math.max(decimalPlaces(magnitude), stepDecimals);
 	const scaledValue = shiftDecimal(magnitude, shift);
 	const scaledStep = shiftDecimal(step, shift);
-	// Dividing the decimal-shifted integers avoids binary-fraction artefacts such as 0.35 / 0.1 === 3.4999999999999996.
-	const quotient = Number.isFinite(scaledValue) && Number.isFinite(scaledStep) ? scaledValue / scaledStep : magnitude / step;
-	// Beyond 2 ** 53 steps, every double is already (within its own precision) a multiple of `step`.
+	// Dividing the decimal-shifted integers avoids binary-fraction artefacts such as 0.35 / 0.1 === 3.4999999999999996. A shift that
+	// overflows needs no fallback: an infinite `scaledValue` means far more than 2 ** 53 steps, and an infinite `scaledStep` (a step
+	// vastly larger than the value) gives `0`, as `magnitude / step` would after rounding.
+	const quotient = scaledValue / scaledStep;
+	// Beyond 2 ** 53 steps, every double is already (within its own precision) a multiple of `step`. Non-finite values (whose
+	// shifted string is `NaN`) are returned here too.
 	if (!(quotient < 2 ** 53)) return value;
 	const rounded = round(Math.round(quotient) * step, stepDecimals);
 	return negative ? -rounded : rounded;

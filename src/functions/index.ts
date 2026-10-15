@@ -490,7 +490,8 @@ export function memoize<F extends AnyFunction, C extends MemoizeCache<unknown, u
 		const single = arguments.length === 1;
 		// eslint-disable-next-line prefer-rest-params -- see above
 		const first: unknown = arguments[0];
-		let args: unknown[] = [];
+		// Only read when there are several arguments.
+		let args!: unknown[];
 		if (!single) {
 			args = new Array<unknown>(arguments.length);
 			// eslint-disable-next-line prefer-rest-params -- see above

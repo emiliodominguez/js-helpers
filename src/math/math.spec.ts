@@ -266,6 +266,19 @@ describe('Math helpers', function () {
 			expect(helpers.log(-1, 3)).toBeNaN();
 		});
 
+		it('should not snap when a power only matches after underflowing to a subnormal', function () {
+			// 3 ** -678 rounds to Number.MIN_VALUE, but the logarithm of Number.MIN_VALUE is -677.6…, not -678.
+			expect(Math.pow(3, -678)).toBe(Number.MIN_VALUE);
+			expect(helpers.log(Number.MIN_VALUE, 3)).toBe(Math.log(Number.MIN_VALUE) / Math.log(3));
+			expect(helpers.log(Number.MIN_VALUE, 0.9)).toBeCloseTo(7065.6457, 4);
+		});
+
+		it('should return exactly what Math.log returns for base e (no snapping)', function () {
+			const value = Math.pow(Math.E, 16);
+			expect(Math.log(value)).toBe(15.999999999999998);
+			expect(helpers.log(value, Math.E)).toBe(Math.log(value));
+		});
+
 		it('should handle edge values', function () {
 			expect(helpers.log(0, 10)).toBe(-Infinity);
 			expect(helpers.log(-1, 10)).toBeNaN();
@@ -1240,6 +1253,15 @@ describe('Math helpers', function () {
 			expect(helpers.roundToStep(0.7, 0.1)).toBe(0.7);
 			expect(helpers.roundToStep(1, 1 / 3)).toBe(1);
 			expect(helpers.roundToStep(1e-20, 1e-21)).toBe(1e-20);
+		});
+
+		it('should give clean multiples of steps written in exponent notation', function () {
+			// String(1e-7) is '1e-7': its decimal places come from the exponent alone.
+			expect(helpers.roundToStep(1.3e-6, 1e-7)).toBe(1.3e-6);
+			expect(helpers.roundToStep(1.3e-6, 5e-8)).toBe(1.3e-6);
+			expect(helpers.roundToStep(0.35, 1e-9)).toBe(0.35);
+			expect(helpers.roundToStep(1e-7, 3e-8)).toBe(9e-8);
+			expect(helpers.roundToStep(123456789, 2)).toBe(123456790);
 		});
 
 		it('should round ties half away from zero', function () {

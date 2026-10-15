@@ -77,7 +77,8 @@ function createNotifier(): Notifier {
 	// Mutated in place, except during a round, which iterates the array it started with: then it is copied on write.
 	let subscriptions: Subscription[] = [];
 	let notifying = false;
-	let pending = false;
+	// Set by every `notify` call before it is read.
+	let pending: boolean;
 
 	/**
 	 * Calls every active listener of the current list once.

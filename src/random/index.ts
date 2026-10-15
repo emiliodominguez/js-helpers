@@ -358,8 +358,11 @@ export function randomId(size: number = 21, alphabet: string = URL_ALPHABET): st
 /** Largest batch of characters {@link randomId} generates ahead of time. */
 const MAX_POOL_SIZE = 32768;
 
-/** Characters generated ahead of time by {@link randomId}, for `poolAlphabet` from `poolSource`; `pool[poolOffset]` is the next unused one. */
-let pool = '';
+/**
+ * Characters generated ahead of time by {@link randomId}, for `poolAlphabet` from `poolSource`; `pool[poolOffset]` is the next unused one.
+ * Set on the first call (whose alphabet always differs from the initial `undefined` one).
+ */
+let pool: string;
 let poolOffset = 0;
 /** Size of the next batch. */
 let poolNext = 0;
@@ -411,10 +414,11 @@ function generateId(count: number, characters: string[], crypto: CryptoLike): st
 	const codes = new Uint8Array(length);
 	let ascii = typeof Decoder === 'function';
 	for (let i = 0; ascii && i < length; i++) {
-		// Check the code before storing it: the byte array would wrap code points above 255 into the ASCII range.
+		// Check the code before storing it: the byte array would wrap code points above 255 into the ASCII range. A first code unit
+		// below 128 is a whole (one-unit) character: astral characters start with a surrogate.
 		const code = characters[i].charCodeAt(0);
 		codes[i] = code;
-		ascii = characters[i].length === 1 && code < 128;
+		ascii = code < 128;
 	}
 	if (ascii) {
 		if (Decoder !== decoderClass) {
@@ -430,9 +434,9 @@ function generateId(count: number, characters: string[], crypto: CryptoLike): st
 	return id;
 }
 
-/** The alphabet most recently validated by {@link alphabetCharacters}, and its characters. */
+/** The alphabet most recently validated by {@link alphabetCharacters}, and its characters (set together on the first call). */
 let cachedAlphabet: string | undefined;
-let cachedCharacters: string[] = [];
+let cachedCharacters: string[];
 
 /**
  * Splits a {@link randomId} alphabet into its code points and validates it. The last result is cached, so repeated
@@ -477,7 +481,8 @@ export function weightedRandom<T>(items: ReadonlyArray<T>, weights: ReadonlyArra
 		throw new RangeError(`weightedRandom: \`items\` and \`weights\` must have the same length, got ${items.length} and ${weights.length}`);
 	}
 	let total = 0;
-	let lastPositive = -1;
+	// Index of the last positive weight: there is one once the total weight is known to be positive.
+	let lastPositive = 0;
 	for (let i = 0; i < weights.length; i++) {
 		const weight = weights[i];
 		if (!(weight >= 0 && weight < Infinity)) assertNumber('weightedRandom', `weights[${i}]`, weight, false, 'a finite number >= 0');

@@ -512,7 +512,7 @@ describe('random', function () {
 
 		it('should only use the characters of non-ASCII alphabets (regression: code points were truncated to bytes)', function () {
 			// U+0100.. would wrap to control characters and U+0080.. are not single UTF-8 bytes: neither may be decoded as ASCII.
-			for (const alphabet of ['ĀāĂ', 'àéîõü\u0080', 'aĀ']) {
+			for (const alphabet of ['ĀāĂ', 'àéîõü\u0080', 'aĀ', 'ab\u0080']) {
 				const id = helpers.randomId(200, alphabet);
 				expect(Array.from(id)).toHaveLength(200);
 				for (const char of id) expect(alphabet).toContain(char);
@@ -621,6 +621,8 @@ describe('random', function () {
 			expect(helpers.weightedRandom(['a', 'b', 'c'], [0, 1, 0], constant(0))).toBe('b');
 			expect(helpers.weightedRandom(['a', 'b', 'c'], [0, 1, 0], constant(1 - Number.EPSILON / 2))).toBe('b');
 			expect(helpers.weightedRandom(['a', 'b', 'c'], [1, 0, -0], constant(0.999))).toBe('a');
+			// The draw times a subnormal total rounds up to the total itself: the trailing zero-weight item must still not be picked.
+			expect(helpers.weightedRandom(['a', 'b'], [Number.MIN_VALUE, 0], constant(1 - Number.EPSILON / 2))).toBe('a');
 			expect(helpers.weightedRandom(['only'], [3])).toBe('only');
 		});
 

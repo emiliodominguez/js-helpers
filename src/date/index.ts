@@ -344,10 +344,10 @@ function mod(value: number, divisor: number): number {
  * localMidnight(2024, 0, 32); // => new Date(2024, 1, 1) // 00:00 local time
  */
 function localMidnight(year: number, monthIndex: number, day: number): Date {
-	const result = new Date(0);
+	// Go through noon so that the intermediate wall-clock time can never fall into a DST gap. `setFullYear` then moves it to the
+	// target day without remapping years 0-99, as the constructor would.
+	const result = new Date(2000, 0, 1, 12);
 
-	// Go through noon first so that the intermediate wall-clock time can never fall into a DST gap.
-	result.setHours(12, 0, 0, 0);
 	result.setFullYear(year, monthIndex, day);
 	result.setHours(0, 0, 0, 0);
 

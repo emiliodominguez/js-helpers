@@ -734,6 +734,15 @@ describe('Math helpers (property-based)', function () {
 				})
 			);
 		});
+
+		it('should leave decimal multiples of a power-of-ten step unchanged, including steps written in exponent notation', function () {
+			fc.assert(
+				fc.property(fc.integer({ min: -1e6, max: 1e6 }), fc.integer({ min: 0, max: 15 }), function (k, decimals) {
+					const multiple = Number(`${k}e-${decimals}`);
+					expect(helpers.roundToStep(multiple, Number(`1e-${decimals}`))).toBe(multiple);
+				})
+			);
+		});
 	});
 
 	describe('round 8 fast paths', function () {
