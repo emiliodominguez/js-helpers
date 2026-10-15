@@ -151,27 +151,6 @@ export function flattenDeep<T>(array: ReadonlyArray<T>): Array<FlatDeep<T>> {
 }
 
 /**
- * Appends to `result` every value of `values` not yet in `seen`, recording it in `seen`. The original value is kept, so `-0` stays
- * `-0` (a `Set` would hand back `+0`).
- * @template T
- * @param {Iterable<T>} values - The values to scan
- * @param {Set<T>} seen - The values already emitted (mutated)
- * @param {T[]} result - The output array (mutated)
- * @returns {T[]} `result`
- * @example
- * appendUnseen([1, 1, 2], new Set(), []); // => [1, 2]
- */
-function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
-	for (const value of values) {
-		if (!seen.has(value)) {
-			seen.add(value);
-			result.push(value);
-		}
-	}
-	return result;
-}
-
-/**
  * Remove duplicates from an iterable (SameValueZero equality), keeping the first occurrence of each value.
  * @template T
  * @param {Iterable<T>} iterable - The iterable to be processed
@@ -181,7 +160,7 @@ function appendUnseen<T>(values: Iterable<T>, seen: Set<T>, result: T[]): T[] {
  */
 export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
 	const values: ReadonlyArray<T> = Array.isArray(iterable) ? iterable : Array.from(iterable);
-	if (values.length <= 16) {
+	if (values.length <= 32) {
 		// Short inputs: scanning the result (`includes` is SameValueZero, and keeps the first zero as is) beats building a Set.
 		const result: T[] = [];
 		for (const value of values) if (!result.includes(value)) result.push(value);
@@ -196,6 +175,18 @@ export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
 }
 
 /**
+ * Whether two set-operation inputs are both arrays with at most 32 items in total: scanning such short arrays (`includes`, which
+ * is SameValueZero like a `Set`) beats hashing them into a `Set`.
+ * @template T
+ * @param {Iterable<unknown>} a - The first input
+ * @param {Iterable<T>} b - The second input
+ * @returns {boolean} Whether both are short arrays
+ */
+function areShortArrays<T>(a: Iterable<unknown>, b: Iterable<T>): b is ReadonlyArray<T> {
+	return Array.isArray(a) && Array.isArray(b) && a.length + b.length <= 32;
+}
+
+/**
  * Get the union of two iterables: every distinct value from `a`, then every distinct value of `b` not already in `a`.
  * Uses SameValueZero equality.
  * @template T
@@ -206,8 +197,8 @@ export function removeDuplicates<T>(iterable: Iterable<T>): T[] {
  * union([1, 2, 3], [3, 4, 5]); // => [1, 2, 3, 4, 5]
  */
 export function union<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const seen = new Set<T>();
-	return appendUnseen(b, seen, appendUnseen(a, seen, []));
+	// `concat` joins two arrays faster than spreading them.
+	return removeDuplicates(Array.isArray(a) && Array.isArray(b) ? a.concat(b) : [...a, ...b]);
 }
 
 /**
@@ -221,8 +212,12 @@ export function union<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * intersection([1, 2, 3], [2, 3, 4]); // => [2, 3]
  */
 export function intersection<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const remaining = new Set<T>(b);
 	const result: T[] = [];
+	if (areShortArrays(a, b)) {
+		for (const value of a) if (b.includes(value) && !result.includes(value)) result.push(value);
+		return result;
+	}
+	const remaining = new Set<T>(b);
 	for (const value of a) {
 		// Deleting on first match both tests membership and guarantees uniqueness.
 		if (remaining.delete(value)) result.push(value);
@@ -241,8 +236,12 @@ export function intersection<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * difference([1, 2, 3, 1], [2, 3, 4]); // => [1]
  */
 export function difference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
-	const excluded = new Set<T>(b);
 	const result: T[] = [];
+	if (areShortArrays(a, b)) {
+		for (const value of a) if (!b.includes(value) && !result.includes(value)) result.push(value);
+		return result;
+	}
+	const excluded = new Set<T>(b);
 	for (const value of a) {
 		if (!excluded.has(value)) {
 			// Excluding the value once emitted guarantees uniqueness without a second Set.
@@ -281,6 +280,10 @@ export function symmetricDifference<T>(a: Iterable<T>, b: Iterable<T>): T[] {
  * isSubset([1, 4], [1, 2, 3]); // => false
  */
 export function isSubset<T>(subset: Iterable<T>, superset: Iterable<T>): boolean {
+	if (areShortArrays(subset, superset)) {
+		for (const value of subset) if (!superset.includes(value)) return false;
+		return true;
+	}
 	const set = new Set<T>(superset);
 	for (const value of subset) {
 		if (!set.has(value)) return false;
@@ -1166,11 +1169,11 @@ export function intersperse<T, S>(array: ReadonlyArray<T>, separator: S): Array<
  * @template U
  * @param {Iterable<U>} iterable - The items
  * @param {(item: U) => unknown} keyFn - Returns the key of an item
- * @returns {Set<unknown>} The set of keys
+ * @returns {unknown[]} The keys, in iteration order
  */
-function keySet<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): Set<unknown> {
-	const keys = new Set<unknown>();
-	for (const item of iterable) keys.add(keyFn(item));
+function keyList<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): unknown[] {
+	const keys = new Array<unknown>();
+	for (const item of iterable) keys.push(keyFn(item));
 	return keys;
 }
 
@@ -1191,8 +1194,19 @@ function keySet<U>(iterable: Iterable<U>, keyFn: (item: U) => unknown): Set<unkn
  */
 export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
 	assertFunction('differenceBy', 'keyFn', keyFn);
-	const excluded = keySet(b, keyFn);
+	const keys = keyList(b, keyFn);
 	const result: T[] = [];
+	if (areShortArrays(a, keys)) {
+		for (const item of a) {
+			const key = keyFn(item);
+			if (!keys.includes(key)) {
+				keys.push(key);
+				result.push(item);
+			}
+		}
+		return result;
+	}
+	const excluded = new Set(keys);
 	for (const item of a) {
 		const key = keyFn(item);
 		if (!excluded.has(key)) {
@@ -1219,7 +1233,7 @@ export function differenceBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (i
  */
 export function intersectionBy<T, U = T>(a: Iterable<T>, b: Iterable<U>, keyFn: (item: T | U) => unknown): T[] {
 	assertFunction('intersectionBy', 'keyFn', keyFn);
-	const remaining = keySet(b, keyFn);
+	const remaining = new Set(keyList(b, keyFn));
 	const result: T[] = [];
 	for (const item of a) {
 		if (remaining.delete(keyFn(item))) result.push(item);

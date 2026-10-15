@@ -94,7 +94,9 @@ function sortedCopy(numbers: ArrayLike<number>): ArrayLike<number> {
 export function sum(numbers: ReadonlyArray<number>): number {
 	let total = 0;
 	let compensation = 0;
-	// An index loop: several times faster than `for...of` here.
+	// An index loop: several times faster than `for...of` here. There is deliberately no fast path for exact (e.g. integer) input:
+	// an integer pre-pass slowed mixed workloads down, and detecting exact additions inside the loop (`next - total === value`, both
+	// ways) costs as much as the compensation it would skip, so the plain loop of other libraries stays about 1.6 times faster.
 	for (let i = 0; i < numbers.length; i++) {
 		const value = numbers[i];
 		const next = total + value;

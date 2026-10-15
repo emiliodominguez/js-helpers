@@ -324,6 +324,46 @@ describe('Arrays helpers', function () {
 		it('should use SameValueZero', function () {
 			expect(helpers.isSubset([NaN, -0], [0, NaN])).toBe(true);
 		});
+
+		it('should give the same answers for long inputs (hashed rather than scanned)', function () {
+			const evens = helpers.range(0, 80, 2);
+			expect(helpers.isSubset([NaN, -0, 40], [NaN, ...evens])).toBe(true);
+			expect(helpers.isSubset(helpers.range(0, 40), evens)).toBe(false);
+			expect(helpers.isSubset([1], evens)).toBe(false);
+		});
+	});
+
+	describe('set operations on short arrays and long inputs', function () {
+		// Inputs totalling at most 32 items are scanned, longer ones (or non-array iterables) are hashed: both must agree.
+		const a = [3, -0, NaN, 1, 3, 0, 7, NaN];
+		const b = [7, 0, 2, NaN];
+		const padding = helpers.range(100, 140);
+
+		it('should give the same results either way, keeping -0 and NaN as SameValueZero', function () {
+			expect(helpers.union(a, b)).toStrictEqual([3, -0, NaN, 1, 7, 2]);
+			expect(helpers.intersection(a, b)).toStrictEqual([-0, NaN, 7]);
+			expect(helpers.intersection(once(...a), once(...b))).toStrictEqual([-0, NaN, 7]);
+			expect(helpers.difference(a, b)).toStrictEqual([3, 1]);
+			expect(helpers.difference(once(...a), b)).toStrictEqual([3, 1]);
+			expect(helpers.symmetricDifference(a, b)).toStrictEqual([3, 1, 2]);
+			expect(helpers.isSubset(b, a)).toBe(false);
+			expect(helpers.isSubset([0, NaN], a)).toBe(true);
+			expect(helpers.isSubset(once(0, NaN), once(...a))).toBe(true);
+
+			expect(helpers.difference([...a, ...padding], b)).toStrictEqual([3, 1, ...padding]);
+			expect(helpers.intersection([...a, ...padding], [...b, 139])).toStrictEqual([-0, NaN, 7, 139]);
+			expect(helpers.intersection([-0, ...padding], [0])).toStrictEqual([-0]);
+		});
+
+		it('should accept any iterable for either input, such as a Set or a string (iterated by code point)', function () {
+			expect(helpers.intersection<number | string>([1, '1', 'a', 'b'], 'a1')).toStrictEqual(['1', 'a']);
+			expect(helpers.difference<number | string>([1, '1', 'a'], 'a1')).toStrictEqual([1]);
+			expect(helpers.isSubset<number | string>([1], '1')).toBe(false);
+			expect(helpers.isSubset(['1'], '12')).toBe(true);
+			expect(helpers.intersection([1, 2, 3], new Set([3, 2]))).toStrictEqual([2, 3]);
+			expect(helpers.difference([1, 2, 3], new Set([2]))).toStrictEqual([1, 3]);
+			expect(helpers.isSubset([2], new Set([2]))).toBe(true);
+		});
 	});
 
 	describe('chunk', function () {
@@ -776,6 +816,21 @@ describe('Arrays helpers', function () {
 			expect(function () {
 				helpers.shuffle([1, 2, 3], sequence(value));
 			}).toThrow(RangeError);
+		});
+
+		it('should trust only the built-in Math.random: a replacement installed later is still validated', function () {
+			const replacement = jest.spyOn(Math, 'random').mockReturnValue(1);
+			try {
+				expect(function () {
+					helpers.shuffle([1, 2, 3]);
+				}).toThrow(RangeError);
+				expect(function () {
+					helpers.sample([1, 2, 3]);
+				}).toThrow(RangeError);
+			} finally {
+				replacement.mockRestore();
+			}
+			expect(helpers.sample([1, 2, 3])).toBeGreaterThanOrEqual(1);
 		});
 	});
 
@@ -1256,6 +1311,15 @@ describe('Arrays helpers', function () {
 			expect(helpers.differenceBy<{ id: number }, number>(users, once(2), key)).toStrictEqual([{ id: 1 }]);
 			expect(helpers.intersectionBy<{ id: number }, number>(once(...users), [2], key)).toStrictEqual([{ id: 2 }]);
 			expect(helpers.intersectionBy([NaN], [NaN], Number)).toStrictEqual([NaN]);
+		});
+
+		it('differenceBy gives the same results for short arrays (keys scanned) and long inputs (keys hashed)', function () {
+			const a = [1.5, 2.5, 1.9, NaN, 4.2, NaN];
+			const b = [2.1, 9];
+			const padding = helpers.range(100, 140);
+			expect(helpers.differenceBy(a, b, Math.floor)).toStrictEqual([1.5, NaN, 4.2]);
+			expect(helpers.differenceBy(once(...a), b, Math.floor)).toStrictEqual([1.5, NaN, 4.2]);
+			expect(helpers.differenceBy([...a, ...padding, 100.5], b, Math.floor)).toStrictEqual([1.5, NaN, 4.2, ...padding]);
 		});
 	});
 

@@ -1,27 +1,29 @@
-import { isDate, isError, isFunction, isMap, isObject, isPlainObject, isPromise, isRegExp, isSet, isWeakMap, isWeakSet } from '../guards/index.js';
+import {
+	isArray,
+	isBoolean,
+	isDate,
+	isError,
+	isFunction,
+	isMap,
+	isNull,
+	isNumber,
+	isObject,
+	isPlainObject,
+	isPromise,
+	isRegExp,
+	isSet,
+	isString,
+	isSymbol,
+	isUndefined,
+	isWeakMap,
+	isWeakSet
+} from '../guards/index.js';
 import { assertFunction, describe } from '../utils/assert.js';
 import type { AnyFunction, DeepReadonly, NestedKeyOf, PathValue, Primitive, UnionToIntersection } from '../utils/index.js';
 
 // Backward compatibility: these type guards MOVED to the `guards` module (where they are real type predicates).
 // They are re-exported here so existing `objects` imports keep working; prefer importing them from `guards`.
-export {
-	isObject,
-	isArray,
-	isFunction,
-	isString,
-	isNumber,
-	isBoolean,
-	isUndefined,
-	isNull,
-	isSymbol,
-	isPromise,
-	isRegExp,
-	isError,
-	isMap,
-	isSet,
-	isWeakMap,
-	isWeakSet
-} from '../guards/index.js';
+export { isObject, isArray, isFunction, isString, isNumber, isBoolean, isUndefined, isNull, isSymbol, isPromise, isRegExp, isError, isMap, isSet, isWeakMap, isWeakSet };
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Types
@@ -525,11 +527,11 @@ export function omit<T extends object, K extends keyof T>(object: T, keys: Reado
 export function mapValues<T extends object, R>(object: T, fn: (value: T[keyof T], key: keyof T, object: T) => R): { [K in keyof T]: R } {
 	assertFunction('mapValues', 'fn', fn);
 	// For array types the mapped return type is an array type, so the runtime result must be an array too.
-	const isArray = Array.isArray(object);
-	const result = (isArray ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
+	const arrayInput = Array.isArray(object);
+	const result = (arrayInput ? new Array<R>(object.length) : {}) as { [K in keyof T]: R };
 	for (const key of ownEnumerableKeys(object)) {
 		const value = fn((object as Properties)[key] as T[keyof T], key as keyof T, object);
-		if (isArray) defineValue(result, key, value);
+		if (arrayInput) defineValue(result, key, value);
 		else definePlain(result, key, value);
 	}
 	return result;

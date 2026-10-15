@@ -91,7 +91,14 @@ export function assertDelay(caller: string, name: string, value: number, allowIn
 }
 
 /**
- * Calls `random()` and returns its result, which must be a number in `[0, 1)`.
+ * The built-in `Math.random` (captured at load time, so a replacement installed later is still validated).
+ * @internal
+ */
+const nativeRandom = Math.random;
+
+/**
+ * Calls `random()` and returns its result, which must be a number in `[0, 1)`. The built-in `Math.random` (the usual default)
+ * is trusted, since the specification guarantees that range: its results are returned unchecked.
  * @param {string} caller - Name of the public function, used in the error message
  * @param {RandomGenerator} random - The generator to draw from
  * @returns {number} The drawn value
@@ -100,6 +107,7 @@ export function assertDelay(caller: string, name: string, value: number, allowIn
  * @internal
  */
 export function draw(caller: string, random: RandomGenerator): number {
+	if (random === nativeRandom) return random();
 	assertFunction(caller, 'random', random);
 	const value = random();
 	if (!(value >= 0 && value < 1)) throw new RangeError(`${caller}: \`random()\` must return a number in [0, 1), got ${String(value)}`);

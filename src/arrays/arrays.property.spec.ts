@@ -182,6 +182,24 @@ describe('arrays (property-based)', function () {
 		);
 	});
 
+	it('set operations agree on short arrays (scanned) and other iterables (hashed)', function () {
+		const value = fc.oneof(smallInt, fc.constantFrom(-0, NaN));
+		const values = fc.array(value, { maxLength: 24 });
+		function floorKey(item: number): number {
+			return Math.floor(item / 2);
+		}
+		fc.assert(
+			fc.property(values, values, function (a, b) {
+				expect(helpers.union(a, b)).toStrictEqual(helpers.union(a.values(), b.values()));
+				expect(helpers.intersection(a, b)).toStrictEqual(helpers.intersection(a.values(), b.values()));
+				expect(helpers.difference(a, b)).toStrictEqual(helpers.difference(a.values(), b.values()));
+				expect(helpers.isSubset(a, b)).toBe(helpers.isSubset(a.values(), b.values()));
+				expect(helpers.differenceBy(a, b, floorKey)).toStrictEqual(helpers.differenceBy(a.values(), b, floorKey));
+				expect(helpers.symmetricDifference(a, b)).toStrictEqual([...helpers.difference(a.values(), b), ...helpers.difference(b.values(), a)]);
+			})
+		);
+	});
+
 	it('isSubset holds exactly when the difference is empty', function () {
 		fc.assert(
 			fc.property(smallInts, smallInts, function (a, b) {

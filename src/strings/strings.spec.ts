@@ -662,6 +662,14 @@ describe('String helpers', function () {
 			expect(helpers.interpolate('{a} {b} {c} {d} {e}', { a: null, b: false, c: 0, d: [1, 2], e: 10n })).toEqual('null false 0 1,2 10');
 		});
 
+		it('should stay correct while more templates alternate than its parse cache holds', function () {
+			for (let round = 0; round < 3; round++) {
+				for (let i = 0; i < 40; i++) {
+					expect(helpers.interpolate(`#${i} {a}-{b.c}`, { a: round, b: { c: i } })).toBe(`#${i} ${round}-${i}`);
+				}
+			}
+		});
+
 		it('should leave missing placeholders untouched', function () {
 			expect(helpers.interpolate('Hi {missing}', {})).toEqual('Hi {missing}');
 			expect(helpers.interpolate('{user.age}', { user: { name: 'Ada' } })).toEqual('{user.age}');

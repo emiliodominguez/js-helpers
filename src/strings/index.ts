@@ -127,15 +127,10 @@ function firstGrapheme(string: string): string {
 }
 
 /**
- * Lower-case Latin digraphs, whose Unicode title-case form is a dedicated letter (`ǆ` → `ǅ`) rather than their upper-case form (`Ǆ`).
- * Only lower-case keys are needed: every caller lower-cases the word before title-casing its first letter.
+ * Lower-case Latin digraphs, whose Unicode title-case form is a dedicated letter (`ǆ` → `ǅ`) rather than their upper-case form (`Ǆ`):
+ * the code point just before them. Only lower-case letters are needed: every caller lower-cases the word before title-casing its first letter.
  */
-const TITLE_CASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
-	['ǆ', 'ǅ'],
-	['ǉ', 'ǈ'],
-	['ǌ', 'ǋ'],
-	['ǳ', 'ǲ']
-]);
+const TITLE_CASE_EXCEPTIONS = /[ǆǉǌǳ]/;
 
 /**
  * Title-cases a single lower-case letter (one code point) for use at the start of a word. Digraphs use their dedicated title-case letter (`'ǆ'` → `'ǅ'`).
@@ -147,9 +142,7 @@ const TITLE_CASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
 function titleCaseLetter(letter: string): string {
 	if (letter.charCodeAt(0) < 0x80) return letter.toUpperCase();
 
-	const exception = TITLE_CASE_EXCEPTIONS.get(letter);
-
-	if (exception !== undefined) return exception;
+	if (TITLE_CASE_EXCEPTIONS.test(letter)) return String.fromCharCode(letter.charCodeAt(0) - 1);
 
 	const upper = letter.toUpperCase();
 	const head = String.fromCodePoint(upper.codePointAt(0) as number);
@@ -524,6 +517,9 @@ export function removeDiacritics(string: string): string {
  */
 const SLUG_TRANSLITERATIONS: Readonly<Record<string, string>> = { ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', đ: 'd', ð: 'd', ł: 'l', þ: 'th', ı: 'i' };
 
+/** Matches the letters of {@link SLUG_TRANSLITERATIONS}. */
+const SLUG_LETTERS = new RegExp(`[${Object.keys(SLUG_TRANSLITERATIONS).join('')}]`, 'g');
+
 /**
  * Converts a string to a URL-friendly slug: compatibility-decomposed (NFKD), diacritics removed, a few common Latin letters transliterated
  * (`ß` → `ss`, `æ` → `ae`, `ø` → `o`...), lower-cased, every run of characters outside `[a-z0-9]` replaced by a single `-`,
@@ -543,7 +539,7 @@ export function toSlug(string: string): string {
 				.normalize('NFKD')
 				.replace(DIACRITICS, '')
 				.toLowerCase()
-				.replace(/[ßæœøđðłþı]/g, function (letter: string): string {
+				.replace(SLUG_LETTERS, function (letter: string): string {
 					return SLUG_TRANSLITERATIONS[letter];
 				})
 		: string.toLowerCase();
@@ -719,9 +715,10 @@ export function escapeHtml(string: string): string {
 }
 
 /**
- * Characters for the entities decoded by {@link unescapeHtml}.
+ * Characters for the entities decoded by {@link unescapeHtml}, except the apostrophe: the other entities it decodes (`&#39;`, `&#x27;`,
+ * `&#X27;` and `&apos;`) are all spellings of `'`.
  */
-const HTML_UNESCAPES: Readonly<Record<string, string>> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'", '&#X27;': "'", '&apos;': "'" };
+const HTML_UNESCAPES: Readonly<Record<string, string | undefined>> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"' };
 
 /**
  * Reverses {@link escapeHtml}: decodes `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&#x27;`, `&apos;` and `&amp;`. Decoding happens in a single pass,
@@ -736,7 +733,7 @@ export function unescapeHtml(string: string): string {
 	if (!string.includes('&')) return string;
 
 	return string.replace(/&(?:amp|lt|gt|quot|apos|#39|#[xX]27);/g, function (entity: string): string {
-		return HTML_UNESCAPES[entity];
+		return HTML_UNESCAPES[entity] ?? "'";
 	});
 }
 
@@ -779,12 +776,10 @@ function resolvePath(source: unknown, path: string): unknown {
 const PLACEHOLDER = /\{([^{}]+)\}/;
 
 /**
- * The template {@link interpolate} parsed last (templates are usually constants, applied to many value objects), split into the text
- * parts at even indices (first and last included, possibly empty) and the raw paths between braces at odd ones.
+ * The templates {@link interpolate} parsed recently, at most 16 (templates are usually constants, applied to many value objects),
+ * each split into the text parts at even indices (first and last included, possibly empty) and the raw paths between braces at odd ones.
  */
-let lastTemplate: string | undefined;
-/** @see lastTemplate */
-let lastParts: string[] = [];
+const parsedTemplates = new Map<string, string[]>();
 
 /**
  * Replaces `{key}` and `{nested.key}` placeholders (whitespace inside the braces is ignored) with values from an object.
@@ -798,12 +793,15 @@ let lastParts: string[] = [];
  * interpolate('Hi {missing}', {}); // => 'Hi {missing}'
  */
 export function interpolate(template: string, values: InterpolationValues): string {
-	if (template !== lastTemplate) {
-		lastParts = template.split(PLACEHOLDER);
-		lastTemplate = template;
+	let parts = parsedTemplates.get(template);
+
+	if (parts === undefined) {
+		// Simple eviction keeps the cache bounded: start afresh once it is full.
+		if (parsedTemplates.size === 16) parsedTemplates.clear();
+		parts = template.split(PLACEHOLDER);
+		parsedTemplates.set(template, parts);
 	}
 
-	const parts = lastParts;
 	let result = parts[0];
 
 	for (let index = 1; index < parts.length; index += 2) {

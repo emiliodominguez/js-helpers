@@ -398,6 +398,23 @@ describe('Math helpers', function () {
 		});
 	});
 
+	describe('random draws', function () {
+		it('should trust only the built-in Math.random: a replacement installed later is still validated', function () {
+			const replacement = jest.spyOn(Math, 'random').mockReturnValue(1);
+			try {
+				expect(function () {
+					helpers.randomBetween(0, 10);
+				}).toThrow(RangeError);
+				expect(function () {
+					helpers.randomIntBetween(0, 10);
+				}).toThrow(RangeError);
+			} finally {
+				replacement.mockRestore();
+			}
+			expect(helpers.randomIntBetween(3, 3)).toBe(3);
+		});
+	});
+
 	describe('randomIntBetween', function () {
 		it('should return a random integer between `min` and `max`, inclusive', function () {
 			for (let i = 0; i < 100; i++) {
