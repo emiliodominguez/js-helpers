@@ -204,6 +204,20 @@ describe('Arrays helpers', function () {
 	});
 
 	describe('removeDuplicates', function () {
+		it('should keep the original sign of zero on the hashed path (more than 32 items)', function () {
+			const many = Array.from({ length: 40 }, function (_, index) {
+				return index + 1;
+			});
+			const negativeFirst = helpers.removeDuplicates([-0, ...many, 0]);
+			const positiveFirst = helpers.removeDuplicates([0, ...many, -0]);
+			const noZero = helpers.removeDuplicates([...many, ...many]);
+
+			expect(negativeFirst).toHaveLength(41);
+			expect(Object.is(negativeFirst[0], -0)).toBe(true);
+			expect(Object.is(positiveFirst[0], 0)).toBe(true);
+			expect(noZero).toStrictEqual(many);
+		});
+
 		it('should give the same result for long inputs (more than 16 items)', function () {
 			const long = [3, -0, 3, NaN, 'x', 0, NaN, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'x', -0, 11];
 			const result = helpers.removeDuplicates(long);
