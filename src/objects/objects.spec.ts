@@ -1134,6 +1134,16 @@ describe('Objects helpers', function () {
 			expect(1 in sparse).toBe(false);
 		});
 
+		it('mapValues maps an extra array key that Array.prototype holds as a read-only property', function () {
+			// `Array.prototype[Symbol.unscopables]` is not writable: an assignment to the result array would throw.
+			const input = Object.defineProperty([1], Symbol.unscopables, { value: 2, enumerable: true });
+			const result = helpers.mapValues(input, function (value) {
+				return (value as number) * 10;
+			});
+			expect(Array.from(result)).toStrictEqual([10]);
+			expect(Object.getOwnPropertyDescriptor(result, Symbol.unscopables)).toStrictEqual({ value: 20, writable: true, enumerable: true, configurable: true });
+		});
+
 		it('setInObjectByKeys never writes through inherited properties (built-ins stay untouched)', function () {
 			const target: Record<string, any> = {};
 			helpers.setInObjectByKeys(target, 'toString.polluted', 1);
@@ -1554,6 +1564,12 @@ describe('Objects helpers', function () {
 			expect(helpers.deepClone({ thenable }).thenable).toBe(thenable);
 			expect(helpers.clone(thenable)).toBe(thenable);
 			expect(helpers.isEqual(thenable, { then: thenable.then })).toBe(false);
+			// A thenable array is promise-like too: only equal to itself, and never copied.
+			const thenableArray = Object.assign([1, 2], { then: thenable.then });
+			expect(helpers.isEqual(thenableArray, Object.assign([1, 2], { then: thenable.then }))).toBe(false);
+			expect(helpers.isEqual(thenableArray, thenableArray)).toBe(true);
+			expect(helpers.clone(thenableArray)).toBe(thenableArray);
+			expect(helpers.deepClone([thenableArray])[0]).toBe(thenableArray);
 		});
 
 		it('defines copied keys as own data properties, without running inherited setters', function () {

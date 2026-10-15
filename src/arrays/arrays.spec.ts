@@ -273,6 +273,11 @@ describe('Arrays helpers', function () {
 		it('should work with one-shot iterables', function () {
 			expect(helpers.union(once('a', 'b'), once('b', 'c'))).toStrictEqual(['a', 'b', 'c']);
 		});
+
+		it('should mix an array with another kind of iterable, in either order', function () {
+			expect(helpers.union([1, 2], new Set([2, 3]))).toStrictEqual([1, 2, 3]);
+			expect(helpers.union(new Set([1, 2]), [2, 3])).toStrictEqual([1, 2, 3]);
+		});
 	});
 
 	describe('intersection', function () {
@@ -1567,6 +1572,28 @@ describe('Arrays helpers', function () {
 			for (const a of sequences) {
 				for (const b of sequences) expectValidMinimalScript(a, b, helpers.diffSequences(a, b));
 			}
+		});
+
+		it('should be minimal when the backward search must choose between diagonals (sequences of different lengths)', function () {
+			const pairs: Array<[number[], number[]]> = [
+				[
+					[1, 1, 1, 0, 0],
+					[0, 0, 0, 1, 0, 1, 1]
+				],
+				[
+					[1, 1, 0, 1, 0],
+					[0, 0, 0, 0, 1, 1, 1]
+				],
+				[
+					[2, 2, 1, 2, 0],
+					[0, 2, 0, 1, 0, 1, 1]
+				]
+			];
+			for (const [a, b] of pairs) {
+				expectValidMinimalScript(a, b, helpers.diffSequences(a, b));
+				expectValidMinimalScript(b, a, helpers.diffSequences(b, a));
+			}
+			expect(helpers.longestCommonSubsequence([2, 2, 1, 2, 0], [0, 2, 0, 1, 0, 1, 1])).toHaveLength(3);
 		});
 
 		it('should split strings and other iterables into elements', function () {
