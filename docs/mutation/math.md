@@ -1,0 +1,31 @@
+# math — equivalent mutants
+
+- 25: `currentExponent = '0'` → `""` — `Number('')` is `0`, the same as `Number('0')`.
+- 40: `value > 0` → `value >= 0` — `nextDown` already returned for `value === 0`.
+- 55: `1 / a > 1 / b` → `>=` — reached only when `a === b`. It only adds moves between equal numbers of the same sign, which are identical; `0` vs `-0` still give `Infinity` vs `-Infinity`.
+- 55: `1 / a` → `1 * a` — when `a === b`, the zero pair still compares `±0` against `∓Infinity` correctly, and nonzero equal values only swap identical numbers.
+- 55: `1 / b` → `1 * b` — same as above.
+- 69: `length > 32` → `true` — threshold between two sorts with identical results: the typed-array sort is used for every length.
+- 69: `length > 32` → `false` — same as above (insertion sort for every length).
+- 69: `length > 32` → `>=` — same as above (the threshold moves by one).
+- 69: `length > 32` → `<=` — same as above (the two paths swap).
+- 75: `j > 0 &&` → `true &&` — at `j = 0`, `sortsAfter(sorted[-1] /* undefined */, value)` is false, so the loop stops anyway. The bound check only avoids a slow out-of-bounds read.
+- 75: `j > 0` → `j >= 0` — same as above.
+- 104: `Math.abs(total) >= Math.abs(value)` → `>` (`sum`) — when the magnitudes are equal, both Neumaier correction formulas are exact and give the same value.
+- 140: round fast-path test → `false` — the decimal-string slow path is exact and gives the same result. The fast path is speed only.
+- 140: `>` → `>=` — only moves the fast-path boundary; both paths agree there.
+- 140: `* 2 ** -46` → `/ 2 ** -46` — the margin becomes huge, so the exact slow path always runs: same result.
+- 140: `2 ** -46` → `2 ** +46` — same as above.
+- 142: `1 / number < 0` → `<= 0` — `1 / number` is `0` only for `±Infinity`, which `round` returns unchanged before using `negative`.
+- 152: `POWERS_OF_TEN = [...]` → `[]` — the table only feeds the fast path: an `undefined` scale makes the product `NaN`, so the exact slow path runs.
+- 278: `<= 1e-9 * …` → `<` (`log`) — exact equality between the ratio error and the tolerance does not happen in practice, and the `Math.pow(base, nearest) === number` test decides anyway.
+- 321: `rest < 0` → `rest <= 0` (`modulo`) — `rest === 0` already returned.
+- 321: `divisor < 0` → `divisor <= 0` — a zero divisor makes `rest` `NaN`, and both branches then return `NaN`.
+- 493: `start <= end` → `start < end` (`inRange`) — when `start === end`, both branches test the empty range `[start, start)`.
+- 586: `divisor <= 0` → `divisor < 0` (`variance`) — with a zero divisor, `squaredDistance` is `0` and the result is `0 / 0 = NaN` anyway.
+- 775: `exponent = '0'` → `""` (`decimalPlaces`) — `Number('')` is `0`.
+- 841: `Math.abs(total) >= Math.abs(value)` → `>` (`cumulativeSum`) — same as line 104.
+- 969: `magnitude >= base ** (exponent + 1)` → `>` (`formatBytes`) — at the exact boundary (e.g. 1000), the post-rounding `Math.abs(value) >= base` bump selects the next unit anyway.
+- 1025: `n === 2 ? Math.sqrt` → `false` (`nthRoot`) — V8's `Math.pow(x, 0.5)` equals `Math.sqrt(x)` (0 differences in 22M random doubles), and the snap and the sign handling then agree.
+- 1056: `1 / value < 0` → `<= 0` (`roundToStep`) — only infinite values give `1 / value === 0`, and they are returned before `negative` is used.
+- 1068: `quotient < 2 ** 53` → `<=` — exactly 2^53 steps means the value is already an exact multiple, and rounding returns it unchanged.

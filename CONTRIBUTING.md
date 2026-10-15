@@ -71,7 +71,7 @@ yarn test:mutation                                # whole library (slow: tens of
 yarn test:mutation --mutate "src/math/index.ts"   # one module (seconds to a few minutes)
 ```
 
-The report is written to `reports/mutation/index.html`. A surviving mutant usually means a missing test, such as a boundary value or an error message. Sometimes the mutant is _equivalent_: it changes the code without changing the behaviour. Then the best fix is often to simplify the code so that the redundant branch disappears.
+The report is written to `reports/mutation/index.html`. Known equivalent mutants are listed per module in [docs/mutation](./docs/mutation/README.md); a survivor that is not on its module's list is a real gap. A surviving mutant usually means a missing test, such as a boundary value or an error message. Sometimes the mutant is _equivalent_: it changes the code without changing the behaviour. Then the best fix is often to simplify the code so that the redundant branch disappears.
 
 ## Performance
 

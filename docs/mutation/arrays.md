@@ -1,0 +1,58 @@
+# arrays — equivalent mutants
+
+- 96: flatten `i < array.length` → `<=` — index `length` is never `in` the array, so the extra iteration is skipped by the hole check.
+- 100: flatten `j < value.length` → `<=` — same: index `length` fails the `j in value` hole check.
+- 124: flattenDeep `positions = []` → `["Stryker was here"]` — `positions` is popped exactly as often as `parents`, which ends empty first; the extra bottom entry is never read.
+- 145: flattenDeep `parents.length === DEEP_NESTING` → `true` — Set-based cycle detection from the first level: same answers (the Set mirrors `parents`), only a threshold for speed.
+- 145: `=== DEEP_NESTING` → `!==` — same: the Set is created at the first level instead of the 64th, mirroring `parents` from then on.
+- 145: `=== DEEP_NESTING` → `false` — never switches to the Set: the list scan gives the same answers (quadratic only for > 64 levels).
+- 146: `deepParents === undefined ? parents.includes(value) : …` → `true ? …` — `parents` is always maintained, so scanning it answers the same as the mirror Set.
+- 163: removeDuplicates `values.length <= 32` → `true` — `includes` scan (SameValueZero, keeps the first zero as is) gives the same result as the Set path with its -0 fix-up; threshold only.
+- 163: `<= 32` → `false` — Set path for short inputs: same result.
+- 163: `<= 32` → `< 32` — threshold shift: both paths agree at length 32.
+- 163: `<= 32` → `> 32` — swaps the two equivalent paths.
+- 163: short-input block removed — falls through to the equivalent Set path.
+- 185: areShortArrays body removed (returns `undefined`) — callers always take their equivalent Set path.
+- 186: areShortArrays → `return false` — same: Set path everywhere.
+- 186: `a.length + b.length <= 32` → `true` — `includes` scan for long arrays too: same results (SameValueZero like a Set), just slower.
+- 186: `<= 32` → `< 32` — threshold shift between equivalent paths.
+- 186: `<= 32` → `> 32` — swaps equivalent paths.
+- 186: `a.length + b.length` → `a.length - b.length` — threshold shift between equivalent paths.
+- 201: union `Array.isArray(a) && Array.isArray(b) ? a.concat(b) : [...a, ...b]` → `false ? …` — spreading two arrays builds the same array as `concat`; speed only.
+- 216: intersection short-array block removed — falls through to the equivalent Set path.
+- 216: `areShortArrays(a, b)` → `false` — Set path: same result.
+- 240: difference short-array block removed — equivalent Set path.
+- 240: `areShortArrays(a, b)` → `false` — Set path: same result.
+- 283: isSubset short-array block removed — equivalent Set path.
+- 283: `areShortArrays(subset, superset)` → `false` — Set path: same result.
+- 305: copyRange `end - start > 32 || …` → `true` — `slice` copies exactly like the manual loop (holes kept); speed only.
+- 305: `end - start > 32` → `false` — manual copy of long ranges of plain arrays: same result (subclasses still go through `slice`).
+- 305: `> 32` → `>= 32` — threshold shift between equivalent copies.
+- 305: `> 32` → `<= 32` — swaps equivalent copies.
+- 305: `end - start` → `end + start` — threshold shift between equivalent copies.
+- 339: compact `i < array.length` → `<=` — `array[length]` is `undefined`, which is falsy and dropped.
+- 373: range `new Array<number>(length)` → `new Array()` — preallocation only: every index is assigned.
+- 395: rangeLength `ratio === nearest || …` → `false || …` — when `ratio === nearest` the tolerance test also holds (0 <= a non-negative bound; Infinity goes to `Math.ceil(Infinity)` either way); the shortcut is kept because it makes small ranges ~15% faster (measured).
+- 395: tolerance `<=` → `<` — equality between the float error and the 4·ε bound does not occur for finite inputs in practice; the boundary is not observable.
+- 399: rangeLength `length > MAX_ARRAY_LENGTH` → `>=` — differs only for exactly 2^32 - 1 items, where the original would allocate a 4-billion-item array: not testable.
+- 401: `(…) * step >= 0` → `(…) / step >= 0` — same sign for a finite non-zero `step`; `x / step` cannot underflow to 0 here since `x` is either 0 or of the order of `step`.
+- 617: sortBy `typeof selected === 'number' ? selected : toComparable(selected)` → `false ? …` — `toComparable` returns numbers unchanged; fast path only.
+- 617: `'number'` → `""` — same as above (always calls `toComparable`).
+- 631: sortBy `new Array<T>(length)` → `new Array()` — preallocation only: every index is assigned.
+- 736: unzip `new Array<unknown[]>(arity)` → `new Array()` — preallocation only.
+- 738: unzip `new Array<unknown>(tuples.length)` → `new Array()` — preallocation only.
+- 802: extremeBy `typeof selected !== 'number'` → `true` (first loop) — skips the number fast path; the general path computes the same extreme with the same tie rule.
+- 802: `'number'` → `""` — same as above.
+- 813: extremeBy `typeof selected !== 'number'` → `true` (second loop) — same: hands over to the equivalent general path.
+- 813: `'number'` → `""` — same as above.
+- 814: `direction < 0` → `<= 0` — `direction` is always -1 or 1.
+- 822: general loop `i < array.length` → `<=` — the extra step re-examines the last key, which can never compare strictly better than the current best (it was already considered), and reads no new item.
+- 893: sumBy `Math.abs(total) >= Math.abs(value)` → `>` — on equal magnitudes, `total === value` (both formulas identical) or `total === -value` (both are 0).
+- 1130: cartesianProduct `total > MAX_ARRAY_LENGTH` → `>=` — differs only for a product of exactly 2^32 - 1 tuples, which the original would try to build: not testable.
+- 1175: keyList `new Array<unknown>()` → `new Array([])` — the extra key is a fresh empty array, SameValueZero-equal to no key returned by `keyFn`; it only shifts the short-array threshold.
+- 1199: differenceBy `areShortArrays(a, keys)` → `true` — `includes` scan for long inputs too: same result, slower.
+- 1199: `areShortArrays(a, keys)` → `false` — Set path: same result.
+- 1199: short-array block removed — falls through to the equivalent Set path.
+- 1302: myersDiff `offset = ceil((N + M) / 2) + 1` → `ceil((N + M) * 2) + 1` — only over-allocates the diagonal buffers.
+- 1341: middleSnake `odd = delta % 2 !== 0` → `false` — overlap is then detected in the backward pass of the same round; any path has del + ins ≡ delta (mod 2), so the found snake is still on a minimal path. The script stays minimal (which minimal script is returned is documented as unspecified); the forward check only saves a half round.
+- 1388: compare suffix stripping `while (…)` → `while (false)` — the middle-snake search still produces a minimal script (choice among minimal scripts is unspecified); stripping the common suffix is a speed optimisation.

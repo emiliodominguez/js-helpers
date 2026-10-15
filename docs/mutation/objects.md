@@ -1,0 +1,54 @@
+# objects — equivalent mutants
+
+Most survivors are in fast paths whose fallback is the generic code with the same result: a mutant that only makes a fast path
+apply LESS often (or a write helper always use `Object.defineProperty`) cannot be observed.
+
+- 184: defineValue `key in object && !hasOwn(object, key)` → `true` — always `defineOwn`, which has the same effect as the assignment on module-created objects; speed only.
+- 184: `&&` → `||` — same: always `defineOwn`.
+- 198: definePlain `key in Object.prototype` → `true` — always `defineOwn`: same effect, slower.
+- 272: unbox `valueOf === undefined` → `false` — `undefined.call` throws, the `catch` returns `[false, undefined]`; the guard only avoids the throw.
+- 272: `return [false, undefined]` → `return []` — callers destructure `isBoxed`, `undefined` is falsy like `false`.
+- 276: `return [false, undefined]` (catch) → `return []` — same.
+- 300: isOrdinary body removed (returns `undefined`) — every caller falls back to its generic path, which gives the same result.
+- 301: `prototype === Object.prototype` → `false` — plain objects take the generic path: same result.
+- 301: plain-object branch → `return false` — same.
+- 301: `!ArrayBuffer.isView(value)` → `ArrayBuffer.isView(value)` — plain objects then take the generic path (same result); only a typed array re-prototyped to `Object.prototype` (unspecified input) would differ.
+- 301: `'[object Object]'` → `""` — plain objects take the generic path: same result.
+- 302: array branch → `return false` — arrays take the generic path: same result.
+- 302: `getTag(value) === '[object Array]'` → `true` — only arrays with an own forged `Symbol.toStringTag` are affected; clone/deepClone reject them anyway (`isSimpleArray` sees the symbol key) and isEqual compares them the same way, except for tags of built-in binary kinds, an unspecified input.
+- 302: `=== '[object Array]'` → `!==` — genuine arrays take the generic path (same result); forged-tag arrays as above.
+- 302: `'[object Array]'` → `""` — arrays take the generic path: same result.
+- 311: isSimpleArray body removed — arrays take the generic copy: same result.
+- 314: isSimpleArray → `return false` — same.
+- 314: `length === 0 || …` → `length === 0 && …` — never simple: generic copy, same result.
+- 314: `length === 0 || …` → `false || …` — empty arrays take the generic copy: same result.
+- 314: `keys[length - 1] === String(length - 1)` → `false` — only empty arrays are simple: generic copy otherwise, same result.
+- 314: `keys[length - 1]` → `keys[length + 1]` — never simple (out of range): generic copy, same result.
+- 314: `String(length - 1)` → `String(length + 1)` — never simple: generic copy, same result.
+- 336: merge `sources.length === 1` → `false` — the loop does the same two spreads.
+- 358: clone `isObject(value) && isOrdinary(…)` → `false` — `copyWith` copies plain objects and arrays identically.
+- 358: clone fast-path block removed — same.
+- 359: clone `!Array.isArray(value)` → `false` — plain objects go to `copyWith`: same copy.
+- 361: clone `isSimpleArray(value)` → `false` — dense arrays go to `copyWith`: same copy.
+- 487: pick `value !== undefined || key in object` → `false || key in object` — the `in` test is true for every found value; the left operand only skips the lookup.
+- 534: mapValues `if (arrayInput) defineValue` → `true` — `defineValue` also has `definePlain`'s effect on plain-object results; speed only.
+- 657: assignPath `fresh && !(segment in current)` → `false` — always `defineOwn`, same effect on a fresh container.
+- 657: `&&` → `||` — also assigns on a fresh container whose key is inherited (see next line: nothing on `Object.prototype`/`Array.prototype` can intercept it) and on a non-fresh target where the key is nowhere in the prototype chain (no setter can run): same effect.
+- 657: `!(segment in current)` → `segment in current` — fresh containers are `{}` (only `__proto__` could intercept, and it is rejected) or `[]` written with canonical indices only: assignment has the same effect.
+- 660: `fresh = true` → `false` — only forces the `hasOwn` lookups and `defineOwn` that a fresh container does not need.
+- 712: getFromObjectByKeys `keys.indexOf('.') === -1` → `false` — splitting a single-segment path gives the same one-step read.
+- 712: `'.'` → `""` — same (always splits).
+- 761: copyWith `isOrdinary(…)` → `false` — the generic copy gives the same result for plain objects and dense arrays.
+- 761: fast-path block removed — same.
+- 762: `!Array.isArray(value)` → `false` — plain objects take the generic copy: same result.
+- 762: plain-object fast-path block removed — same.
+- 766: `seen?.set` → `seen.set` — this branch is only reached by deepClone (`clone` handles plain objects before calling `copyWith`), so `seen` is always defined; the optional chaining is kept so a shallow call stays safe.
+- 770: `isSimpleArray(value)` → `false` — dense arrays take the generic copy: same result.
+- 770: dense-array fast-path block removed — same.
+- 771: `new Array<unknown>(value.length)` → `new Array()` — preallocation only: every index is assigned.
+- 772: `seen?.set` → `seen.set` — same as line 766 (`clone` copies dense arrays itself).
+- 940: mapsEqual `.filter(isObject key)` removed — the extra primitive-key candidates never match an object key (`equalWith` returns false); the filter only shortens the pairwise scan.
+- 969: setsEqual `.filter(isObject)` removed — same: primitive candidates never match an object member.
+- 1038: objectsEqual `isOrdinary(…)` → `false` — the generic comparison ends in the same length check and `propertiesEqual`.
+- 1099: isEqual `equalWith(a, b, [])` → `["Stryker was here"]` — destructuring the string gives one-character strings, never the compared objects.
+- 1362: flattenObject ancestors `[]` → `["Stryker was here"]` — a string is never `includes`-equal to a container.

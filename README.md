@@ -338,7 +338,7 @@ Each remaining gap is tracked in the benchmark files, and the hot paths skip the
 
 ## Testing philosophy
 
-Example-based tests cover known edge cases. Property tests check algebraic laws and invariants over generated inputs. The JSDoc examples are executed too, with their documented results asserted by `yarn test:docs`. [Stryker](https://stryker-mutator.io) mutation testing checks that the tests catch injected bugs, not just that the code runs: every module scores 94–100%, and each remaining surviving mutant has been reviewed as equivalent (it cannot change observable behaviour).
+Example-based tests cover known edge cases. Property tests check algebraic laws and invariants over generated inputs. The JSDoc examples are executed too, with their documented results asserted by `yarn test:docs`. [Stryker](https://stryker-mutator.io) mutation testing checks that the tests catch injected bugs, not just that the code runs: every module scores 93.9–100%, and each remaining surviving mutant is [documented as equivalent](./docs/mutation/README.md): it cannot change observable behaviour.
 
 The local validation suite runs tests in UTC, New York, Lord Howe and Kolkata. CI is configured for Node.js 20, 22, 24 and 26, with additional time-zone jobs on Node.js 22.
 
